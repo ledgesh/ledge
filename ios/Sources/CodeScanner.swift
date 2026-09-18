@@ -13,7 +13,7 @@ final class CodeScannerViewController: UIViewController, AVCaptureMetadataOutput
     private let session = AVCaptureSession()
     /// `startRunning` and `stopRunning` block until the camera answers, so they
     /// run here rather than on the main queue.
-    private let sessionQueue = DispatchQueue(label: "dev.ledge.scanner")
+    private let sessionQueue = DispatchQueue(label: "sh.ledge.scanner")
     private let preview: AVCaptureVideoPreviewLayer
     private var rotation: AVCaptureDevice.RotationCoordinator?
     private var rotationWatch: NSKeyValueObservation?

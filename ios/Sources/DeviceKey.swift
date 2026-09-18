@@ -66,7 +66,7 @@ enum DeviceKey {
         }
     }
 
-    private static let service = "dev.ledge.ios.ssh"
+    private static let service = "sh.ledge.ios.ssh"
     private static let account = "device-key"
 
     /// The key for this install, minted on the first call and returned by every

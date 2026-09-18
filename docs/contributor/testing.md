@@ -417,12 +417,12 @@ filesystem is the scratch root, so nothing has to be pointed away from
 
 ```
 bun run ios -- --build                        # build; the app mints its key at first launch
-xcrun simctl launch --console-pty <dev> dev.ledge.ios     # read the [pair] line
+xcrun simctl launch --console-pty <dev> sh.ledge.ios     # read the [pair] line
 nc -z 127.0.0.1 2222 || echo free             # any port nothing answers on
 docker run -d --name ledge-ios-probe --cap-add=NET_ADMIN -p 127.0.0.1:2222:22 \
   -e LEDGE_PUBKEY="<that key>" ledge-sshd:probe
 ssh-keyscan -t ed25519 -p 2222 127.0.0.1      # the key after [127.0.0.1]:2222 is the pin
-xcrun simctl launch --console-pty <dev> dev.ledge.ios \
+xcrun simctl launch --console-pty <dev> sh.ledge.ios \
   -LedgeServer ledge@127.0.0.1 -LedgePort 2222 -LedgeHostKey "ssh-ed25519 AAAA…"
 ```
 

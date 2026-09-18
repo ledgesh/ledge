@@ -37,7 +37,7 @@ import { dirname, join } from "node:path";
 const REPO = join(import.meta.dir, "..");
 const OUT = join(REPO, "build", "ios");
 const APP = join(OUT, "Ledge.app");
-const BUNDLE_ID = "dev.ledge.ios";
+const BUNDLE_ID = "sh.ledge.ios";
 // The runtime installed on this Mac decides the ceiling; this is the floor.
 // Compiled against whatever SDK Xcode has, deployed back to here.
 const DEPLOYMENT = "17.0";

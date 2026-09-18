@@ -1391,7 +1391,7 @@ an install that succeeds and a launch that does not.
 | Back-deployment shims | the toolchain's `iphonesimulator` copies | its `iphoneos` copies. A simulator dylib in a device bundle is the same dyld abort by another route |
 | Signature | ad hoc | the certificate the profile names |
 | Entitlements | `__TEXT,__entitlements` at link time | in the signature, and `--generate-entitlement-der` with them: iOS 15 and later read the DER copy and kill a process whose signature has only the plist |
-| Identifier | `dev.ledge.ios`, no team prefix | `<TEAMID>.dev.ledge.ios`, and it is the profile that decides |
+| Identifier | `sh.ledge.ios`, no team prefix | `<TEAMID>.sh.ledge.ios`, and it is the profile that decides |
 | The profile | none | `embedded.mobileprovision` in the bundle root |
 | The icon catalog | `actool --platform iphonesimulator` | `iphoneos`. The weakest row here: the two catalogs differ in their bytes, but a device one rendered on the Simulator when it was tried, so this is matched because it is the correct input and not because a mismatch is known to cost anything |
 | Info.plist | as committed | plus `CFBundleSupportedPlatforms` and the `DT` keys Xcode writes. installd refuses a bundle that does not claim the platform, and says the bundle is invalid rather than which key is missing |
@@ -1419,7 +1419,7 @@ Apple account rather than a build:
 1. An **Apple Development** certificate, minted from Xcode > Settings >
    Accounts > Manage Certificates so that its private key is on this Mac. A
    Developer ID certificate is a macOS one and cannot sign this.
-2. The phone's UDID registered, an App ID for `dev.ledge.ios` with **no**
+2. The phone's UDID registered, an App ID for `sh.ledge.ios` with **no**
    capabilities, and an iOS App Development profile over the two.
 3. **Developer Mode on the phone**, under Settings > Privacy & Security, which
    needs a restart. The entry does not appear until something has tried to

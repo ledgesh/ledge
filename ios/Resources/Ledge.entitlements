@@ -14,10 +14,10 @@
        (ios.md §12). It is the profile, not this file, that decides what the
        identifier really is. -->
   <key>application-identifier</key>
-  <string>dev.ledge.ios</string>
+  <string>sh.ledge.ios</string>
   <key>keychain-access-groups</key>
   <array>
-    <string>dev.ledge.ios</string>
+    <string>sh.ledge.ios</string>
   </array>
 </dict>
 </plist>
