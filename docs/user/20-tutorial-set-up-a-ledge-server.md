@@ -44,14 +44,13 @@ The line goes in unrestricted for now. Step 7 restricts it, once you know the se
 
 ## 3. Install the server
 
-Still on the VPS, as your own account:
+Still on the VPS, as your own account, install the server into the new account's home:
 
 ```sh norun
-curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash
-sudo BUN_INSTALL=/usr/local bun add -g ledge-server
+curl -fsSL https://ledge.sh/server.sh | sudo -iu ledge sh
 ```
 
-Both commands carry `BUN_INSTALL=/usr/local`. Bun puts global commands beside itself, and `/usr/local/bin` is on the short PATH an incoming ssh gets. Without the variable, the server lands in a home directory that ssh never searches.
+The installer runs as `ledge` and puts the server, with a Bun of its own, in `/home/ledge/.ledge/.server`. It refuses to run as root, because the server belongs to the account Ledge signs in to, and `sudo -iu ledge` is how your own account runs it as that one.
 
 Nothing else needs installing and no service needs starting. Ledge starts the server over ssh when it connects, and the server exits a minute after the last device leaves, unless a block is still running.
 
@@ -60,12 +59,12 @@ Nothing else needs installing and no service needs starting. Ledge starts the se
 From your Mac, as the new account, with the new key:
 
 ```sh norun
-ssh -i ~/.ssh/ledge ledge@vps 'command -v ledge; command -v bun'
+ssh -i ~/.ssh/ledge ledge@vps 'PATH=$HOME/.ledge/.server/bin:$PATH command -v ledge'
 ```
 
-Two paths printed means the machine is ready. Keep the first one; step 7 needs it.
+A path printed means the machine is ready. This is the same lookup Ledge makes when it connects.
 
-Nothing printed means Bun was already installed for one user before you started, and its commands are in a directory ssh does not search. [[Keep Notes on a Remote Server]] shows the two symlinks that fix it.
+Nothing printed means the installer ran as a different account. Run step 3 again exactly as written.
 
 ## 5. Add the server in Ledge
 
@@ -101,10 +100,10 @@ hostname; whoami
 
 ## 7. Restrict the key to Ledge
 
-Edit `/home/ledge/.ssh/authorized_keys` on the VPS and put a prefix in front of the key, using the path step 4 printed:
+Edit `/home/ledge/.ssh/authorized_keys` on the VPS and put a prefix in front of the key:
 
 ```
-restrict,command="/usr/local/bin/ledge serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
 That key can now speak Ledge's protocol and nothing else: no shell, no port forwarding, no file copying. sshd runs the named command whatever the client asks for, so the terminal check in step 4 stops working for this key. That is expected. Your own account is the one for terminals.
@@ -197,10 +196,10 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 
 Answer Yes. Ubuntu ships with this on, and the two commands confirm it.
 
-The server itself is a package, and updating it is the install line again:
+The server updates with the install line from step 3, run again:
 
 ```sh norun
-sudo BUN_INSTALL=/usr/local bun add -g ledge-server@latest
+curl -fsSL https://ledge.sh/server.sh | sudo -iu ledge sh
 ```
 
 A connection between an app and a server that cannot understand each other is refused with a sentence naming which end to update, so a version that falls behind is reported rather than guessed at.

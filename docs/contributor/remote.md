@@ -8,8 +8,8 @@ connection grammar §8 called for now lives in `interactions.md` §4-1, the
 state ownership §5 describes is the code's, and the resilience §7
 promises is real: the server is a process behind a unix socket, a dropped wire
 reconnects and replays, and terminal output rides binary frames. The server
-runs on Linux, installs as `BUN_INSTALL=/usr/local bun add -g ledge-server`
-(§11), and ships as an image; `bun run probe:ssh` connects to one over a real
+runs on Linux, installs with `curl -fsSL https://ledge.sh/server.sh | sh` or
+as the npm package (§11), and ships as an image; `bun run probe:ssh` connects to one over a real
 sshd with the §4 forced command enforcing itself, and `bun run probe:npm`
 installs the published package on a machine with no toolchain and no Bun, then
 drives its terminal.

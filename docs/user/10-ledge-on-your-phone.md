@@ -40,31 +40,20 @@ A code never replaces a host key the phone already has. When Ledge has a differe
 
 ## Set up a server
 
-I don't have a server yet opens "Set up a server", which shows the commands that make a machine a Ledge server. Choose Linux or Mac above them. On Linux:
+I don't have a server yet opens "Set up a server", which shows the two commands that make a machine a Ledge server, on Linux or a Mac:
 
 ```sh norun
-curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash
-sudo BUN_INSTALL=/usr/local bun add -g ledge-server
-ledge pair
+curl -fsSL https://ledge.sh/server.sh | sh
+~/.ledge/.server/bin/ledge pair
 ```
 
-On a Mac:
-
-```sh norun
-curl -fsSL https://bun.sh/install | bash
-echo 'export PATH="$HOME/.bun/bin:$PATH"' >> ~/.zshenv
-source ~/.zshenv
-bun add -g ledge-server
-ledge pair
-```
-
-Run them in a terminal on that machine, signed in as the account the phone should use. They install Bun and the server where a command run over ssh can find them, which on Linux needs `sudo` and on a Mac needs the `~/.zshenv` line instead. The last command prints a pairing code for that account, and Scan the pairing code on the same screen reads it.
+Run them in a terminal on that machine, signed in as the account the phone should use rather than root. The first installs the server in that account's home, where a command run over ssh finds it, and needs no `sudo`. The second prints a pairing code for that account, and Scan the pairing code on the same screen reads it. It names `ledge` by its full path because the PATH line the installer adds reaches only new terminals.
 
 Copy commands puts them on the phone's pasteboard. Share commands hands them to AirDrop, Messages, or any app that can carry them to a computer with a terminal open on that machine.
 
-On a Mac, turn on Remote Login first, in System Settings under General, then Sharing. A Mac that runs the Ledge app needs only "Install Shell Command (ledge)" from the app's command palette in place of the first four commands: it puts `ledge` where the phone's ssh looks, pointing at the app's own copy, so the phone sees the same notes the app shows. `ledge pair` in a new terminal then prints the code.
+On a Mac, turn on Remote Login first, in System Settings under General, then Sharing. A Mac that runs the Ledge app needs only "Install Shell Command (ledge)" from the app's command palette in place of the first command: it puts `ledge` where the phone's ssh looks, pointing at the app's own copy, so the phone sees the same notes the app shows. The second command then prints the code.
 
-The machine needs sshd running and an address the phone can reach. [[Keep Notes on a Remote Server]] has the details of the install, including a machine that already has Bun, and [[Tutorial: Set Up a Ledge Server]] walks through a fresh VPS.
+The machine needs sshd running and an address the phone can reach. [[Keep Notes on a Remote Server]] has the details of the install, including installing with Bun instead, and [[Tutorial: Set Up a Ledge Server]] walks through a fresh VPS.
 
 If you already have a server, Add an existing server at the bottom of the screen opens the form from "Pair by address", and Back from there returns to the first screen.
 

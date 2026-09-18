@@ -6,55 +6,17 @@ import UIKit
 /// by the pasteboard or the share sheet. The last command prints a pairing code,
 /// and the scan button reads it.
 final class ServerSetupViewController: UIViewController {
-    /// The two sets differ because sshd on a Mac searches no directory Bun can
-    /// install into, and zsh reads `~/.zshenv` for a command ssh runs (remote.md
-    /// §11). Each is docs/user/09's "Install the server", then `pair`.
-    enum Machine: Int, CaseIterable {
-        case linux, mac
-
-        var name: String { self == .linux ? "Linux" : "Mac" }
-
-        var commands: [String] {
-            switch self {
-            case .linux:
-                return [
-                    "curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash",
-                    "sudo BUN_INSTALL=/usr/local bun add -g ledge-server",
-                    "ledge pair",
-                ]
-            case .mac:
-                return [
-                    "curl -fsSL https://bun.sh/install | bash",
-                    "echo 'export PATH=\"$HOME/.bun/bin:$PATH\"' >> ~/.zshenv",
-                    "source ~/.zshenv",
-                    "bun add -g ledge-server",
-                    "ledge pair",
-                ]
-            }
-        }
-
-        var steps: String {
-            switch self {
-            case .linux:
-                return "In a terminal on that machine, signed in as the account Ledge should use, run these commands. The first two need sudo."
-            case .mac:
-                return "In a terminal on that Mac, signed in as the account Ledge should use, run these commands. None of them need sudo."
-            }
-        }
-
-        var requirements: String {
-            switch self {
-            case .linux:
-                return "The machine needs glibc 2.29 or newer, on arm64 or x64: Debian 11, Ubuntu 20.04, RHEL 9, or later. This device has to be able to reach its address."
-            case .mac:
-                return "The account's shell has to be zsh, the default since macOS Catalina. This device has to be able to reach the Mac's address."
-            }
-        }
-    }
+    /// ledge.sh/server.sh, then the pair verb by its full path, because the
+    /// PATH line the installer adds reaches only new terminals. One set for
+    /// Linux and a Mac alike: the installer brings its own Bun, and both apps'
+    /// ssh command puts `~/.ledge/.server/bin` on PATH (remote.md §11).
+    static let commands = [
+        "curl -fsSL https://ledge.sh/server.sh | sh",
+        "~/.ledge/.server/bin/ledge pair",
+    ]
 
     private let onScan: () -> Void
     private let onExisting: () -> Void
-    private var machine = Machine.linux
 
     private let scroll = UIScrollView()
     private let stack = UIStackView()
@@ -83,7 +45,6 @@ final class ServerSetupViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         build()
-        show(.linux)
     }
 
     private func build() {
@@ -93,23 +54,16 @@ final class ServerSetupViewController: UIViewController {
         stack.isLayoutMarginsRelativeArrangement = true
         stack.layoutMargins = UIEdgeInsets(top: 16, left: 20, bottom: 24, right: 20)
 
-        let picker = UISegmentedControl(items: Machine.allCases.map(\.name))
-        picker.selectedSegmentIndex = Machine.linux.rawValue
-        picker.addAction(
-            UIAction { [weak self, weak picker] _ in
-                guard let self, let picker, let machine = Machine(rawValue: picker.selectedSegmentIndex) else { return }
-                self.show(machine)
-            },
-            for: .valueChanged
-        )
-
         style(steps, .body)
+        // The installer refuses root: the server lives in the home of the
+        // account Ledge signs in to.
+        steps.text = "In a terminal on that machine, signed in as the account Ledge should use rather than root, run these two commands. Neither needs sudo."
         style(macNote, .body)
         // Remote Login is off on a new Mac. A Mac with the app has a server
-        // already, and the app's Install Shell Command puts it where the
-        // phone's ssh looks (remote.md §11), so the four install lines are
-        // for a Mac without the app.
-        macNote.text = "Turn on Remote Login first, in System Settings under General, then Sharing. If the Ledge app runs on that Mac, choose Install Shell Command (ledge) in the app instead of the first four commands, then run the last one in a new terminal."
+        // already, and the app's Install Shell Command writes its launcher to
+        // the same `~/.ledge/.server/bin/ledge` (remote.md §11), so the second
+        // command works after it unchanged.
+        macNote.text = "On a Mac, turn on Remote Login first, in System Settings under General, then Sharing. If the Ledge app runs on that Mac, choose Install Shell Command (ledge) in the app instead of the first command."
 
         buttons.addArrangedSubview(copy)
         buttons.addArrangedSubview(share)
@@ -122,7 +76,7 @@ final class ServerSetupViewController: UIViewController {
         copy.addAction(
             UIAction { [weak self] _ in
                 guard let self else { return }
-                Natives.clipboardWrite(self.machine.commands.joined(separator: "\n"))
+                Natives.clipboardWrite(Self.commands.joined(separator: "\n"))
                 self.copied.isHidden = false
                 self.stack.setCustomSpacing(4, after: self.buttons)
             },
@@ -132,7 +86,7 @@ final class ServerSetupViewController: UIViewController {
         share.addAction(
             UIAction { [weak self] _ in
                 guard let self else { return }
-                Natives.share(self.machine.commands.joined(separator: "\n"), over: self, from: self.share)
+                Natives.share(Self.commands.joined(separator: "\n"), over: self, from: self.share)
             },
             for: .touchUpInside
         )
@@ -154,6 +108,7 @@ final class ServerSetupViewController: UIViewController {
         copied.textColor = .secondaryLabel
         style(requirements, .footnote)
         requirements.textColor = .secondaryLabel
+        requirements.text = "The server runs on macOS, or on Linux with glibc 2.29 or newer (Debian 11, Ubuntu 20.04, RHEL 9, or later), on arm64 or x64. The machine needs sshd running, and this device has to be able to reach its address."
 
         box.isEditable = false
         box.isScrollEnabled = false
@@ -161,22 +116,24 @@ final class ServerSetupViewController: UIViewController {
         box.backgroundColor = .secondarySystemBackground
         box.layer.cornerRadius = 8
         box.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
+        box.attributedText = commandText(Self.commands)
 
         let intro = UILabel()
         style(intro, .body)
         intro.text = "A server is a Mac or Linux machine that stays on and accepts ssh, such as a VPS or a computer at home."
         let last = UILabel()
         style(last, .body)
-        last.text = "The last command shows a pairing code for that account."
+        last.text = "The second command shows a pairing code for that account."
+        copied.isHidden = true
 
-        for view in [intro, picker, macNote, steps, box, buttons, copied, last, scan, requirements, existing] {
+        for view in [intro, steps, box, buttons, copied, last, macNote, scan, requirements, existing] {
             stack.addArrangedSubview(view)
         }
         stack.setCustomSpacing(16, after: intro)
-        stack.setCustomSpacing(16, after: picker)
         stack.setCustomSpacing(4, after: box)
         stack.setCustomSpacing(20, after: buttons)
         stack.setCustomSpacing(20, after: copied)
+        stack.setCustomSpacing(20, after: macNote)
         stack.setCustomSpacing(16, after: scan)
         stack.setCustomSpacing(24, after: requirements)
 
@@ -195,18 +152,6 @@ final class ServerSetupViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
             stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
         ])
-    }
-
-    /// Puts one machine's commands and sentences on screen. A "Copied" note
-    /// from the other set is hidden, since it no longer describes the box.
-    private func show(_ machine: Machine) {
-        self.machine = machine
-        steps.text = machine.steps
-        requirements.text = machine.requirements
-        macNote.isHidden = machine != .mac
-        copied.isHidden = true
-        stack.setCustomSpacing(20, after: buttons)
-        box.attributedText = commandText(machine.commands)
     }
 
     /// One paragraph per command. A command too long for the line wraps at a

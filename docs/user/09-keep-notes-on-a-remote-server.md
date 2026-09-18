@@ -124,17 +124,36 @@ Closing the last window quits Ledge.
 
 ## Install the server
 
-The other machine needs the `ledge` command on the PATH an incoming ssh gets. It comes from the `ledge-server` package, so a few commands install it. [[Tutorial: Set Up a Ledge Server]] walks through them on a fresh VPS, with an account for Ledge and the sshd hardening this page describes further down.
+The other machine needs the server, which is the `ledge-server` package. One command installs it, on Linux or a Mac. Run it in a terminal on that machine, signed in as the account Ledge will sign in to:
 
-The server runs on Bun, and where Bun goes decides where the server goes, because Bun puts global commands beside itself. On a Linux machine, install Bun into `/usr/local` and both names land in `/usr/local/bin`, which is where the short PATH of an ssh command looks:
+```sh norun
+curl -fsSL https://ledge.sh/server.sh | sh
+```
+
+It needs no `sudo` and nothing installed first. It downloads the package and a Bun of its own, checks both against the checksums written into the script, and puts them in `~/.ledge/.server` in that account's home. Ledge's ssh command looks in `~/.ledge/.server/bin` before anything else, so an incoming ssh finds the server with no change to the PATH. The script also adds a PATH line to the shell's startup file, so your own new terminals find `ledge` too.
+
+It refuses to run as root, because the server belongs to the account Ledge signs in to. To install for another account, such as one named `ledge`, run it through `sudo`:
+
+```sh norun
+curl -fsSL https://ledge.sh/server.sh | sudo -iu ledge sh
+```
+
+Running the same command again updates the server. A server that is already running goes on serving until it exits on its own, a minute or more after the last device disconnects, and the next connection starts the new version. [[Tutorial: Set Up a Ledge Server]] walks through the install on a fresh VPS, with an account for Ledge and the sshd hardening this page describes further down.
+
+A Mac that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge` in `~/.ledge/.server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both. On a Mac, the machine also needs Remote Login turned on ("Expose ssh carefully").
+
+macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
+
+Nothing else has to be installed and no port is opened. Ledge speaks its protocol over ssh's stdin and stdout.
+
+Blocks need zsh or bash on that machine. Ledge spawns the account's login shell when it is one of those, and otherwise the first of the two it finds, so an ordinary Linux install needs nothing extra. Where neither exists, a run refuses and names the shell it looked for instead of appearing to do nothing.
+
+## Install the server with Bun
+
+If the machine already has Bun and you would rather use it, the same package installs with `bun add -g`. Where Bun goes decides where the server goes, because Bun puts global commands beside itself, and both have to be on the short PATH an incoming ssh gets. On Linux, that means Bun in `/usr/local`:
 
 ```sh norun
 curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash
-```
-
-Then the server, into the same place:
-
-```sh norun
 sudo BUN_INSTALL=/usr/local bun add -g ledge-server
 ```
 
@@ -151,27 +170,23 @@ bun add -g ledge-server
 
 Run them as the account Ledge signs in to. None of them needs `sudo`. The account's shell has to be zsh, which it is unless the account predates macOS Catalina.
 
-A Mac that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge` in `~/.ledge/.server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both.
-
-macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
-
-Nothing else has to be installed and no port is opened. Ledge speaks its protocol over ssh's stdin and stdout.
-
-Blocks need zsh or bash on that machine. Ledge spawns the account's login shell when it is one of those, and otherwise the first of the two it finds, so an ordinary Linux install needs nothing extra. Where neither exists, a run refuses and names the shell it looked for instead of appearing to do nothing.
+Updating is `bun add -g ledge-server@latest`, with the same `sudo BUN_INSTALL=/usr/local` in front on Linux.
 
 ## Check that ssh can find the server
 
 Worth doing once, because Ledge reports the failure it catches as a server that is not installed. A remote shell that cannot find a command says only that, so that is all the app has to go on.
 
-Ledge starts the server by running `ledge serve` over ssh. A command run that way gets a short PATH and skips the startup files a terminal reads, so both `ledge` and the `bun` its first line names have to be on that PATH already. From your Mac's own terminal:
+Ledge starts the server by running `PATH=$HOME/.ledge/.server/bin:$PATH ledge serve` over ssh. A command run that way skips the startup files a terminal reads, so `ledge` has to be in `~/.ledge/.server/bin` or on the short PATH an incoming ssh gets. From your Mac's own terminal, ask the machine the same question:
 
 ```sh norun
-ssh you@machine 'command -v ledge; command -v bun'
+ssh you@machine 'PATH=$HOME/.ledge/.server/bin:$PATH command -v ledge'
 ```
 
-Two paths printed means the machine is ready to add.
+A path printed means the machine is ready to add.
 
-On Linux, nothing printed means Bun is installed for one user rather than system-wide, which is what a machine that already had Bun before you started usually has. Its global commands are then in `~/.bun/bin`, which an incoming ssh does not search, and `bun pm bin -g` on that machine confirms where they went. Linking both names into a system directory, on that machine, fixes it without reinstalling anything:
+Nothing printed after `server.sh` means it ran as a different account from the one you signed in as. Run it again as that account.
+
+After an install with Bun, check `bun` as well, since the package starts with it: `ssh you@machine 'command -v bun'`. On Linux, nothing printed means Bun is installed for one user rather than in `/usr/local`, which is what a machine that already had Bun before you started usually has. Its global commands are then in `~/.bun/bin`, which an incoming ssh does not search, and `bun pm bin -g` on that machine confirms where they went. Linking both names into a system directory, on that machine, fixes it without reinstalling anything:
 
 ```sh norun
 sudo ln -s "$(bun pm bin -g)/ledge" /usr/local/bin/ledge
@@ -200,10 +215,10 @@ Optional, and worth doing on a server you care about. Ledge connects with an ord
 Restricting gives the server a key that can speak Ledge's protocol and nothing else. In that machine's `~/.ssh/authorized_keys`:
 
 ```
-restrict,command="/usr/local/bin/ledge serve" ssh-ed25519 AAAA... ledge@laptop
+restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ssh-ed25519 AAAA... ledge@laptop
 ```
 
-Use the absolute path that `command -v ledge` printed above. sshd runs this line instead of whatever the client asked for, so naming the file outright settles where it is. It does not settle where Bun is, which is the other half of the check.
+The command is the one Ledge itself runs, so it finds the server wherever the check above found it. sshd runs this line instead of whatever the client asked for.
 
 That key cannot forward a port, run `scp`, or open a shell over ssh. What it limits is what the key is good for if it is ever stolen: no route into the network behind that server, and no file copying.
 

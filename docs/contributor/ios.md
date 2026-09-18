@@ -425,24 +425,23 @@ suggestion (testing.md §6). The welcome screen loads the device key, so a first
 launch mints it and prints the `[pair]` line whichever screen ends up on top.
 
 **The setup screen hands over commands the phone cannot run.** They are
-`docs/user/09`'s install commands, then `ledge pair`, which prints a
-code for the account that ran it and ends at the same scan as every other code.
-They leave by Copy or by the share sheet, since the terminal they belong in is
-on another machine. Add an existing server at the bottom opens the typed form in
-place of the setup screen, so Back from it returns to the welcome screen.
+`docs/user/09`'s install, `curl -fsSL https://ledge.sh/server.sh | sh`, then
+`~/.ledge/.server/bin/ledge pair`, which prints a code for the account that ran
+it and ends at the same scan as every other code. The second names the launcher
+by its path because the PATH line the installer adds reaches only new
+terminals. They leave by Copy or by the share sheet, since the terminal they
+belong in is on another machine. Add an existing server at the bottom opens the
+typed form in place of the setup screen, so Back from it returns to the welcome
+screen.
 
-A Linux / Mac switch picks the set, because the two install differently:
-
-| | Linux | Mac |
-| --- | --- | --- |
-| Bun and the server go in | `/usr/local/bin`, with `sudo` | `~/.bun/bin`, without it |
-| ssh finds them by | sshd's default PATH | a line in `~/.zshenv` (remote.md §11) |
-| Also on screen | glibc 2.29 and the distributions that meet it | Remote Login, and an account whose shell is zsh |
-
-The Mac set also says to use an account that does not run the app. The app
-already has a server in its process for that account's notes, and a daemon
-started over ssh beside it would be a second server over the same notes root,
-with the two watchers and two vaults remote.md §8a describes.
+**One set serves Linux and a Mac.** The installer brings its own Bun, needs no
+`sudo`, and writes into `~/.ledge/.server/bin`, which the phone's ssh command
+puts first on PATH (§4), so nothing about where sshd searches differs between
+the two. What does differ is said in a sentence under the commands: a Mac needs
+Remote Login, and a Mac that runs the app uses its Install Shell Command in
+place of the install, which writes the same launcher path. The npm route with
+`BUN_INSTALL` is still in the manual for a machine that has Bun already, and is
+not on this screen.
 
 These screens come up on a first launch, after a host key changes under a record
 that still exists, after the last server is removed, and from a button on the

@@ -49,7 +49,7 @@ On a Mac, the server is up while the app is open and for a minute after it close
 Nothing else needs installing: no timer, no unit file, no line in a crontab. One line is worth adding on a server where notes are written while no device is connected, by the `ledge` command or by an agent, since those do not start the server:
 
 ```sh norun
-0 * * * * /usr/local/bin/ledge backup now
+0 * * * * $HOME/.ledge/.server/bin/ledge backup now
 ```
 
 `ledge backup now` takes a backup at any time and is safe to run beside the schedule.

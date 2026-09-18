@@ -22,10 +22,11 @@ needs no `sudo`, opens no port, and starts no service: Ledge starts the server
 over ssh when a device connects, and it exits on its own a minute after the
 last device leaves.
 
-Then print a pairing code:
+Then print a pairing code. The full path is because the installer's PATH line
+reaches only new terminals:
 
 ```sh
-ledge pair
+~/.ledge/.server/bin/ledge pair
 ```
 
 It lists the machine's addresses, with what each one reaches, and asks which
