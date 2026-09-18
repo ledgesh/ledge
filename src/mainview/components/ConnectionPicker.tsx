@@ -14,7 +14,7 @@
 // other direction is a row's own control: the code for a server this Mac has,
 // made from its record for a phone to scan.
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import { Check, Laptop, Loader2, Pencil, QrCode, Server, Plus, Trash2 } from "lucide-react";
+import { Check, Eye, EyeOff, Laptop, Loader2, Pencil, QrCode, Server, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { pushLayer } from "@/commands/layers";
@@ -144,9 +144,22 @@ export function ConnectionPicker({ onClose }: { onClose: () => void }) {
     setBusy(false);
   };
 
+  // A phone's keyboard shortens the whole page (ios/Sources/WebHost.swift), so
+  // the lower fields of a tall form end up below the page's new bottom edge.
+  // The backdrop scrolls, and each resize brings the focused field back into
+  // view.
+  useEffect(() => {
+    const reveal = () => {
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement && el.closest('[role="dialog"]')) el.scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener("resize", reveal);
+    return () => window.removeEventListener("resize", reveal);
+  }, []);
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-6 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-6 pt-[12vh]"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -939,26 +952,52 @@ function Field({
   secret?: boolean;
   inputRef?: RefObject<HTMLInputElement>;
 }) {
+  // A typed password can be shown, so a typo is fixed in place rather than
+  // retyped whole: on a phone the whole field is what a mistake costs.
+  const [shown, setShown] = useState(false);
+  const input = (
+    <input
+      ref={inputRef}
+      type={secret && !shown ? "password" : "text"}
+      // Off rather than "current-password": the field holds the password for
+      // somebody else's machine, so the keychain's saved logins for this app
+      // would offer the wrong secret from a right-looking list.
+      autoComplete={secret ? "off" : undefined}
+      value={value}
+      placeholder={placeholder}
+      spellCheck={false}
+      autoCapitalize="off"
+      autoCorrect="off"
+      onChange={(e) => onChange(e.target.value)}
+      className={`w-full rounded-md border border-input bg-transparent px-2 py-1 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring touch:min-h-[44px] ${
+        mono ? "font-mono" : ""
+      } ${secret ? "pr-8 touch:pr-11" : ""}`}
+    />
+  );
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[11px] text-muted-foreground">{label}</span>
-      <input
-        ref={inputRef}
-        type={secret ? "password" : "text"}
-        // Off rather than "current-password": the field holds the password for
-        // somebody else's machine, so the keychain's saved logins for this app
-        // would offer the wrong secret from a right-looking list.
-        autoComplete={secret ? "off" : undefined}
-        value={value}
-        placeholder={placeholder}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        onChange={(e) => onChange(e.target.value)}
-        className={`rounded-md border border-input bg-transparent px-2 py-1 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring touch:min-h-[44px] ${
-          mono ? "font-mono" : ""
-        }`}
-      />
+      {secret ? (
+        <span className="relative flex">
+          {input}
+          <button
+            type="button"
+            aria-label={shown ? "Hide password" : "Show password"}
+            title={shown ? "Hide password" : "Show password"}
+            aria-pressed={shown}
+            // Keeps the focus in the field, so a tap does not close the
+            // phone's keyboard in the middle of a correction.
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => setShown((v) => !v)}
+            className="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-muted-foreground hover:text-foreground touch:w-11"
+          >
+            {shown ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+          </button>
+        </span>
+      ) : (
+        input
+      )}
     </label>
   );
 }
+

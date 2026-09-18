@@ -38,11 +38,11 @@ export function ConnectionBar() {
   const verb = dropped ? "connection.reconnect" : "connection.switch";
   const Icon = fellBack || link.state === "lost" ? TriangleAlert : dropped ? PlugZap : local ? Laptop : Server;
   const trouble = fellBack || (dropped ? link.detail : "");
-  // The bar's third line: "not reachable", "reconnecting…" or "disconnected".
-  // It takes a line of its own rather than a corner of the name's, so a long
-  // machine name and a dropped wire never compete for the same few pixels of
-  // a narrow sidebar (interactions.md §4-1). Empty on a live link with
-  // nothing fallen back, so the bar rests two lines tall.
+  // The card's second line: the trouble while there is some ("not
+  // reachable", "reconnecting…", "disconnected"), and otherwise the address
+  // the name stands for. Trouble replaces the address rather than joining the
+  // name's line, so a long machine name and a dropped wire never compete for
+  // the same few pixels of a narrow sidebar (interactions.md §4-1).
   const state = fellBack
     ? "not reachable"
     : link.state === "reconnecting"
@@ -50,6 +50,7 @@ export function ConnectionBar() {
       : link.state === "lost"
         ? "disconnected"
         : "";
+  const detail = state || (local ? "This Mac" : conn.destination);
   // Who else is on this machine (remote.md §7). Nothing is drawn while nobody
   // else is, which is nearly always: "1 device" would be noise in a strip that
   // must stay readable at a glance. One other device is named, since it is the
@@ -64,72 +65,77 @@ export function ConnectionBar() {
   const Verb = dropped ? RotateCw : ChevronsUpDown;
 
   return (
-    // A split button while the link is down, on the pattern the workspace
-    // strip uses for New Workspace (Sidebar.tsx): the wide half is the verb
-    // for the moment, the narrow half the other one. One button meant the
-    // switcher was gone while disconnected, so a window that could not
-    // reconnect could not leave either. The chooser was left to the palette
-    // and the File menu (commands/menu.ts), which nobody looks for while
-    // staring at a bar that says "disconnected". A machine that is not
-    // answering is when another one is worth offering (interactions.md §4-1).
-    <div className="flex w-full shrink-0 items-stretch border-b">
-      <button
-        type="button"
-        data-connection={conn.id}
-        data-link={link.state}
-        // The command's own tooltip, prefixed with where the notes are: the
-        // name in the bar is the user's word for the machine, and the
-        // destination is its address.
-        title={`${trouble || (local ? "Notes on this Mac" : `Notes on ${conn.destination}`)} — ${tooltip(verb)}`}
-        onClick={() => exec(verb)}
-        // Sized as a control rather than as a status line (interactions.md
-        // §4-1). It scopes every note, tab, tag and shell below it, so it
-        // reads larger than the section labels it sits above. A labelled
-        // two-line row sits flush against the workspace strip and clears 44
-        // points on its own, without the touch minimum raising it (§1a).
-        className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left hover:bg-accent/50 touch:min-h-[44px]"
-      >
-        <Icon className={`size-4 shrink-0 ${trouble ? "text-destructive" : "text-muted-foreground"}`} />
-        <span className="min-w-0 flex-1 leading-tight">
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-            {/* The label never truncates and the chip does: the label is two
-                fixed words, the chip a device name of any length. At the
-                narrowest sidebar (App.tsx SIDEBAR_MIN) the chip gives way, and
-                its own tooltip still carries the names. */}
-            <span className="shrink-0">Notes on</span>
-            {company && (
-              // Its own title rather than a clause in the button's: a hover over
-              // the chip should give the full list, and the button's tooltip is
-              // about switching machines.
-              <span className="flex min-w-0 flex-1 items-center justify-end gap-1" title={`Also on this server: ${names}`} data-presence={others.length}>
-                <Users className="size-3 shrink-0" />
-                <span className="truncate">{company}</span>
+    // A section of its own, headed like the Workspaces and Notes sections
+    // below it, with the machine drawn as a card like a selected workspace
+    // row. The heading says what the name is: "v1" alone names nothing
+    // (interactions.md §4-1).
+    <div className="shrink-0 border-b">
+      <div className="px-3 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Server</div>
+      {/* A split button while the link is down, on the pattern the workspace
+          strip uses for New Workspace (Sidebar.tsx): the wide half is the verb
+          for the moment, the narrow half the other one. One button meant the
+          switcher was gone while disconnected, so a window that could not
+          reconnect could not leave either (interactions.md §4-1). */}
+      <div className="px-1.5 pb-2">
+        <div className="flex w-full items-stretch overflow-hidden rounded-md border bg-accent/60">
+          <button
+            type="button"
+            data-connection={conn.id}
+            data-link={link.state}
+            // The command's own tooltip, prefixed with where the notes are: the
+            // name on the card is the user's word for the machine, and the
+            // destination is its address.
+            title={`${trouble || (local ? "Notes on this Mac" : `Notes on ${conn.destination}`)} — ${tooltip(verb)}`}
+            onClick={() => exec(verb)}
+            // The same height as a workspace row, and the touch minimum of one
+            // (interactions.md §1a).
+            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left hover:bg-accent touch:min-h-[44px]"
+          >
+            <Icon className={`size-4 shrink-0 ${trouble ? "text-destructive" : "text-muted-foreground"}`} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium leading-tight text-foreground">{conn.name}</span>
+              <span className="flex items-center gap-1 text-[11px] leading-tight">
+                <span
+                  className={`min-w-0 truncate ${
+                    !state || (link.state === "reconnecting" && !fellBack) ? "text-muted-foreground" : "text-destructive"
+                  }`}
+                >
+                  {detail}
+                </span>
+                {company && (
+                  // Its own title rather than a clause in the button's: a hover
+                  // over the chip should give the full list, and the button's
+                  // tooltip is about switching machines. The address truncates
+                  // first, and at the narrowest sidebar the chip does too.
+                  <span
+                    className="ml-auto flex min-w-0 shrink items-center gap-1 text-muted-foreground"
+                    title={`Also on this server: ${names}`}
+                    data-presence={others.length}
+                  >
+                    <Users className="size-3 shrink-0" />
+                    <span className="truncate">{company}</span>
+                  </span>
+                )}
               </span>
-            )}
-          </span>
-          <span className="block truncate text-[13px] font-medium text-foreground">{conn.name}</span>
-          {state && (
-            <span className={`block truncate text-[11px] ${link.state === "reconnecting" && !fellBack ? "text-muted-foreground" : "text-destructive"}`}>
-              {state}
             </span>
+            <Verb className="size-3.5 shrink-0 text-muted-foreground" />
+          </button>
+          {dropped && (
+            <button
+              type="button"
+              data-switch=""
+              title={tooltip("connection.switch")}
+              onClick={() => exec("connection.switch")}
+              // The narrow half of a split button, so its width is a touch
+              // target too: the two halves touch, and a miss here dials instead
+              // of choosing.
+              className="flex items-center border-l px-2.5 text-muted-foreground hover:bg-accent touch:min-w-[44px] touch:justify-center"
+            >
+              <ChevronsUpDown className="size-3.5 shrink-0" />
+            </button>
           )}
-        </span>
-        <Verb className="size-3.5 shrink-0 text-muted-foreground" />
-      </button>
-      {dropped && (
-        <button
-          type="button"
-          data-switch=""
-          title={tooltip("connection.switch")}
-          onClick={() => exec("connection.switch")}
-          // The narrow half of a split button, so its width is a touch target
-          // too: the two halves touch, and a miss here dials instead of
-          // choosing.
-          className="flex items-center border-l px-2.5 text-muted-foreground hover:bg-accent/50 touch:min-w-[44px] touch:justify-center"
-        >
-          <ChevronsUpDown className="size-3.5 shrink-0" />
-        </button>
-      )}
+        </div>
+      </div>
     </div>
   );
 }

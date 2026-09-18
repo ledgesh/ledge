@@ -285,12 +285,17 @@ export async function loadWorkspaces(): Promise<void> {
 
 // Guarantees the view boots with at least one folder to put a note in. Runs
 // after loadWorkspaces at launch. A first launch, or a registry healed to
-// empty, gets APP_HOME/scratch.
-export async function ensureDefault(): Promise<void> {
+// empty, gets APP_HOME/scratch. Returns that folder when nothing at all was
+// registered before, which is the launch that gets the welcome note
+// (server.ts), and null otherwise. A registry whose only roots are on an
+// unmounted volume still gets a folder, but not the welcome note.
+export async function ensureDefault(): Promise<string | null> {
   // The docs root does not count: it is read-only, so a boot with only docs
   // registered still has nowhere to put a note.
-  if (availableRoots().some((r) => kindOf(r) !== "docs")) return;
-  await createManaged("Scratch");
+  if (availableRoots().some((r) => kindOf(r) !== "docs")) return null;
+  const first = ![...entries.keys()].some((r) => kindOf(r) !== "docs");
+  const root = await createManaged("Scratch");
+  return first ? root : null;
 }
 
 // Creates a managed workspace folder from a display name. Bun slugs the name

@@ -1,7 +1,7 @@
 // A fresh start opens the welcome note, and every block in it draws a run
 // pair. The welcome note fills the first tab when there is nothing else to
 // open: a first launch on a Mac, or a first connection to a server with no
-// notes (workspace/seeds.ts). The manual marks every runnable-language
+// notes (workspace/seeds.ts, shared/welcome.ts). The manual marks every runnable-language
 // fence `norun` (bun/docsContent.test.ts). This note leaves its fences live.
 import { expect, test } from "@playwright/test";
 

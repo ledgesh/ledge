@@ -54,6 +54,7 @@ final class PairingViewController: UIViewController {
     private let portField = UITextField()
     private let authPicker = UISegmentedControl(items: ["A key", "A password"])
     private let passwordField = UITextField()
+    private let reveal = UIButton(type: .system)
     private let keyStep = UILabel()
     private let copy = UIButton(type: .system)
     private let share = UIButton(type: .system)
@@ -199,6 +200,15 @@ final class PairingViewController: UIViewController {
         passwordField.textContentType = .none
         passwordField.returnKeyType = .go
         passwordField.delegate = self
+        // Shows what was typed, so a typo is fixed in place rather than by
+        // clearing the field and typing the whole password again.
+        reveal.setImage(UIImage(systemName: "eye"), for: .normal)
+        reveal.accessibilityLabel = "Show password"
+        reveal.tintColor = .secondaryLabel
+        reveal.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+        reveal.addTarget(self, action: #selector(toggleReveal), for: .touchUpInside)
+        passwordField.rightView = reveal
+        passwordField.rightViewMode = .always
 
         passwordNote.text = "Kept in this device's keychain, where only Ledge can read it."
         passwordNote.font = .preferredFont(forTextStyle: .footnote)
@@ -546,10 +556,18 @@ final class PairingViewController: UIViewController {
         present(sheet, animated: true)
     }
 
+    @objc private func toggleReveal() {
+        passwordField.isSecureTextEntry.toggle()
+        let hidden = passwordField.isSecureTextEntry
+        reveal.setImage(UIImage(systemName: hidden ? "eye" : "eye.slash"), for: .normal)
+        reveal.accessibilityLabel = hidden ? "Show password" : "Hide password"
+    }
+
     private func busy(_ on: Bool) {
         connect.isEnabled = !on
         field.isEnabled = !on
         passwordField.isEnabled = !on
+        reveal.isEnabled = !on
         authPicker.isEnabled = !on
         on ? spinner.startAnimating() : spinner.stopAnimating()
     }
@@ -559,5 +577,15 @@ extension PairingViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         start()
         return true
+    }
+
+    /// A masked field applies each edit here itself. Left to UIKit, the first
+    /// keystroke after the field regains focus erases everything already in
+    /// it, so fixing the last character of a hidden password meant retyping it.
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard textField === passwordField, textField.isSecureTextEntry,
+              let text = textField.text, let bounds = Range(range, in: text) else { return true }
+        textField.text = text.replacingCharacters(in: bounds, with: string)
+        return false
     }
 }

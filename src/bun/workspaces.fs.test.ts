@@ -381,14 +381,14 @@ describe("loadWorkspaces healing", () => {
 });
 
 describe("ensureDefault", () => {
-  test("a first launch gets scratch", async () => {
-    await ensureDefault();
+  test("a first launch gets scratch, and says it was the first", async () => {
+    expect(await ensureDefault()).toBe(join(resolve(APP_HOME), "scratch"));
     expect(userRoots()).toEqual([join(resolve(APP_HOME), "scratch")]);
   });
 
   test("an available root means no-op", async () => {
     const root = await createManaged("Mine");
-    await ensureDefault();
+    expect(await ensureDefault()).toBeNull();
     expect(userRoots()).toEqual([root]);
   });
 
@@ -397,7 +397,8 @@ describe("ensureDefault", () => {
     await attachExternal(dir);
     await rm(dir, { recursive: true });
     await loadWorkspaces();
-    await ensureDefault();
+    // A folder, but not a first launch: this machine has notes elsewhere.
+    expect(await ensureDefault()).toBeNull();
     expect(writableRoots()).toEqual([join(resolve(APP_HOME), "scratch")]);
   });
 });

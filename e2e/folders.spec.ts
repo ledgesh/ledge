@@ -373,8 +373,7 @@ test.describe("searching one folder", () => {
     await folderRow(page, "projects").click({ button: "right" });
     await page.getByRole("menuitem", { name: "Search in Folder" }).click();
     // `exact` is needed here because a role name matches as a substring by
-    // default, and the connection bar is a button whose name begins "Notes on"
-    // (interactions.md §4-1).
+    // default, and other buttons' names contain "Notes".
     await page.getByRole("button", { name: "Notes", exact: true }).click();
     await expect(page.getByTestId("overlay-scope")).toHaveText("projects");
     await expect(page.getByTestId("overlay-list")).not.toContainText("Alpha");

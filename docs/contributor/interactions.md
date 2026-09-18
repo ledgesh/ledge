@@ -661,18 +661,20 @@ the failure it prevents, which is running a command on the wrong box.
   machine at all times. A fact you have to go looking for prevents nothing. It
   is deliberately distinct from the drawer's `host:` badge (§4a): that says
   where a *block* will run, this says where the *note lives*.
-- **It is drawn as a control, not as a status line.** A labelled two-line row:
-  "Notes on" above the machine's name, the machine's icon beside both, and a
-  switcher's chevrons at the end. The chevrons become the dial-now arrow
-  whenever the bar means Reconnect rather than the switcher, and the chevrons
+- **It is drawn as a control, not as a status line.** A section headed
+  "Server", in the same small capitals as Workspaces and Notes below it, holding
+  one card drawn like a selected workspace row: the machine's icon, its name,
+  its address beneath (or "This Mac"), and a switcher's chevrons at the end.
+  The heading is what makes the name mean something: "v1" alone says nothing
+  about what it names, and an inline "Notes on" label read as a caption rather
+  than as a place to tap. The chevrons become the dial-now arrow
+  whenever the card means Reconnect rather than the switcher, and the chevrons
   reappear beside it as the narrow half of a split button, on the pattern the
-  workspace strip already uses for New Workspace. Trouble takes a
-  third line of its own — "not reachable", "reconnecting…", "disconnected" — so
-  a long machine name and a dropped wire never compete for the same few pixels
-  of a narrow sidebar. The label is what makes the name mean something: "v1"
-  alone says nothing about what it names. The size is what puts it in scope
-  order: everything below the bar belongs to the machine on it, so it reads
-  larger than the section headings it sits above rather than smaller.
+  workspace strip already uses for New Workspace. Trouble ("not reachable",
+  "reconnecting…", "disconnected") takes the address's line, so a long
+  machine name and a dropped wire never compete for the same few pixels of a
+  narrow sidebar. It sits first because it is the widest scope: everything
+  below belongs to the machine on it.
 - **A strip stands in for it wherever it is not on screen.** The bar lives in
   the sidebar, which is a pane on a Mac and a shut drawer on a phone
   (ios.md §9), so the app's one report on the link was behind a tap on a phone

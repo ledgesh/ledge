@@ -79,7 +79,7 @@ Ledge adds the server only once `ledge serve` answers there. On a machine where 
 
 ## Sign in with a password instead
 
-Choose "A password" under Sign in with and type the password for that account. The phone keeps it in its own keychain, and no key line has to be installed.
+Choose "A password" under Sign in with and type the password for that account. The eye button at the end of the field shows what you typed, to check it before connecting. The phone keeps the password in its own keychain, and no key line has to be installed.
 
 The trade-off is the one described on [[Keep Notes on a Remote Server]]: a password reaches a fresh machine today, and a key is the better long-term answer. A server with `PasswordAuthentication no` refuses it.
 

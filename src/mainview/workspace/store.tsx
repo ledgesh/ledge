@@ -58,9 +58,9 @@ function makeWorkspace(name: string, folder: string, tab: TabState, symbol = DEF
 
 // The fresh-start launch state: one workspace on `folder`, one tab. The tab
 // holds the most recently edited note (`notes` arrives in listNotes order,
-// newest first), or the welcome note (workspace/seeds.ts) when the folder is
-// empty. The welcome note is unsaved like any other new note, so the folder
-// is still empty after a first launch with no typing in it.
+// newest first), or an unsaved welcome note (workspace/seeds.ts) when the
+// folder is empty. On a machine's first launch the folder is not empty: the
+// server has written the welcome note as a file (shared/welcome.ts).
 //
 // This is the fallback, not the normal boot: a saved session restores through
 // workspace/persist.ts, whose restoredState calls this whenever restoreLayout

@@ -49,6 +49,7 @@ import {
   tagsIn,
   writeNote,
 } from "./notes";
+import { WELCOME_DOC } from "../shared/welcome";
 import {
   configureVault,
   createVault,
@@ -403,7 +404,12 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
   const settings = await loadSettings();
 
   await loadWorkspaces();
-  await ensureDefault();
+  // A machine's first launch writes the welcome note as a file, so it is
+  // there on every launch after rather than only in the first one's tab.
+  const first = await ensureDefault();
+  if (first) {
+    await createNote(first, WELCOME_DOC).catch((err) => console.warn("[server] could not write the welcome note", err));
+  }
   await syncDocs();
 
   // The vault (note locking): salt and passphrase-check loaded so vaultState
