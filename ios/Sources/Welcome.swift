@@ -1,11 +1,16 @@
+import SafariServices
 import UIKit
 
 /// The first screen on a phone with no servers (ios.md §4).
 ///
-/// It says what Ledge on a phone is before asking for anything, then offers the
-/// ways in: a pairing code first, the setup commands for someone with no server
-/// yet, and the address form for an existing server last.
+/// It says what Ledge is and links the guide before asking for anything, then
+/// offers the ways in: a pairing code first, the setup commands for someone with
+/// no server yet, and the address form for an existing server last.
 final class WelcomeViewController: UIViewController {
+    /// The manual's page for the phone, on ledge.sh. It explains this screen and
+    /// links the rest, for someone who installed the app knowing nothing else.
+    static let guide = URL(string: "https://ledge.sh/docs/ledge-on-your-phone")!
+
     private let client: String
     private let onScan: () -> Void
     private let onExisting: () -> Void
@@ -48,8 +53,26 @@ final class WelcomeViewController: UIViewController {
             for: .systemFont(ofSize: 32, weight: .bold)
         )
         heading.accessibilityTraits = .header
-        let lede = label("Your notes live on a server, and Ledge reaches them over ssh.", style: .body)
+        let lede = label(
+            "Ledge is a Markdown notebook that runs the code in your notes. On a phone it opens the notes on your own server, a Mac or a Linux machine, over ssh.",
+            style: .body
+        )
         lede.textColor = .secondaryLabel
+
+        // Inside the app rather than in Safari, so Done comes back to this screen.
+        var guideConfig = UIButton.Configuration.plain()
+        guideConfig.title = "New to Ledge? Read the guide"
+        guideConfig.image = UIImage(systemName: "book")
+        guideConfig.imagePadding = 6
+        guideConfig.contentInsets = .zero
+        let guide = UIButton(configuration: guideConfig)
+        guide.contentHorizontalAlignment = .leading
+        guide.addAction(
+            UIAction { [weak self] _ in
+                self?.present(SFSafariViewController(url: Self.guide), animated: true)
+            },
+            for: .touchUpInside
+        )
 
         let scan = UIButton(configuration: .filled())
         scan.configuration?.title = "Scan a pairing code"
@@ -82,7 +105,7 @@ final class WelcomeViewController: UIViewController {
         // The mark in a row of its own, so the labels below it fill the width
         // and wrap rather than taking the width of one long line.
         let markRow = UIStackView(arrangedSubviews: [LedgeMark(side: 64), UIView()])
-        let hero = UIStackView(arrangedSubviews: [markRow, heading, lede])
+        let hero = UIStackView(arrangedSubviews: [markRow, heading, lede, guide])
         hero.axis = .vertical
         hero.spacing = 12
         hero.setCustomSpacing(18, after: markRow)

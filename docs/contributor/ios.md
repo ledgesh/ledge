@@ -409,8 +409,9 @@ is what a failed boot never reaches. Four screens cover it:
 
 **A first launch opens on the welcome screen, not on the form.** The form asked
 for an address before anything had said what the app is, and its second step
-was a 180-character key line. The welcome screen says what Ledge on a phone is,
-then offers three ways in, the one that asks least first:
+was a 180-character key line. The welcome screen says what Ledge is, links
+`ledge.sh/docs/ledge-on-your-phone` for someone who installed the app knowing
+nothing else, then offers three ways in, the one that asks least first:
 
 | Control | Leads to |
 | --- | --- |
