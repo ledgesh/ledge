@@ -72,6 +72,26 @@ if (!probeUrl) {
   );
 }
 
+// --- the App Store link -------------------------------------------------------
+// The README sends a phone to Ledge for iPhone on the App Store (ios.md §12),
+// and until App Store Connect issues the app's id that link carries a
+// placeholder one. Publishing it hands every reader a dead App Store page.
+// The same placeholder is in ledge-www's src/lib/links.ts, which this cannot
+// see, so the fix names both checkouts.
+const APP_STORE_PLACEHOLDER = "id0000000000";
+const readme = readFileSync(resolve(ROOT, "README.md"), "utf8");
+if (!readme.includes(APP_STORE_PLACEHOLDER)) {
+  ok("the README's App Store link");
+} else if (process.env["LEDGE_UNSIGNED"] === "1") {
+  notes.push(`The README's App Store link is still the ${APP_STORE_PLACEHOLDER} placeholder. A dry run publishes nothing, so it is not fatal here.`);
+} else {
+  bad(
+    `the README's App Store link is still the ${APP_STORE_PLACEHOLDER} placeholder`,
+    "Put the id App Store Connect issued in README.md, and in ledge-www's src/lib/links.ts,\n" +
+      `        which this cannot see. \`grep -r ${APP_STORE_PLACEHOLDER}\` in both checkouts finds every copy.`,
+  );
+}
+
 // A dirty tree is not fatal: a release is sometimes cut with a local tweak in
 // hand. It is reported anyway, because the artifact is about to be stamped with
 // a commit that does not describe it.
