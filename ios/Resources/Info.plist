@@ -51,6 +51,13 @@
     <string>UIInterfaceOrientationLandscapeLeft</string>
     <string>UIInterfaceOrientationLandscapeRight</string>
   </array>
+  <!-- App Store Connect's export compliance question, answered once here so
+       each upload stops asking: "None of the algorithms mentioned above".
+       Every cipher the app uses is CryptoKit's or the Secure Enclave's, both
+       Apple's OS; swift-crypto re-exports CryptoKit on Apple platforms, and no
+       OpenSSL or BoringSSL is linked. Bundling a crypto library changes this. -->
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
   <key>UIRequiredDeviceCapabilities</key>
   <array>
     <string>arm64</string>
