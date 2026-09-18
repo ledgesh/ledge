@@ -372,7 +372,7 @@ to be pasted on is the one that is not in the user's hand.
 
 **So the line leaves by the device's share sheet.** `Natives.share` is a
 `UIActivityViewController` over one string: AirDrop to the Mac, a message, a
-note to self, whatever that device has. Both forms offer it beside Copy line —
+note to self, whatever that device has. Both forms offer it beside Copy command —
 the native pairing screen directly, and the connection dialog across
 `share.text`, the bridge's eighteenth string (§2) — because both show the same
 line and the second one is reached from a phone too. It is the answer to
@@ -385,6 +385,17 @@ prefix second, as ports and files rather than as "cannot open a shell". The old
 sentence explained the hardening option before naming the thing it is an option
 on, and its last clause read as a guarantee remote.md §4a is explicit about not
 making.
+
+**What is copied is a command, not the bare line.** "Add this line to
+`~/.ssh/authorized_keys`" left the user to know where that file is and which
+modes sshd insists on, and gave no hint of how. Both forms now show and copy
+`shared/connections.ts` `authorizeCommand`: it makes `~/.ssh` at 700, appends
+the line after a newline (a file with no final newline would otherwise fuse its
+last key with this one, and break both), and sets the file to 600. It is plain
+POSIX shell, so it needs no Ledge verb on the server and works before an update.
+`DeviceKey.swift` holds the same prefix and suffix for the native screen, and
+`shared/authorizeCommand.test.ts` runs the command in each shell and checks the
+Swift copy.
 
 The answer is that it stops being the only door. remote.md §4 takes a password
 or a key like every other ssh client, and on a phone that is three fields and

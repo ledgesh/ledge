@@ -11,11 +11,12 @@ import UIKit
 /// host, port and fingerprints, and the host key is checked against the code
 /// rather than asked about (remote.md §4b). The sign-in half is the same.
 ///
-/// Pairing is a line the user copies or shares. The app shows its public key
-/// and the whole `authorized_keys` line, forced command included, exactly as
-/// remote.md §4 writes it. Getting that line onto the server is the user's
-/// problem, and a harder one than on a Mac: the server is not this device, and
-/// neither is the pasteboard's other end (ios.md §4).
+/// Pairing is a command the user copies or shares. It appends the whole
+/// `authorized_keys` line, forced command included, exactly as remote.md §4
+/// writes it, and makes `~/.ssh` with the right modes on the way, so it works
+/// on any server. Getting it onto the server is still the user's problem, and
+/// a harder one than on a Mac: the server is not this device, and neither is
+/// the pasteboard's other end (ios.md §4).
 ///
 /// The host key is confirmed here rather than scanned. `ssh-keyscan` fetches a
 /// key and a later connection trusts what was written down; this asks about the
@@ -111,7 +112,7 @@ final class PairingViewController: UIViewController {
         do {
             let key = try DeviceKey.load()
             held = key
-            keyBox.text = DeviceKey.authorizedKeysLine(key, client: client)
+            keyBox.text = DeviceKey.authorizeCommand(DeviceKey.authorizedKeysLine(key, client: client))
             DeviceKey.log(key, client: client)
             if !key.isEnclave {
                 say("This build is using a software key: the Simulator has no Secure Enclave.")
@@ -165,16 +166,16 @@ final class PairingViewController: UIViewController {
         keyBox.layer.cornerRadius = 8
         keyBox.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
 
-        copy.setTitle("Copy line", for: .normal)
-        copy.addTarget(self, action: #selector(copyLine), for: .touchUpInside)
+        copy.setTitle("Copy command", for: .normal)
+        copy.addTarget(self, action: #selector(copyCommand), for: .touchUpInside)
 
         // Beside the copy and not instead of it. A pasteboard ends at the
-        // device holding it, and the machine this line has to be pasted on is
+        // device holding it, and the machine this command has to be run on is
         // the one that is not in the user's hand: without a sheet the way off
         // the phone is AirDrop by way of another app, or retyping base64
         // (ios.md §4).
-        share.setTitle("Share line", for: .normal)
-        share.addTarget(self, action: #selector(shareLine), for: .touchUpInside)
+        share.setTitle("Share command", for: .normal)
+        share.addTarget(self, action: #selector(shareCommand), for: .touchUpInside)
 
         buttons.axis = .horizontal
         buttons.spacing = 16
@@ -245,7 +246,7 @@ final class PairingViewController: UIViewController {
         status.textColor = .secondaryLabel
         status.numberOfLines = 0
 
-        // What the line is comes first. A reader who does not know it carries
+        // What the command does comes first. A reader who does not know it carries
         // this device's public key cannot tell why the server needs it, and a
         // step that opens on hardening explains the option before the thing it
         // is an option on.
@@ -257,7 +258,7 @@ final class PairingViewController: UIViewController {
         // and read as a guarantee Ledge does not make.
         keyStep.text =
             (code == nil ? "2. " : "")
-            + "Add this line to ~/.ssh/authorized_keys on the server. It is this device's public key, which is how that server knows to let this device in. The restrict prefix keeps the key from forwarding ports or copying files."
+            + "Run this command on the server, signed in as the account Ledge uses. It adds this device's public key to ~/.ssh/authorized_keys, which is how that server knows to let this device in. Share command sends it to a Mac with AirDrop. The restrict prefix keeps the key from forwarding ports or copying files."
         keyStep.font = .preferredFont(forTextStyle: .body)
         keyStep.adjustsFontForContentSizeCategory = true
         keyStep.numberOfLines = 0
@@ -384,16 +385,16 @@ final class PairingViewController: UIViewController {
         status.text = HostKeyOffer.wrappable(text)
     }
 
-    @objc private func copyLine() {
+    @objc private func copyCommand() {
         Natives.clipboardWrite(keyBox.text)
-        say("Copied. Paste it on the server, then connect.")
+        say("Copied. Run it on the server, then connect.")
     }
 
-    /// The line, to anywhere the device can send a string.
+    /// The command, to anywhere the device can send a string.
     ///
     /// No status line after it: the sheet is its own feedback, it may be
     /// cancelled, and what happens after AirDrop is on the other machine.
-    @objc private func shareLine() {
+    @objc private func shareCommand() {
         Natives.share(keyBox.text, over: self, from: share)
     }
 

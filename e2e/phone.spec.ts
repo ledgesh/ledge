@@ -907,22 +907,25 @@ test.describe("the iOS client, and what it does not have", () => {
     await dialog.getByRole("button", { name: "Scan a pairing code" }).tap();
     expect(await page.evaluate(() => (window as unknown as { harnessScans?: number }).harnessScans ?? 0)).toBe(1);
     await expect(dialog).toContainText("authorized_keys");
-    // The copy says what the line is before what the `restrict` prefix
+    // The copy says what the command does before what the `restrict` prefix
     // narrows. It makes no claim that the key cannot open a shell: the
     // protocol behind the forced command runs arbitrary code (remote.md §4a).
     await expect(dialog).toContainText("this device's public key");
     await expect(dialog).toContainText("keeps the key from forwarding ports or copying files");
     await expect(dialog).not.toContainText("opening a shell");
     await expect(dialog).not.toContainText("the only thing that key can do");
-    await expect(dialog.getByText(/^restrict,command=/)).toBeVisible();
+    // The box holds a command that installs the line, not the bare line
+    // (shared/connections.ts authorizeCommand).
+    await expect(dialog.locator("[data-authorize-command]")).toHaveText(/^mkdir -p ~\/\.ssh .*'restrict,command=.*>> ~\/\.ssh\/authorized_keys/);
     await expect(dialog.getByLabel(/^Key/)).toHaveCount(0);
 
-    // Share Line hands the line to the device's share sheet (ios.md §4). A
-    // phone's pasteboard ends at the phone, and the server is another machine.
-    // The sheet is UIKit's. The view offers the button and hands over the line.
-    await dialog.getByRole("button", { name: "Share Line" }).tap();
+    // Share Command hands the command to the device's share sheet (ios.md
+    // §4). A phone's pasteboard ends at the phone, and the server is another
+    // machine. The sheet is UIKit's. The view offers the button and hands over
+    // the command.
+    await dialog.getByRole("button", { name: "Share Command" }).tap();
     expect(await page.evaluate(() => (window as unknown as { harnessShared?: string[] }).harnessShared ?? [])).toEqual([
-      'restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123',
+      "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\\n%s\\n' 'restrict,command=\"PATH=$HOME/.ledge/.server/bin:$PATH ledge serve\" ecdsa-sha2-nistp256 AAAAharness ledge-iphone-abc123' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",
     ]);
 
     await dialog.getByLabel("Name").fill("Studio");

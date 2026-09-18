@@ -100,6 +100,21 @@ export const DEFAULT_PORT = 22;
  */
 export const SERVE_COMMAND = "PATH=$HOME/.ledge/.server/bin:$PATH ledge serve";
 
+/**
+ * The shell command that installs a phone's `authorized_keys` line, for the
+ * user to run on the server as the account Ledge signs in to. It creates
+ * `~/.ssh` with the modes sshd insists on, and starts the line with a newline
+ * so a file that does not end in one cannot fuse its last key with this one
+ * (a blank line is ignored). DeviceKey.swift holds the same prefix and suffix,
+ * which shared/authorizeCommand.test.ts checks.
+ */
+export const AUTHORIZE_PREFIX = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\\n%s\\n' ";
+export const AUTHORIZE_SUFFIX = " >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys";
+
+export function authorizeCommand(line: string): string {
+  return `${AUTHORIZE_PREFIX}'${line.replaceAll("'", "'\\''")}'${AUTHORIZE_SUFFIX}`;
+}
+
 export function isPort(port: number): boolean {
   return Number.isInteger(port) && port >= 1 && port <= 65535;
 }

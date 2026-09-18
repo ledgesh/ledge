@@ -73,7 +73,7 @@ async function start(): Promise<void> {
     // (ios.md §4).
     deviceKey: key,
     // How that line leaves the phone. The connection form offers the sheet
-    // beside Copy Line, because a copy on a phone can only be pasted on the
+    // beside Copy Command, because a copy on a phone can only be pasted on the
     // phone, and the server is somewhere else (ios.md §4).
     shareSheet: (text) => void shell.call("share.text", { text }).catch(() => {}),
     // How a code reaches the connection form: the camera, then the native

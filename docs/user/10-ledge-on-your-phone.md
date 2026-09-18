@@ -63,13 +63,19 @@ Add an existing server opens "Pair with a server", a form with three parts. The 
 
 The first part is the machine: `user@host`, and a port when sshd is not on 22. A phone reads no `~/.ssh/config`, so write the address out.
 
-The second is how to sign in. With A key, the default, the form shows a key line. On its first launch the phone makes a key of its own in the Secure Enclave, and that key never leaves the phone: there is no file to copy in or out. What leaves is the public half, as one line for the server's `~/.ssh/authorized_keys`:
+The second is how to sign in. With A key, the default, the form shows a command to run on the server. On its first launch the phone makes a key of its own in the Secure Enclave, and that key never leaves the phone: there is no file to copy in or out. What leaves is the public half, as one line for the server's `~/.ssh/authorized_keys`:
 
 ```
 restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3f2a91c0
 ```
 
-Copy line puts it on the phone's pasteboard. Share line hands it to AirDrop, Messages, or any app that can carry it to a machine with a shell on the server, which is where the pasteboard on a phone falls short. Add it to `~/.ssh/authorized_keys` there. The comment at the end names the phone, so the line is easy to find again when you want to revoke it.
+The command adds that line to the file, creating `~/.ssh` first if the account has none:
+
+```sh norun
+mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\n%s\n' 'restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3f2a91c0' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+```
+
+Run it on the server, signed in as the account Ledge uses: over ssh from a Mac, or in the provider's web console for a new VPS. Copy command puts it on the phone's pasteboard. Share command hands it to AirDrop, Messages, or any app that can carry it to that terminal, which is where the pasteboard on a phone falls short. The comment at the end of the line names the phone, so the line is easy to find again when you want to revoke it.
 
 The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It looks for `ledge` in `~/.ledge/.server/bin` first and then on the PATH an incoming ssh gets, so a server installed in either place starts ("Check that ssh can find the server" on the same page).
 
@@ -95,7 +101,7 @@ Removing the last server returns the phone to the first screen. Deleting the app
 
 ## More than one server
 
-Inside the app the connection bar works as on a Mac: tap it to add, edit, remove, or switch servers, with the same fingerprint step ([[Keep Notes on a Remote Server]]). The form shows the phone's key line where a Mac's shows a key path, with Share Line beside Copy Line.
+Inside the app the connection bar works as on a Mac: tap it to add, edit, remove, or switch servers, with the same fingerprint step ([[Keep Notes on a Remote Server]]). The form shows the command that installs the phone's key where a Mac's shows a key path, with Share Command beside Copy Command.
 
 Add Server… starts with Scan a pairing code, where a Mac's form has a field for the pasted link. It opens the camera, then the same "Pair with a server" screen as the first launch, and the app reopens on the new server once you tap Connect there. Cancel returns you to the form, where you can type the address instead. Editing a server has no scan: a code never replaces a host key the phone already has.
 

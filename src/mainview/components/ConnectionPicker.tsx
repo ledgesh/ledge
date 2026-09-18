@@ -31,7 +31,7 @@ import { flushAllNow } from "@/notes/store";
 import { copyText } from "@/lib/clipboard";
 import { codeScanner, deviceKeyLine, shareSheet } from "@/lib/shell";
 import { qrPath } from "@/lib/qr";
-import { DEFAULT_PORT, hostPart, parsePort, PORT_UNSET, type AuthMode } from "../../shared/connections";
+import { authorizeCommand, DEFAULT_PORT, hostPart, parsePort, PORT_UNSET, type AuthMode } from "../../shared/connections";
 import { codeForRecord, pairingLink, parsePairingLink, type PairingCode } from "../../shared/pairing";
 import type { ConnectionInfo } from "../../shared/rpc-schema";
 
@@ -787,50 +787,6 @@ function ConnectionForm({
           </span>
         </div>
       )}
-      {/* Only on the key door. The line installs a key, and a password
-          connection offers none: ssh is sent `PubkeyAuthentication=no`
-          (bun/connections.ts). Showing it here would ask the user to prepare
-          their server for a credential this connection never presents. */}
-      {ownKey && auth === "key" && (
-        <div className="flex flex-col gap-1">
-          {/* The copy says what the line is before what the prefix does. A
-              sentence that opens on hardening explains the option before the
-              thing it is an option on, and a reader who does not know the line
-              carries this device's public key cannot tell why the server needs
-              it. The third sentence, on `restrict`, stops short of "cannot
-              open a shell" (remote.md §4a). */}
-          <span className="text-[11px] text-muted-foreground">
-            Add this line to <code className="font-mono">~/.ssh/authorized_keys</code> on the server. It is this
-            device's public key, which is how that server knows to let this device in. The{" "}
-            <code className="font-mono">restrict</code> prefix keeps the key from forwarding ports or copying files.
-          </span>
-          <code className="select-text break-all rounded-md border border-input bg-muted/40 p-2 font-mono text-[11px]">
-            {ownKey}
-          </code>
-          <div className="flex gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                copyText(ownKey);
-                setCopied(true);
-              }}
-            >
-              {copied ? "Copied" : "Copy Line"}
-            </Button>
-            {/* Beside Copy rather than instead of it, and absent on a client
-                with no share sheet (lib/shell.ts). Copy suits a server that is
-                a window away. A phone's pasteboard ends at the phone, so the
-                sheet is how the line reaches the machine it is pasted on
-                (ios.md §4). */}
-            {share && (
-              <Button size="sm" variant="ghost" onClick={() => share(ownKey)}>
-                Share Line
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
       {/* Only when adding, and only on a client with no reader of its own: a
           phone has the scan button above instead (ios.md §4). The shell
           behind this form's probe is what checks the key against the code
@@ -861,10 +817,59 @@ function ConnectionForm({
           placeholder={storedPassword ? "Stored" : "The password for that account"}
           secret
         />
+      ) : ownKey ? (
+        /* Directly under the choice it belongs to, where the password field
+           sits for the other one. Only on the key door: a password connection
+           offers no key (ssh is sent `PubkeyAuthentication=no`,
+           bun/connections.ts), so the command would prepare the server for a
+           credential this connection never presents. */
+        <div className="flex flex-col gap-1">
+          {/* A command rather than the bare line, so "add it" needs no knowledge
+              of where the file is or which modes sshd insists on
+              (shared/connections.ts authorizeCommand). The copy says what the
+              command does before what the prefix does: a sentence that opens
+              on hardening explains the option before the thing it is an option
+              on. The sentence on `restrict` stops short of "cannot open a
+              shell" (remote.md §4a). */}
+          <span className="text-[11px] text-muted-foreground">
+            Run this command on the server, signed in as the account Ledge uses. It adds this device's public key to{" "}
+            <code className="font-mono">~/.ssh/authorized_keys</code>, which is how that server knows to let this
+            device in. The <code className="font-mono">restrict</code> prefix keeps the key from forwarding ports or
+            copying files.
+          </span>
+          <code
+            data-authorize-command
+            className="select-text break-all rounded-md border border-input bg-muted/40 p-2 font-mono text-[11px]"
+          >
+            {authorizeCommand(ownKey)}
+          </code>
+          <div className="flex gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                copyText(authorizeCommand(ownKey));
+                setCopied(true);
+              }}
+            >
+              {copied ? "Copied" : "Copy Command"}
+            </Button>
+            {/* Beside Copy rather than instead of it, and absent on a client
+                with no share sheet (lib/shell.ts). Copy suits a server that is
+                a window away. A phone's pasteboard ends at the phone, so the
+                sheet is how the command reaches the machine it is run on
+                (ios.md §4). */}
+            {share && (
+              <Button size="sm" variant="ghost" onClick={() => share(authorizeCommand(ownKey))}>
+                Share Command
+              </Button>
+            )}
+          </div>
+        </div>
       ) : (
         /* Absent where there is no path to give: a Secure Enclave key cannot be
            read out of the enclave, let alone named by a file (ios.md §4). */
-        !ownKey && <Field label="Key (optional)" value={keyPath} onChange={setKeyPath} placeholder="~/.ssh/ledge" mono />
+        <Field label="Key (optional)" value={keyPath} onChange={setKeyPath} placeholder="~/.ssh/ledge" mono />
       )}
       {/* No prose under the fields: a paragraph here is read by everyone every
           time to be useful to somebody once (interactions.md §4-1). A missing

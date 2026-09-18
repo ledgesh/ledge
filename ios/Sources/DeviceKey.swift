@@ -96,6 +96,17 @@ enum DeviceKey {
         return "restrict,command=\"\(SSHTransport.serveCommand)\" \(held.openSSHPublicKey) \(label)"
     }
 
+    /// The shell command that installs `line` on the server, which is what
+    /// the pairing screen shows and copies. The same prefix and suffix as
+    /// shared/connections.ts `authorizeCommand`, checked by
+    /// shared/authorizeCommand.test.ts.
+    static let authorizePrefix = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\\n%s\\n' "
+    static let authorizeSuffix = " >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+
+    static func authorizeCommand(_ line: String) -> String {
+        authorizePrefix + "'" + line.replacingOccurrences(of: "'", with: "'\\''") + "'" + authorizeSuffix
+    }
+
     /// Where the key is kept and its line, on the console. A Mac with a cable
     /// reads the line there without retyping base64, and a probe reads it at
     /// first launch (testing.md §6).
