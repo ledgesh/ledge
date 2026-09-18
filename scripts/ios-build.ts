@@ -299,6 +299,8 @@ const needed = (await run(["otool", "-L", join(APP, "Ledge")], { quiet: true }))
   .map((line) => line.trim().split(" ")[0] ?? "")
   .filter((path) => path.startsWith("@rpath/"))
   .map((path) => path.slice("@rpath/".length));
+// Where each came from, for the .ipa's SwiftSupport folder below.
+const shimSources = new Map<string, string>();
 if (needed.length > 0) {
   const toolchain = dirname(dirname((await run(["xcrun", "--find", "swiftc"], { quiet: true })).trim()));
   mkdirSync(join(APP, "Frameworks"), { recursive: true });
@@ -306,6 +308,7 @@ if (needed.length > 0) {
     const found = [...new Bun.Glob(`lib/swift-*/${PLATFORM}/${dylib}`).scanSync({ cwd: toolchain, absolute: true })];
     if (found.length === 0) throw new Error(`the binary needs ${dylib}, and this toolchain ships no ${PLATFORM} copy of it`);
     await run(["cp", found[0]!, join(APP, "Frameworks", dylib)]);
+    shimSources.set(dylib, found[0]!);
   }
   console.log(`[ios] bundled ${needed.join(", ")}`);
 }
@@ -541,9 +544,19 @@ if (store) {
   rmSync(ipa, { force: true });
   mkdirSync(join(staging, "Payload"), { recursive: true });
   await run(["ditto", APP, join(staging, "Payload", "Ledge.app")]);
+  // A Swift runtime dylib in Frameworks has to travel a second time, as the
+  // toolchain's own Apple-signed copy, in SwiftSupport/iphoneos beside Payload.
+  // Xcode's export does this; without it the upload succeeds and processing
+  // rejects the build with ITMS-90426.
+  if (shimSources.size > 0) {
+    mkdirSync(join(staging, "SwiftSupport", PLATFORM), { recursive: true });
+    for (const [dylib, source] of shimSources) {
+      await run(["cp", source, join(staging, "SwiftSupport", PLATFORM, dylib)]);
+    }
+  }
   // altool prints two SSZipArchive errors about Info.plist while unpacking this,
   // whatever made the zip, and then validates it; they are its own noise.
-  await run(["zip", "-qry", ipa, "Payload"], { cwd: staging });
+  await run(["zip", "-qry", ipa, "Payload", ...(shimSources.size > 0 ? ["SwiftSupport"] : [])], { cwd: staging });
   console.log(`[ios] ${ipa}`);
 
   const auth = ["--api-key", key, "--api-issuer", issuer];

@@ -1454,10 +1454,13 @@ refuses an upload that calls a required-reason API without declaring why, and
 this binary calls two, `UserDefaults` and SwiftNIO's `stat` family. Its comment
 has the `nm -u` check that finds a new one.
 
-The first validation found one rule no Simulator or device build enforces: an
-app that claims the iPad must allow all four orientations there, for
-multitasking, so Info.plist carries `UISupportedInterfaceOrientations~ipad`
-beside the phone's three.
+Two rules surfaced only at Apple. Validation found the first: an app that
+claims the iPad must allow all four orientations there, for multitasking, so
+Info.plist carries `UISupportedInterfaceOrientations~ipad` beside the phone's
+three. Processing found the second, after an upload validation had passed: the
+back-deployment shims in `Frameworks/` must also travel as the toolchain's own
+Apple-signed copies in the `.ipa`'s `SwiftSupport/iphoneos/`, or the build is
+rejected with ITMS-90426 by email.
 
 **The Swift closure is a second set of attributions.** architecture.md §8 says
 every dependency travels with the binary it ships in; the Mac app's notices are
