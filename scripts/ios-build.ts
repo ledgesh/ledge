@@ -6,6 +6,8 @@
 //   bun run ios -- --server ledge@10.0.0.4
 //   bun run ios -- --server ledge@127.0.0.1 --port 2222
 //   bun run ios -- --device "iPhone 16 Pro"
+//   bun run ios -- --store            an App Store build, packaged and validated
+//   bun run ios -- --store --upload   the same, then uploaded to App Store Connect
 //
 // A package manifest and a directory, not an Xcode project. The app is a
 // binary, a plist and the built view in a folder, which is what `swift build`
@@ -60,8 +62,13 @@ const launchArgs = [...(server !== null ? ["-LedgeServer", server] : []), ...(po
 // have exactly one device paired, and `simctl`'s word for a simulator is
 // already "device", so this flag is spelled for the hardware instead.
 const phoneArg = flag("phone");
-const phone = phoneArg !== null;
+// `--store` is a device build signed for the App Store rather than for one
+// phone, and it ends as an .ipa instead of an install (ios.md §12).
+const store = argv.includes("--store");
+const upload = argv.includes("--upload");
+const phone = phoneArg !== null || store;
 const phoneName = phoneArg && !phoneArg.startsWith("--") ? phoneArg : null;
+if (upload && !store) throw new Error("--upload uploads a store build; add --store");
 
 // Outside the checkout, like the release credentials (releasing.md §3). It
 // holds no secret, only public certificates and a device UDID, but it belongs
@@ -70,7 +77,7 @@ const phoneName = phoneArg && !phoneArg.startsWith("--") ? phoneArg : null;
 const PROFILE =
   flag("profile") ??
   process.env.LEDGE_IOS_PROFILE ??
-  join(homedir(), ".config", "ledge", "ios-dev.mobileprovision");
+  join(homedir(), ".config", "ledge", store ? "ios-appstore.mobileprovision" : "ios-dev.mobileprovision");
 
 async function run(cmd: string[], opts: { cwd?: string; quiet?: boolean } = {}): Promise<string> {
   const proc = Bun.spawn({
@@ -117,7 +124,7 @@ async function readProfile(path: string): Promise<Profile> {
   if (!existsSync(path)) {
     throw new Error(
       `no provisioning profile at ${path}\n` +
-        `Register an iOS App Development profile for ${BUNDLE_ID} at developer.apple.com, download it there, ` +
+        `Register an ${store ? "App Store Connect distribution" : "iOS App Development"} profile for ${BUNDLE_ID} at developer.apple.com, download it there, ` +
         `or name another with --profile or LEDGE_IOS_PROFILE (ios.md §12).`,
     );
   }
@@ -141,13 +148,16 @@ async function readProfile(path: string): Promise<Profile> {
     throw new Error(`the profile "${name}" expired on ${expires}; download a new one`);
   }
 
-  // A distribution profile has no device list at all, so an empty one means the
-  // wrong file was brought.
+  // An App Store profile has no device list at all and a development one always
+  // has one, so the list says which file was brought.
   const devices = readFileSync(plist, "utf8").includes("<key>ProvisionedDevices</key>")
     ? (JSON.parse(await at("ProvisionedDevices", "json")) as string[])
     : [];
-  if (devices.length === 0) {
+  if (!store && devices.length === 0) {
     throw new Error(`the profile "${name}" provisions no devices; a device build needs a DEVELOPMENT profile`);
+  }
+  if (store && devices.length > 0) {
+    throw new Error(`the profile "${name}" names devices; a store build needs an App Store Connect profile`);
   }
 
   const team = String(entitlements["com.apple.developer.team-identifier"] ?? "");
@@ -176,7 +186,9 @@ async function readProfile(path: string): Promise<Profile> {
 }
 
 const profile = phone ? await readProfile(PROFILE) : null;
-if (profile) console.log(`[ios] profile "${profile.name}", ${profile.devices.length} device(s)`);
+if (profile) {
+  console.log(`[ios] profile "${profile.name}", ${store ? "App Store" : `${profile.devices.length} device(s)`}`);
+}
 
 // --- the view ----------------------------------------------------------------
 
@@ -301,6 +313,10 @@ if (needed.length > 0) {
 const plistPath = join(APP, "Info.plist");
 await Bun.write(plistPath, Bun.file(join(REPO, "ios", "Resources", "Info.plist")));
 await run(["plutil", "-replace", "CFBundleShortVersionString", "-string", version, plistPath]);
+// The build number. App Store Connect refuses a second upload with the same one
+// under the same version, and the commit count only goes up on main.
+const buildNumber = (await run(["git", "rev-list", "--count", "HEAD"], { quiet: true })).trim();
+await run(["plutil", "-replace", "CFBundleVersion", "-string", buildNumber, plistPath]);
 if (server !== null) {
   await run(["plutil", "-replace", "LedgeServer", "-string", server, plistPath]);
 }
@@ -320,6 +336,18 @@ if (phone) {
   await run(["plutil", "-replace", "DTPlatformVersion", "-string", sdkVersion, plistPath]);
   await run(["plutil", "-replace", "DTSDKName", "-string", `${PLATFORM}${sdkVersion}`, plistPath]);
   await run(["plutil", "-replace", "DTSDKBuild", "-string", sdkBuild, plistPath]);
+  await run(["plutil", "-replace", "DTPlatformBuild", "-string", sdkBuild, plistPath]);
+  // The rest of what Xcode records, which App Store validation reads to decide
+  // what built the app. `xcodebuild -version` prints "Xcode 26.6" and a build
+  // line; DTXcode is the version as four digits, "2660".
+  const [xcodeLine = "", buildLine = ""] = (await run(["xcodebuild", "-version"], { quiet: true })).trim().split("\n");
+  const [major = "0", minor = "0", patch = "0"] = (xcodeLine.split(" ")[1] ?? "").split(".");
+  const dtXcode = `${major.padStart(2, "0")}${minor}${patch}`;
+  const macBuild = (await run(["sw_vers", "-buildVersion"], { quiet: true })).trim();
+  await run(["plutil", "-replace", "DTXcode", "-string", dtXcode, plistPath]);
+  await run(["plutil", "-replace", "DTXcodeBuild", "-string", buildLine.split(" ").pop() ?? "", plistPath]);
+  await run(["plutil", "-replace", "DTCompiler", "-string", "com.apple.compilers.llvm.clang.1_0", plistPath]);
+  await run(["plutil", "-replace", "BuildMachineOSBuild", "-string", macBuild, plistPath]);
 
   // The profile, under the one name the installer looks for. It is not
   // configuration and nothing here reads it again: the phone reads it, checks
@@ -391,6 +419,9 @@ for (const [key, value] of Object.entries(iconKeys)) {
 // The view as a bundle resource, under the one directory BundleScheme.swift
 // will serve and nothing above it.
 await run(["cp", "-R", join(REPO, "dist-ios"), join(APP, "view")]);
+
+// The privacy manifest, at the bundle's root where the App Store looks for it.
+await run(["cp", join(REPO, "ios", "Resources", "PrivacyInfo.xcprivacy"), join(APP, "PrivacyInfo.xcprivacy")]);
 
 // --- the attribution the Swift closure asks for -------------------------------
 //
@@ -467,6 +498,8 @@ if (phone && profile) {
       // Whatever the profile allows: a development profile says true, and it is
       // what lets `devicectl` attach to the process and stream its output.
       "get-task-allow": profile.entitlements["get-task-allow"] === true,
+      // An App Store profile grants this and TestFlight requires it.
+      ...(profile.entitlements["beta-reports-active"] === true ? { "beta-reports-active": true } : {}),
     }),
   );
   await run(["plutil", "-convert", "xml1", ent]);
@@ -486,8 +519,42 @@ for (const dylib of needed) {
 await run(["codesign", "--force", "--sign", identity, ...signature, APP]);
 
 const size = (await run(["du", "-sh", APP], { quiet: true })).split("\t")[0];
-console.log(`[ios] ${APP} (${size?.trim()}), version ${version}`);
+console.log(`[ios] ${APP} (${size?.trim()}), version ${version} (${buildNumber})`);
 if (buildOnly) process.exit(0);
+
+// --- the App Store --------------------------------------------------------------
+//
+// An .ipa is the app inside a `Payload` directory, zipped. altool checks it
+// against App Store Connect's rules and then uploads it, with the same API key
+// that notarizes the Mac app (releasing.md §3), read from the environment the
+// same way: `source ~/.config/ledge/release.env` first. altool finds the .p8 by
+// key ID under ~/.appstoreconnect/private_keys.
+if (store) {
+  const key = process.env.ELECTROBUN_APPLEAPIKEY;
+  const issuer = process.env.ELECTROBUN_APPLEAPIISSUER;
+  if (!key || !issuer) {
+    throw new Error("ELECTROBUN_APPLEAPIKEY and ELECTROBUN_APPLEAPIISSUER are not set; source ~/.config/ledge/release.env");
+  }
+  const staging = join(OUT, "ipa");
+  const ipa = join(OUT, `Ledge-${version}-${buildNumber}.ipa`);
+  rmSync(staging, { recursive: true, force: true });
+  rmSync(ipa, { force: true });
+  mkdirSync(join(staging, "Payload"), { recursive: true });
+  await run(["ditto", APP, join(staging, "Payload", "Ledge.app")]);
+  // altool prints two SSZipArchive errors about Info.plist while unpacking this,
+  // whatever made the zip, and then validates it; they are its own noise.
+  await run(["zip", "-qry", ipa, "Payload"], { cwd: staging });
+  console.log(`[ios] ${ipa}`);
+
+  const auth = ["--api-key", key, "--api-issuer", issuer];
+  console.log("[ios] validating with App Store Connect");
+  await run(["xcrun", "altool", "--validate-app", "-f", ipa, "-t", "ios", ...auth]);
+  if (upload) {
+    console.log("[ios] uploading; the build appears under TestFlight once Apple has processed it");
+    await run(["xcrun", "altool", "--upload-app", "-f", ipa, "-t", "ios", ...auth]);
+  }
+  process.exit(0);
+}
 
 // --- the phone ----------------------------------------------------------------
 //

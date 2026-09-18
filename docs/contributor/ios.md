@@ -1430,6 +1430,34 @@ exists, has not expired, is for this bundle id, lists devices at all, names the
 phone being installed to, and was issued to a certificate this keychain holds.
 Each of those is otherwise an install failure with a number in it.
 
+**A store build is a device build signed for the App Store, and it ends as an
+`.ipa` rather than an install.** `bun run ios -- --store` builds, packages and
+validates it against App Store Connect; `--store --upload` then uploads it, and
+the build appears under TestFlight once Apple has processed it. Both read the
+API key that notarizes the Mac app (releasing.md §3), so
+`source ~/.config/ledge/release.env` comes first. What differs from `--phone`:
+
+| What | `--phone` | `--store` |
+| --- | --- | --- |
+| Certificate | Apple Development | Apple Distribution, which a Mac mints separately |
+| Profile | `~/.config/ledge/ios-dev.mobileprovision`, with this phone in it | `~/.config/ledge/ios-appstore.mobileprovision`, an App Store Connect profile with no devices. The script refuses either file in the other's place |
+| Entitlements | `get-task-allow` true | `get-task-allow` false, plus `beta-reports-active`, which TestFlight requires |
+| Output | installed and launched with `devicectl` | `build/ios/Ledge-<version>-<build>.ipa`, then `altool --validate-app` |
+
+Every build, of either kind, writes three things App Store validation checks.
+`CFBundleVersion` is the commit count, because App Store Connect refuses a
+second upload with the same build number under one version. The `DT` keys
+include the Xcode and macOS build that made it. And
+`ios/Resources/PrivacyInfo.xcprivacy` goes in the bundle root: the store
+refuses an upload that calls a required-reason API without declaring why, and
+this binary calls two, `UserDefaults` and SwiftNIO's `stat` family. Its comment
+has the `nm -u` check that finds a new one.
+
+The first validation found one rule no Simulator or device build enforces: an
+app that claims the iPad must allow all four orientations there, for
+multitasking, so Info.plist carries `UISupportedInterfaceOrientations~ipad`
+beside the phone's three.
+
 **The Swift closure is a second set of attributions.** architecture.md §8 says
 every dependency travels with the binary it ships in; the Mac app's notices are
 generated from npm and committed, and the iOS app's are generated from the
