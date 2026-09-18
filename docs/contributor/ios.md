@@ -1331,9 +1331,19 @@ and commands run on the user's own server over SSH. That is what every SSH
 client on the store does, and there are several. When live execution ships
 (§8), the review note is that the app is a terminal, not an interpreter.
 
-**TestFlight is the distribution for as long as this is one person's
-notebook.** Nothing in the design needs a paid tier, a server of Ledge's, or
-an account.
+**The App Store is the distribution, and 0.1.0 does not ship until the app is
+on it.** The Mac app, the server package and the phone are one release, and
+the README and ledge.sh both send a phone to an App Store page. TestFlight is
+a stage on the way there rather than the destination: it takes the same
+Distribution certificate and the same uploaded build, so nothing built for it
+is spent. Nothing in the design needs a paid tier, a server of Ledge's, or an
+account, so there is no purchase or sign-in for review to assess.
+
+**Review needs a server, and that is this app's unusual submission problem.**
+A reviewer who cannot connect sees the empty first screen and nothing else,
+so the submission carries a server they can reach and an account with a
+password, since the key path asks them to install a line they have no way to
+install. Nothing else about the app is unusual for the store.
 
 **The manual comes from the server.** `bun/docsContent.ts` compiles
 `docs/user/` into the server binary (remote.md §11), so the phone showing the

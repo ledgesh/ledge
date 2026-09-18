@@ -42,9 +42,10 @@ side.
 Ledge to Applications. Ledge runs on macOS 13 or newer on Apple Silicon, and
 updates itself.
 
-**iPhone and iPad.** The iOS app is on the same releases page. It connects
-over ssh to a Linux server or to your Mac, and reads, edits, and runs the
-same notes from anywhere.
+**iPhone and iPad.** Get
+[Ledge for iPhone](https://apps.apple.com/app/ledge/id0000000000) on the App
+Store. It holds no notes of its own: it connects over ssh to a Linux server or
+to your Mac, and reads, edits, and runs the same notes from anywhere.
 
 **Server.** Host your notes on a Linux server or a Mac, run their blocks
 there, and reach them from every device over ssh. Signed in as the account

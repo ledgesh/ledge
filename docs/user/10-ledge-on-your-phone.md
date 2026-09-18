@@ -2,6 +2,8 @@
 
 Ledge runs on an iPhone or iPad as a window onto a server. The phone holds no notes: it reaches a server over ssh, the way a Mac does in [[Keep Notes on a Remote Server]], and shows you what is there.
 
+Get Ledge for iPhone from the App Store. It runs on iOS and iPadOS 17 or newer, and it needs a server to connect to before it shows anything.
+
 A server that already serves your Mac needs nothing more. A machine without one needs the server installed first, as "Install the server" on that page describes, and the phone shows the same commands ("Set up a server" below).
 
 ## The first screen
