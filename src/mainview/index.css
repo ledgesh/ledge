@@ -1020,13 +1020,26 @@ body {
      typographic scale (interactions.md §1a). The header grows to hold it. */
   min-height: 44px;
   padding: 0 12px;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  background: var(--btn-hover);
+  border: 0;
+  background: none;
   color: var(--fg);
   font: 12px -apple-system, system-ui, sans-serif;
   white-space: nowrap;
   cursor: pointer;
+  position: relative;
+  isolation: isolate;
+}
+/* The drawn pill is shorter than the 44-point target. A box the full height of
+   the header touched the rules above and below it and read as wedged in. */
+.ledge-term-leave::before,
+.ledge-tap-hint::before {
+  content: "";
+  position: absolute;
+  inset: 8px 0;
+  z-index: -1;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: var(--btn-hover);
 }
 .ledge-duration {
   font-size: 11px;
