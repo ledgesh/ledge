@@ -109,6 +109,7 @@ section.
 | ⌘Escape / Escape Escape out of a running block | a Back to note button in the run's own header, and the last key on that face (§6a) |
 | Nothing dismisses the keyboard | the bar's own last button, apart from the verbs, and on every face that is not a run's |
 | A run taking the keyboard on its own | a tap on its panel, or on the Tap to type button in its header — raising a software keyboard should cost a deliberate touch (§6a) |
+| A tab switch putting the caret in the note | a tap in the text; the switch only shows the note, and only a new note takes the caret on its own |
 
 - **The long press is 500 ms, and belongs to touch and pen only**
   (`lib/useRowMenu.ts`). A mouse is excluded deliberately: it has the right

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Columns2, FilePlus, Plus, Rows2, SquareX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { softKeyboard } from "@/lib/shell";
 import { useCmdHeld, useCtrlHeld } from "@/lib/useCmdHeld";
 import { useRowMenu } from "@/lib/useRowMenu";
 import { ContextMenu } from "@/components/ContextMenu";
@@ -142,8 +143,14 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   // this pane's active tab, and taking focus would pull it off the row the row
   // verbs act on (interactions.md §1 R5). Clicking a note shows it; clicking
   // the editor is what asks to type in it.
+  //
+  // Where the keyboard is on screen, only a new scratch note takes the caret.
+  // There, focus raises the keyboard, and this runs inside the tap on a tab, so
+  // a tab switch would cover the note it just showed (interactions.md §1a). A
+  // new note is opened to be typed in.
   useLayoutEffect(() => {
     if (!focused || !docId) return;
+    if (softKeyboard() && (active?.path || active?.seed !== "scratch")) return;
     if (document.activeElement?.closest("[data-list-row]")) return;
     focusEditor(docId);
   }, [focused, docId]);

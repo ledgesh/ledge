@@ -997,6 +997,25 @@ test.describe("the iOS client, and what it does not have", () => {
     await expect(content).toContainText("Getting Started");
   });
 
+  test("a tap on a tab shows its note and raises no keyboard", async ({ page }) => {
+    // On a Mac a tab switch puts the caret in the note (PaneTree.tsx). Here
+    // that focus would raise the keyboard over the note the tap asked to see.
+    await openSidebar(page);
+    await noteRow(page, "Beta").tap();
+    await pressAndHold(page.locator("[data-tab]", { hasText: "Beta" }));
+    await page.getByRole("menuitem", { name: "Keep Tab Open" }).tap();
+    await openSidebar(page);
+    await noteRow(page, "Gamma").tap();
+    await expect(page.locator(".cm-content").first()).toContainText("gamma body");
+    await page.locator("[data-tab]", { hasText: "Beta" }).tap();
+    const content = page.locator(".cm-content").first();
+    await expect(content).toContainText("beta body");
+    await expect(content).not.toBeFocused();
+    // A tap in the text is still what starts editing.
+    await content.tap();
+    await expect(content).toBeFocused();
+  });
+
   test("the help button closes the manual, which on a phone is the only way out", async ({
     page,
   }) => {
