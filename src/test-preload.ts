@@ -48,3 +48,8 @@ const zsh = ["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh"].find((path) => {
   }
 });
 if (zsh) process.env["SHELL"] = zsh;
+
+// And the login shell a server reads its base environment from at boot
+// (bun/loginEnv.ts): skipped, so no test runs the profile of the account
+// running it. loginEnv.fs.test.ts drives that shell against a scratch HOME.
+process.env["LEDGE_SKIP_LOGIN_ENV"] = "1";

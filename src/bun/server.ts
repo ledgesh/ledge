@@ -100,6 +100,7 @@ import {
   type SpawnDeps,
 } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
+import { resolveLoginEnv } from "./loginEnv";
 import { readFileSync, statSync } from "node:fs";
 import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
 
@@ -402,6 +403,9 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
   // view's snapshot via settingsGet. Editing settings.jsonc takes effect at
   // the next launch (architecture.md §6).
   const settings = await loadSettings();
+  // Started now and awaited where shellEnv is built, so the login shell runs
+  // while the loads below do (bun/loginEnv.ts).
+  const loginEnv = resolveLoginEnv(settings.shell.path, process.env);
 
   await loadWorkspaces();
   // A machine's first launch writes the welcome note as a file, so it is
@@ -417,7 +421,7 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
   // through vaultUnlock.
   await loadVault();
 
-  const shellEnv = { ...process.env, TERM: "xterm-256color" } as Record<string, string>;
+  const shellEnv: Record<string, string> = { ...(await loginEnv), TERM: "xterm-256color" };
 
   // Per-session spawn parameters, as the view parsed them from each note's
   // frontmatter (sessionConfigure). Read at spawn, never applied to a running

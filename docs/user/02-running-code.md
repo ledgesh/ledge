@@ -119,6 +119,8 @@ Ledge spawns your own login shell with `-i` for every inline shell and every ter
 
 Relaunch to apply. Keep an interactive flag in `args`, usually `-i`, so your rc files run and blocks get the aliases and PATH you expect.
 
+Ledge also reads your login profile (`~/.zprofile`, `~/.bash_profile` or `~/.profile`) once at launch, so a PATH set there, such as Homebrew's, reaches every block even when you open Ledge from the Dock. Relaunch Ledge after editing your profile.
+
 zsh and bash are the two shells Ledge can read block output from. It marks where a block's output starts and stops with a hook that only those two provide. Any other shell runs the terminal drawer normally, and its inline runs show no output and no exit code. Ledge warns about that in the launch log rather than overriding what you set.
 
 A shell that is not installed refuses the run and names the path it could not find. Nothing quietly falls back to a different shell, because a different shell is not the one you asked for.

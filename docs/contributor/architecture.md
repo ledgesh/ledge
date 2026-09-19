@@ -907,9 +907,16 @@ block has one grammar, not because the shell cares.)
 
 `shared/frontmatter.ts` owns the grammar (hand-rolled per §8; per-line
 degradation like `parseSettings`); `bun/spawnParams.ts` owns what the values
-mean at spawn. Precedence is `process.env` < `envFile` < `profile` < `env`,
+mean at spawn. Precedence is the login env < `envFile` < `profile` < `env`,
 with `TERM` pinned back afterwards — xterm.js is the terminal whatever a note
-claims. The base layer is first scrubbed of *host-terminal identity*
+claims. The login env is `process.env` as a login shell leaves it:
+`bun/loginEnv.ts` runs `shell.path -l -c` once at server boot and keeps what
+it prints. An app opened from the Dock inherits launchd's PATH, and note
+shells run `-i` without `-l`, so without it nothing reads `~/.zprofile`, where
+Homebrew puts its PATH. `-l` and not `-i`, because the note shell sources the
+rc files itself. A shell that fails, prints no env, or takes over five seconds
+leaves `process.env` as the base, with a warning in the launch log; the test
+preload skips it (`LEDGE_SKIP_LOGIN_ENV`). The base layer is first scrubbed of *host-terminal identity*
 (`CMUX_*`, `GHOSTTY_*`, `ITERM_*`, `TERM_PROGRAM`, `TMUX`, …): the app
 inherits those from whatever terminal launched it, and inside a Ledge PTY
 every one is a false fact — cmux's `claude` shim, for one, keys on
