@@ -61,7 +61,7 @@ enum DeviceKey {
             case .keychain(let status):
                 return "The keychain refused the key (OSStatus \(status))."
             case .unreadable:
-                return "The stored key could not be read. Pair this phone again."
+                return "The stored key could not be read. Pair this device again."
             }
         }
     }

@@ -54,7 +54,7 @@ final class WelcomeViewController: UIViewController {
         )
         heading.accessibilityTraits = .header
         let lede = label(
-            "Ledge is a Markdown notebook that runs the code in your notes. On a phone it opens the notes on your own server, a Mac or a Linux machine, over ssh.",
+            "Ledge is a Markdown notebook that runs the code in your notes. On an iPhone or iPad it opens the notes on your own server, a Mac or a Linux machine, over ssh.",
             style: .body
         )
         lede.textColor = .secondaryLabel

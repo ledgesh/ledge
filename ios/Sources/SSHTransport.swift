@@ -390,15 +390,15 @@ enum SSHFailure: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notPaired:
-            return "This phone is not paired with a server yet."
+            return "This device is not paired with a server yet."
         case .timedOut(let where_):
             return "\(where_) did not finish an ssh handshake in time."
         case .unreachable(let where_, let error):
             return "could not reach \(where_): \(error.localizedDescription)"
         case .rejected(let where_, let enclave):
             return """
-                \(where_) refused this phone's key. Add its line to ~/.ssh/authorized_keys there, \
-                and check that the account and the key type are ones it accepts\
+                \(where_) refused this device's key. Run this screen's command there, signed in as the \
+                account Ledge uses, and check that the server accepts the key type\
                 \(enclave ? "" : " (this build is using a software key, which a Simulator has to)")\
                 .
                 """
@@ -414,7 +414,7 @@ enum SSHFailure: Error, LocalizedError {
         case .outOfKeys:
             // Reworded by `explain` into the destination's own sentence; this
             // is what it says if it ever escapes on its own.
-            return "The server did not accept this phone's key."
+            return "The server did not accept this device's key."
         case .wrongChannel:
             return "The server opened a channel Ledge did not ask for."
         case .commandRefused:
