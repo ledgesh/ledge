@@ -379,6 +379,13 @@ export class InlineTerm {
     this.term.textarea?.focus({ preventScroll: true });
   }
 
+  /** Scroll the cursor's row into view: that row holds the prompt being
+   * answered. xterm keeps its textarea on the cursor cell, so the textarea
+   * stands in for the cursor, the way CodeMirror's caret does for the prose. */
+  revealCursor(): void {
+    this.term.textarea?.scrollIntoView({ block: "nearest" });
+  }
+
   /** Hand the keyboard back to the prose editor (Escape grammar, dismiss, freeze). */
   private leave(): void {
     this.lastEscape = 0;
@@ -697,7 +704,22 @@ export function shownRows(currentRows: number, needed: number, pinned: boolean):
 
 const pool = new Map<string, InlineTerm>();
 
+// A software keyboard shortens the page (ios/Sources/WebHost.swift), and it
+// rises after the tap that focused a run. CodeMirror's scroller reveals its
+// own caret on that resize but knows nothing of a run's, so each resize
+// brings the focused run's cursor back above the keyboard.
+let revealing = false;
+function revealFocusedRun(): void {
+  for (const it of pool.values()) {
+    if (it.hasFocus()) return it.revealCursor();
+  }
+}
+
 export function acquireInlineTerm(id: string, opts: InlineTermOptions): InlineTerm {
+  if (!revealing) {
+    revealing = true;
+    window.addEventListener("resize", revealFocusedRun);
+  }
   let it = pool.get(id);
   if (!it) {
     it = new InlineTerm(id, opts);

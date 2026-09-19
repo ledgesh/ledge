@@ -1365,6 +1365,36 @@ test.describe("giving the keyboard back, with no key to press", () => {
     await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
   });
 
+  // The keyboard rises after the tap and shortens the page (WebHost.swift), so
+  // a panel low in the note ends up under it. The resize has to bring the
+  // prompt back into view. A shorter viewport stands in for the keyboard.
+  test("the keyboard rising does not cover the prompt it answers", async ({ page }) => {
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    const prose = Array.from({ length: 24 }, (_, i) => `line ${i + 1}`).join("\n\n");
+    await page.keyboard.insertText(`# Untitled\n\n${prose}\n\n\`\`\`sh\nread a\n\`\`\`\n`);
+    await page.locator('[data-act="run"]').tap();
+    await expect(page.locator(".ledge-output")).toBeVisible();
+    const runs = await page.evaluate(() => window.__harness.inlineRuns());
+    const id = runs[runs.length - 1]!.id;
+    await page.evaluate((runId) => window.__harness.runOutput(runId, "Continue? [y/N] "), id);
+
+    await page.locator(".ledge-tap-hint").scrollIntoViewIfNeeded();
+    await page.locator(".ledge-tap-hint").tap();
+    await expect.poll(() => page.evaluate(IN_TERMINAL)).toBe(true);
+
+    await page.setViewportSize({ width: 390, height: 420 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const r = document.activeElement!.getBoundingClientRect();
+          return r.top >= 0 && r.bottom <= window.innerHeight;
+        }),
+      )
+      .toBe(true);
+  });
+
   // The tap hint (`.ledge-tap-hint`) is the only thing on this client that
   // asks for a keystroke, so it is hidden once a keystroke cannot arrive.
   // `accepts` in inlineTerm.ts refuses input to a run whose machine went away,
