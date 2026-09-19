@@ -628,6 +628,23 @@ describe("rename and delete", () => {
     expect(focusedTab(home)!.title).toBe("renamed");
   });
 
+  test("a move to another workspace carries the tab there, session and all, and re-lists the note", () => {
+    // withNotes opens a.md in workspace 1; addWs(2) selects the new one, so
+    // the tab is not in the selected workspace when the move lands.
+    const before = withNotes(addWs(2));
+    const home = before.workspaces[0]!;
+    const docId = focusedTab(home)!.docId;
+    const moved: NoteMeta = { path: "/ws/extra-2/a.md", title: "a", mtimeMs: 3 };
+    const s = reducer(before, { type: "noteMovedWorkspace", path: `${FOLDER}/a.md`, folder: "/ws/extra-2", note: moved });
+    expect(countTabs(s.workspaces[0]!.root)).toBe(countTabs(home.root) - 1);
+    const tab = focusedTab(s.workspaces[1]!)!;
+    expect(tab.path).toBe(moved.path);
+    expect(tab.docId).toBe(docId); // the editor and shells follow the docId
+    expect(notesOf(s, FOLDER).map((n) => n.title)).toEqual(["b"]);
+    expect(notesOf(s, "/ws/extra-2").map((n) => n.title)).toEqual(["a"]);
+    expect(allDocIds(s).sort()).toEqual(allDocIds(before).sort());
+  });
+
   test("deleting a note closes its tab and drops it from the list", () => {
     const before = withNotes();
     const docId = focusedTab(selected(before))!.docId;

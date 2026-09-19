@@ -671,10 +671,16 @@ export function freezeDoc(docId: string): void {
 // that piled up while frozen. Called with the new path once a rename lands, and
 // with the old one if it failed: either way the note ends up unfrozen and aimed
 // at the file that actually exists.
-export function retargetDoc(docId: string, path: string): void {
+//
+// `folder` is the workspace the note now belongs to, after a move into
+// another one (actions.ts moveNoteToWorkspace); omitted, it stays. It decides
+// the default cwd of the note's shells (syncParams), re-sent at the next save
+// with the new path, as a rename's LEDGE_NOTE is.
+export function retargetDoc(docId: string, path: string, folder?: string): void {
   const e = docs.get(docId);
   if (!e) return;
   e.path = path;
+  if (folder !== undefined) e.folder = folder;
   e.frozen = false;
   if (e.pending !== null) void flush(e);
 }

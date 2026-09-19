@@ -204,6 +204,7 @@ export const REQUEST_METHODS = [
   "noteWrite",
   "noteCreate",
   "noteMove",
+  "noteMoveToWorkspace",
   "folderRename",
   "folderDelete",
   "noteRetitle",

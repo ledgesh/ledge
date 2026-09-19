@@ -292,9 +292,23 @@ Bun therefore validates everything and derives anything derivable:
   lists below; it is here because the alternative is worse than untidy, an
   invisible empty directory refusing a later rename onto its own name.
   Moving a note between folders (`moveNote`)
-  is a rename, within one root: a note's root decides its wikilink scope, its tag directory, its
-  asset pool and its trash, so cross-root is four migrations rather than a
-  rename and is not offered. Moving a workspace is not offered either: it
+  is a rename, within one root. Moving a note to ANOTHER workspace is the
+  same rename plus what the new root lacks: a note's root decides its
+  wikilink scope, its tag directory, its asset pool and its trash. Tags are
+  read out of the note wherever it sits and a live note has no trash history,
+  so those two need nothing. Its in-root images are COPIED into the
+  destination's `.ledge-assets/` before the reference rewrite
+  (`carryAssetRefs`, `assets.ts` copyAssetInto): copied and not moved,
+  because another note in the old workspace may show the same image, and the
+  orphan left behind is the trade deleting a note already makes. The
+  wikilinks that named it from the old workspace stop resolving, which the
+  handler counts before the move and the Undo strip says. Two workspaces can
+  sit on two volumes, the one place rename(2) fails with EXDEV: then
+  `carryAcrossVolumes` writes a byte copy at the destination (temp-plus-rename,
+  so a locked note travels sealed) and moves the original into ITS OWN root's
+  trash by the ordinary delete, so nothing is unlinked and the source
+  workspace's Trash section shows what left. Folders do not move between
+  workspaces; a note does, one at a time. Moving a workspace is not offered: it
   is Finder's rename, then remove and attach the folder at its new path, so
   no code here ever copies-then-unlinks every note across a volume.
   Detaching a workspace (Remove from Ledge, attached folders only)

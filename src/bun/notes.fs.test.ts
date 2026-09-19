@@ -12,8 +12,10 @@ import { mkdir, mkdtemp, readdir, readFile as readRaw, rm, stat, utimes, writeFi
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { APP_HOME, attachExternal, createManaged, loadWorkspaces } from "./workspaces";
+import { readAsset, savePastedImage } from "./assets";
 import {
   backlinksTo,
+  carryAcrossVolumes,
   createNote,
   deleteNote,
   ensureFolder,
@@ -812,6 +814,78 @@ describe("folders", () => {
     await deleteNote((await createNote(ROOT, "# B\n")).path);
     expect(await emptyTrash(ROOT)).toBe(2);
     expect(await listTrash(ROOT)).toEqual([]);
+  });
+});
+
+describe("moveNote into another workspace", () => {
+  // Not an image. readAsset reads the mime off the extension, and the copy
+  // is compared byte for byte, so any bytes serve.
+  const PNG = new Uint8Array([1, 2, 3, 4]);
+  const copiedRef = (text: string) => text.match(/\((\.ledge-assets\/[^)]+)\)/)![1]!;
+
+  test("lands at the destination's top level with its images copied into that pool", async () => {
+    const other = await secondRoot();
+    const note = await createNote(ROOT, "# Trip\n", "travel");
+    const ref = await savePastedImage(ROOT, PNG, ".png", false, note.path);
+    expect(ref.startsWith("../")).toBe(true); // one folder down, the reference climbs
+    await writeNote(note.path, `# Trip\n\n![](${ref})\n`);
+    const moved = await moveNote(note.path, null, other);
+    expect(moved.path).toBe(join(other, "trip.md"));
+    await expect(stat(note.path)).rejects.toThrow(); // moved, not copied
+    // The reference names the copy from the note's new spot: the top level,
+    // so no climb. The bytes are the same, and the source pool keeps its own.
+    const text = (await readNote(moved.path))!.text;
+    expect(text).toMatch(/^# Trip\n\n!\[\]\(\.ledge-assets\/pasted-[^)]+\.png\)\n$/);
+    expect(new Uint8Array(await readRaw(join(other, copiedRef(text))))).toEqual(PNG);
+    expect(await readdir(join(ROOT, ".ledge-assets"))).toHaveLength(1);
+  });
+
+  test("a name the destination holds is suffixed, and a reference with no file is left alone", async () => {
+    const other = await secondRoot();
+    await createNote(other, "# Plan\n");
+    const note = await createNote(ROOT, "# Plan\n\n![](.ledge-assets/never-pasted.png)\n");
+    const moved = await moveNote(note.path, "", other);
+    expect(moved.path).toBe(join(other, "plan-2.md"));
+    expect((await readNote(moved.path))!.text).toContain("![](.ledge-assets/never-pasted.png)");
+  });
+
+  test("a destination that is not a workspace is refused", async () => {
+    const note = await createNote(ROOT, "# Stay\n");
+    await expect(moveNote(note.path, null, join(APP_HOME, "nowhere"))).rejects.toThrow();
+    expect(await textAt(note.path)).toBe("# Stay\n");
+  });
+
+  test("a locked note travels sealed, its sealed image with it, and is refused with the vault shut", async () => {
+    resetVaultForTests();
+    await createVault("test passphrase", DEVICE);
+    const other = await secondRoot();
+    const note = await createNote(ROOT, "# Secrets\n");
+    const ref = await savePastedImage(ROOT, PNG, ".png", false, note.path);
+    await writeNote(note.path, `# Secrets\n\nplutonium\n\n![](${ref})\n`);
+    await lockNote(note.path); // seals the image too (locking.md §5)
+    const moved = await moveNote(note.path, null, other);
+    expect(await isNoteLocked(moved.path)).toBe(true);
+    expect(await readRaw(moved.path, "utf8")).not.toContain("plutonium");
+    const text = (await readNote(moved.path))!.text;
+    expect(text).toContain("plutonium");
+    // The copy is the sealed bytes, wrapped by the master key, so the new
+    // pool opens it as the old one did.
+    const got = await readAsset(other, copiedRef(text), moved.path);
+    expect(got !== null && "dataB64" in got && new Uint8Array(Buffer.from(got.dataB64, "base64"))).toEqual(PNG);
+    lockVault();
+    await expect(moveNote(moved.path, null, ROOT)).rejects.toThrow(/unlock first/);
+  });
+
+  test("carryAcrossVolumes copies the bytes and puts the original in its own trash", async () => {
+    // rename(2) cannot be made to fail with EXDEV inside one temp directory,
+    // so the fallback is exercised on its own.
+    const other = await secondRoot();
+    const note = await createNote(ROOT, "# Far\n\nbody\n");
+    const target = join(other, "far.md");
+    await carryAcrossVolumes(note.path, target);
+    expect(await readRaw(target, "utf8")).toBe("# Far\n\nbody\n");
+    await expect(stat(note.path)).rejects.toThrow();
+    expect((await listTrash(ROOT)).map((t) => t.title)).toEqual(["Far"]);
   });
 });
 

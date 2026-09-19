@@ -41,7 +41,7 @@ import {
   stripLockedLine,
   vaultState,
 } from "./vault";
-import { assetPathOf, assetRefFor, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
+import { assetPathOf, assetRefFor, copyAssetInto, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
 import { folderLeafProblem, folderNameProblem, folderScopeOf, notesUnder } from "../shared/folders";
 
 // Where a deleted note goes: a `.ledge-trash` directory in its own workspace
@@ -1024,28 +1024,21 @@ export async function createNote(root: string, text: string, folder?: string | n
   return metaFor(path, text);
 }
 
-// Move a note into another folder of its own workspace, keeping its name.
-//
-// Within one root by construction, so this is a rename(2) like every other move
-// in this file: atomic, and free of EXDEV even when the workspace sits on
-// another volume. Cross-workspace moves are not offered. A note's root decides
-// its wikilink scope, its tag directory, its assets pool and its trash, so
-// moving between roots is four migrations rather than a rename.
-//
-// The docId is untouched, as in retitleNote, so the note's editor, undo history
-// and running shell survive the move (architecture.md §4). Moving a note that
-// is open on screen is therefore safe.
-//
-// A trashed note is refused rather than moved. Restore is the call that knows
-// which folder the note came from, and letting a move double as an untrash
-// would leave that origin recorded nowhere.
-export async function moveNote(path: string, folder: string | null): Promise<NoteMeta> {
+// Move a note into a folder of its own workspace, or with `toRoot` into
+// another workspace, keeping its name. Within one root it is a rename(2).
+// Into another root it is that rename plus copies of the note's images
+// (carryAssetRefs) and, across volumes, carryAcrossVolumes in place of the
+// rename: architecture.md §3 has what a root decides and why. The docId is
+// untouched (§4). A trashed note is refused: restore is the way out of the
+// trash, and it knows the folder the note came from where a move would not.
+export async function moveNote(path: string, folder: string | null, toRoot?: string | null): Promise<NoteMeta> {
   const root = assertWritableRoot(assertNote(path));
+  const dest = toRoot == null ? root : assertWritableRoot(assertRegisteredRoot(toRoot));
   const from = resolve(path);
   if (isInside(trashDirOf(root), from)) {
     throw new Error("that note is in the trash — restore it first, then move it");
   }
-  const dir = await ensureFolder(root, folder);
+  const dir = await ensureFolder(dest, folder);
   if (dirname(from) === dir) return metaAt(from); // already there: the outcome asked for
 
   // Read before the rename, because the move rewrites the note's image
@@ -1077,17 +1070,80 @@ export async function moveNote(path: string, folder: string | null): Promise<Not
   const target = join(dir, name);
   try {
     assertNote(target);
-    await rename(from, target);
+    // The images are copied before the file moves, so a copy that fails
+    // leaves the note where it was with every reference still right.
+    const rebased =
+      dest === root ? rebaseAssetRefs(file.text, root, from, target) : await carryAssetRefs(file.text, root, from, dest, target);
+    let baseMtimeMs: number | null = file.mtimeMs;
+    try {
+      await rename(from, target);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+      await carryAcrossVolumes(from, target);
+      baseMtimeMs = null; // the copy is a new file, and nothing else has written it
+    }
     // After the rename, so the write lands on the note where it now lives.
     // rename(2) preserves mtime, so `file.mtimeMs` is still the expectation
     // writeNote holds against a foreign edit. writeNote re-seals a locked
     // note's body on the way out, so this hands it plaintext.
-    const rebased = rebaseAssetRefs(file.text, root, from, target);
-    if (rebased !== file.text) await writeNote(target, rebased, file.mtimeMs);
+    if (rebased !== file.text) await writeNote(target, rebased, baseMtimeMs);
   } finally {
     reserved.delete(name);
   }
   return metaAt(target);
+}
+
+/**
+ * Move a note's file where rename(2) refuses with EXDEV: a byte copy at
+ * `target` (temp-plus-rename), then the original into its own root's trash by
+ * the ordinary delete. Bytes and not text, so a locked note travels sealed
+ * and writeNote finds its header at `target` (architecture.md §3). The copy
+ * comes first, so a failed trash leaves a duplicate the error names, never a
+ * note that is gone.
+ */
+export async function carryAcrossVolumes(from: string, target: string): Promise<void> {
+  const bytes = await readFile(from);
+  tmpCounter += 1;
+  const tmp = join(dirname(target), `.${basename(target)}.tmp-${process.pid}-${tmpCounter}`);
+  try {
+    await writeFile(tmp, bytes);
+    await rename(tmp, target);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
+  try {
+    await deleteNote(from);
+  } catch (err) {
+    throw new Error(
+      `copied the note to ${target} but could not move the original to the trash: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/**
+ * rebaseAssetRefs for a note bound for another workspace: each in-root image
+ * it references is copied into `dest`'s pool (assets.ts copyAssetInto) and
+ * the reference rewritten to name the copy from `to`. An image referenced
+ * twice is copied once. A reference to a file that is not on disk is left as
+ * written, since there is nothing to carry.
+ */
+async function carryAssetRefs(text: string, root: string, from: string, dest: string, to: string): Promise<string> {
+  const copies = new Map<string, string>(); // resolved source path -> copied path
+  for (const { path } of assetRefsOf(text, root, from)) {
+    const copied = await copyAssetInto(dest, path);
+    if (copied !== null) copies.set(path, copied);
+  }
+  return text.replace(IMAGE_REF, (whole, open: string, ref: string, close: string) => {
+    let asset: string;
+    try {
+      asset = assetPathOf(root, ref, from);
+    } catch {
+      return whole; // not an in-root image reference
+    }
+    const copied = copies.get(asset);
+    return copied === undefined ? whole : `${open}${assetRefFor(dest, copied, to)}${close}`;
+  });
 }
 
 // Whether two directory entries are the same directory. A case-only rename

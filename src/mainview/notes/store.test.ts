@@ -88,9 +88,12 @@ function fakeBridge() {
     tags: async () => ({ tags: [], lockedSkipped: 0 }),
     tagged: async () => ({ hits: [], lockedSkipped: 0 }),
     takeOpenRequest: async () => null,
-    // The store never calls these three: they are command-layer capabilities.
+    // The store never calls these four: they are command-layer capabilities.
     // The stubs exist to satisfy the handler shape.
     favorite: async () => {
+      throw new Error("unused in store tests");
+    },
+    moveToWorkspace: async () => {
       throw new Error("unused in store tests");
     },
     openDaily: async () => {

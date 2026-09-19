@@ -282,7 +282,7 @@ layer that knows who asked:
 | `noteRead`, `assetRead` | `mayOpen` false gives the withheld shape a shut vault gives |
 | `noteLock`, `noteRemoveLock` | refused outright (`NEEDS_THE_VAULT`) |
 | `vaultChangePassphrase` | refused in its `error` field, which the dialog shows |
-| `noteWrite`, `noteStash`, `noteMove` | refused for a locked note (`refuseLockedFrom`) |
+| `noteWrite`, `noteStash`, `noteMove`, `noteMoveToWorkspace` | refused for a locked note (`refuseLockedFrom`) |
 | `vaultChanged` | pushed per client, each as its own device sees it |
 
 The three refusals in that table ask `vaultState() === "unlocked"` first, so
@@ -418,7 +418,10 @@ it. Assets are therefore in scope from v1, with one structural decision:
   closed and the real image while it is open — nothing breaks. Rare by
   construction either way, since paste allocates unique names and sharing
   only happens by hand. Removing the lock reverses the sweep for assets no
-  other locked note still references.
+  other locked note still references. A note moved to another workspace
+  takes copies of its images into that workspace's pool (architecture.md
+  §3); a sealed one is copied as its sealed bytes, which the master-key
+  wrapping is what makes possible, so it opens there as it did here.
 - **The pasteboard caveat, documented not hidden**: the osascript paste
   path writes a transient temp PNG before ingest. It is unlinked
   immediately, but it existed; the FileVault sentence in §1 covers the

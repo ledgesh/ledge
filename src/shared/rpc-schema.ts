@@ -392,6 +392,17 @@ export type LedgeRPC = {
       // note whose vault is shut, because those references sit inside the
       // encrypted body (bun/notes.ts moveNote).
       noteMove: { params: { path: string; folder: string | null }; response: { note: NoteMeta } };
+      // Move a note to the top level of another workspace, by that workspace's
+      // root handle. Its own method rather than a `root` on noteMove: a server
+      // that predates it refuses the name at the handshake's method check, and
+      // the note stays where it was. A `root` an old server ignored would move
+      // the note to its own top level with no sign. What stays the same as
+      // noteMove: the name, the docId, the locked-note refusal. What differs:
+      // Bun copies the note's images into the destination's asset pool before
+      // rewriting the references (architecture.md §3), and `backlinks` is how
+      // many notes of the workspace it left link to it by title, links that no
+      // longer resolve.
+      noteMoveToWorkspace: { params: { path: string; root: string }; response: { note: NoteMeta; backlinks: number } };
       // Rename a folder of one workspace, keeping it where it sits. `name` is
       // one segment, never a path (shared/folders.ts folderLeafProblem). One
       // rename(2) of the directory, so it is atomic however many notes are

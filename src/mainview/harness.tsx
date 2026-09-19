@@ -497,6 +497,30 @@ class FakeStore {
     return this.meta(data, target);
   }
 
+  // The real moveNote into another root, in Map form: the entry leaves one
+  // root's map for the top level of another's, under a free name there. No
+  // asset pool here, so nothing is copied; the lock refusal is the real one.
+  // `backlinks` is 0: the fake keeps no wikilink index.
+  moveNoteToWorkspace(path: string, root: string): { note: NoteMeta; backlinks: number } {
+    this.assertWritable(path);
+    this.assertWritable(root);
+    const { data } = this.rootOf(path);
+    const dest = this.ensureRoot(root);
+    const note = data.notes.get(path);
+    if (!note) throw new Error(`harness: no note at ${path}`);
+    if (this.lockedOf(note.text) && this.vault.state !== "unlocked") {
+      throw new Error("unlock first — moving a locked note rewrites the image references in its body");
+    }
+    const base = path.split("/").pop()!.replace(/\.md$/i, "");
+    let name = `${base}.md`;
+    const taken = this.namesIn(dest, root);
+    for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${base}-${n}.md`;
+    const target = `${root}/${name}`;
+    data.notes.delete(path);
+    dest.notes.set(target, note);
+    return { note: this.meta(dest, target), backlinks: 0 };
+  }
+
   // The real renameFolder in Map form: rekey every note whose path sits under
   // the folder, leaving its name, its text and its mtime alone. No lock check
   // and no body read, like the real one: a rename changes no note's depth, so
@@ -831,6 +855,7 @@ configureNotes({
   create: async (folder, text, subfolder) => store.create(folder, text, subfolder),
   retitle: async (path, text) => store.retitle(path, text),
   move: async (path, subfolder) => store.moveNote(path, subfolder),
+  moveToWorkspace: async (path, folder) => store.moveNoteToWorkspace(path, folder),
   favorite: async (path, on) => store.favorite(path, on),
   renameFolder: async (folder, subfolder, name) => store.renameFolder(folder, subfolder, name),
     deleteFolder: async (folder, subfolder) => store.deleteFolder(folder, subfolder),

@@ -95,6 +95,16 @@ A locked note has to be unlocked before it can move, because those image referen
 
 Two notes in different folders may share a title. Ledge shows the folder beside the title wherever the list is flat: quick-open, full text search, backlinks, and tag results.
 
+## Moving a note to another workspace
+
+Choose "Move to Workspace…" from the note's right-click menu or the command palette, or drag its row onto a workspace in the strip above the list.
+The note lands at the top level of that workspace, under the name it had, and any tab you have open on it goes along.
+Its images go with it: Ledge copies them into the other workspace's own image folder and rewrites the note's references, so the pictures still show. The copies in the workspace you left stay there, in case another note there shows the same picture.
+Wikilinks are the one thing that does not travel. `[[Title]]` finds a note in its own workspace, so notes here that linked to the moved note will stop finding it, and the strip at the bottom of the sidebar says how many that is. "Undo" there moves the note straight back.
+A locked note moves with its vault open and is refused with it shut, as with moving between folders ([[Note Locking]]).
+Folders do not move between workspaces; move their notes one at a time.
+The two workspaces are on the same machine, since a window shows one machine's notes at a time ([[Keep Notes on a Remote Server]]). If they are on different disks, the original is put in the old workspace's Trash rather than deleted, and the copy in the new workspace is the note from then on.
+
 ## Favorites
 
 A favorite note sits in a Favorites section at the top of the sidebar, above the tree, however deep in a folder it actually lives.

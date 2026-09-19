@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContextMenu, MenuDivider } from "@/components/ContextMenu";
 import { RenameField } from "@/components/RenameField";
 import { NoteBrowser } from "@/notes/NoteBrowser";
+import { NOTE_DRAG } from "@/notes/drag";
 import { agoLabel } from "@/notes/ago";
 import { docsWindow } from "@/lib/windows";
 import { ConnectionBar } from "./ConnectionBar";
@@ -149,6 +150,10 @@ function WorkspaceStrip({ stacked }: { stacked: boolean }) {
 
   // Where an in-flight drop would land, as an index into the strip's rows.
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // The workspace row a dragged NOTE is over, by id. A note dragged out of
+  // the browser onto a row moves to that workspace (interactions.md §3, Move
+  // to Workspace…); the highlight is the only feedback the drag gives.
+  const [noteDropOn, setNoteDropOn] = useState<string | null>(null);
   const nav = useListNav();
   const listRef = nav.containerProps.ref;
 
@@ -215,6 +220,16 @@ function WorkspaceStrip({ stacked }: { stacked: boolean }) {
     setDropIndex(null);
   };
 
+  // A note dropped on a workspace row. The path is the drag's data
+  // (notes/NoteBrowser.tsx), looked up in the lists the view holds. The
+  // browser runs the move and owns the Undo strip that follows
+  // (uiHooks.moveNoteToWorkspace), the same path its chooser takes.
+  const dropNote = (path: string, ws: Workspace) => {
+    setNoteDropOn(null);
+    const note = Object.values(state.notes).flat().find((n) => n.path === path);
+    if (note) uiHooks.moveNoteToWorkspace?.(note, ws.folder);
+  };
+
   // The marker clears only when the pointer leaves the list itself, not when
   // it crosses between rows (those fire dragleave on the parent too).
   const onDragLeave = (e: React.DragEvent) => {
@@ -263,6 +278,10 @@ function WorkspaceStrip({ stacked }: { stacked: boolean }) {
                 draggingWs = null;
                 setDropIndex(null);
               }}
+              dropping={noteDropOn === ws.id}
+              onNoteDragOver={() => setNoteDropOn(ws.id)}
+              onNoteDragLeave={() => setNoteDropOn(null)}
+              onDropNote={(path) => dropNote(path, ws)}
               onContextMenu={(x, y) => {
                 dispatch({ type: "selectWorkspace", id: ws.id });
                 setMenu({ id: ws.id, x, y });
@@ -372,6 +391,10 @@ function WorkspaceRow({
   onRemove,
   onDragStart,
   onDragEnd,
+  dropping,
+  onNoteDragOver,
+  onNoteDragLeave,
+  onDropNote,
   onContextMenu,
 }: {
   ws: Workspace;
@@ -387,6 +410,13 @@ function WorkspaceRow({
   onRemove: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
+  // The row as a drop target for a note dragged out of the browser. It claims
+  // the drop only for a Ledge note (NOTE_DRAG), and not on the selected row:
+  // the browser lists that workspace, so the note is already here.
+  dropping: boolean;
+  onNoteDragOver: () => void;
+  onNoteDragLeave: () => void;
+  onDropNote: (path: string) => void;
   onContextMenu: (x: number, y: number) => void;
 }) {
   const press = useRowMenu(onContextMenu, onSelect);
@@ -414,6 +444,7 @@ function WorkspaceRow({
         // (interactions.md §1a).
         "group relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-1 focus-visible:ring-ring touch:min-h-[44px]",
         selected ? "bg-accent" : "hover:bg-accent/50",
+        dropping && "bg-accent ring-1 ring-ring",
       )}
       onDoubleClick={onBeginRename}
       onDragStart={(e) => {
@@ -423,6 +454,27 @@ function WorkspaceRow({
         onDragStart();
       }}
       onDragEnd={onDragEnd}
+      // The strip's own handlers above reorder workspaces and ignore a drag
+      // that is not one (draggingWs). A note's drag stops here, so the strip
+      // never sees it as a reorder.
+      onDragOver={(e) => {
+        if (selected || !e.dataTransfer.types.includes(NOTE_DRAG)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "move";
+        onNoteDragOver();
+      }}
+      onDragLeave={(e) => {
+        if (e.dataTransfer.types.includes(NOTE_DRAG)) onNoteDragLeave();
+      }}
+      onDrop={(e) => {
+        if (selected || !e.dataTransfer.types.includes(NOTE_DRAG)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const path = e.dataTransfer.getData(NOTE_DRAG);
+        if (path) onDropNote(path);
+        else onNoteDragLeave();
+      }}
     >
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">

@@ -106,6 +106,15 @@ export interface UiHooks {
   // because it also owns the tree the answer changes: a note filed into a
   // collapsed folder still has to end up visible.
   pickFolder(request: FolderRequest): void;
+  // Open the workspace chooser (components/WorkspacePicker.tsx), the
+  // destination question Move to Workspace… asks. The browser owns it for the
+  // Undo strip's sake: the move is offered back on the same strip a delete is.
+  pickWorkspace(note: NoteMeta): void;
+  // Move a note to another workspace's top level and offer the Undo strip.
+  // The chooser's pick and a drag of the row onto a workspace row in the
+  // strip both land here, so the drag cannot grow behavior the menu item does
+  // not have. `folder` is the destination workspace's root handle.
+  moveNoteToWorkspace(note: NoteMeta, folder: string): void;
   // Open the confirmation for deleting a folder, which deletes the notes in
   // it. The delete is reversible: every note lands in the trash and the Undo
   // strip follows. It is confirmed because a collapsed row does not say how

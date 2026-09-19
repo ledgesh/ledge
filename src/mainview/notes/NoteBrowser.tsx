@@ -58,6 +58,7 @@ import { focusedTab } from "@/workspace/tree";
 import { SCRATCH_DOC } from "@/workspace/seeds";
 import { useVaultState } from "@/vault/channel";
 import { FolderPicker } from "@/components/FolderPicker";
+import { WorkspacePicker } from "@/components/WorkspacePicker";
 import { RenameField } from "@/components/RenameField";
 import type { FolderRequest } from "@/commands/types";
 import type { UndoOffer } from "@/workspace/actions";
@@ -68,12 +69,14 @@ import {
   deleteTrashedNote,
   emptyTrashNow,
   moveNoteTo,
+  moveNoteToWorkspace,
   renameFolderTo,
   restoreNote,
 } from "./actions";
 import { createNote } from "./channel";
 import { browserRows, favoriteRows, folderList, folderOf, folderRowId, type BrowserRow } from "./folders";
 import { expandFolder, toggleFolder, useExpanded } from "./expansion";
+import { NOTE_DRAG } from "./drag";
 import { requestTitleCaret } from "@/workspace/editorPool";
 import type { NoteMeta, TrashMeta } from "./channel";
 
@@ -98,6 +101,9 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
   >(null);
   // The folder chooser, when Move to Folder… or New Folder… opened it.
   const [picking, setPicking] = useState<FolderRequest | null>(null);
+  // The workspace chooser, when Move to Workspace… opened it: the note it
+  // was opened on.
+  const [pickingWorkspace, setPickingWorkspace] = useState<NoteMeta | null>(null);
   // The add menu (New Note / New Folder…), opened by the New Note button's
   // dropdown half or by a right-click on the list's blank space.
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
@@ -243,6 +249,36 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
     });
   };
 
+  // Move a note to another workspace, from the chooser or from a drop on a
+  // workspace row in the strip: one path for both, as `file` is for folders.
+  // Reversible, so the Undo strip and no confirmation (interactions.md §4);
+  // Undo is the same move back, from wherever the note is by then. The strip
+  // also says how many notes here linked to it, since those links just broke.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const moveAcross = (note: NoteMeta, folder: string) => {
+    setError(null);
+    const from = selected.folder;
+    const dest = state.workspaces.find((w) => w.folder === folder);
+    void moveNoteToWorkspace(note.path, folder, docIdsForPath(state, note.path), dispatch).then((res) => {
+      if (res.note === null) {
+        setError(res.error);
+        return;
+      }
+      const moved = res.note;
+      const where = dest ? `“${dest.name}”` : "another workspace";
+      const links =
+        res.backlinks === 0 ? "" : ` ${res.backlinks} ${res.backlinks === 1 ? "note here links" : "notes here link"} to it.`;
+      setUndo({
+        label: `Moved “${note.title}” to ${where}.${links}`,
+        run: () =>
+          moveNoteToWorkspace(moved.path, from, docIdsForPath(stateRef.current, moved.path), dispatch).then(
+            (r) => r.error,
+          ),
+      });
+    });
+  };
+
   // Rename a folder in place. Every note under it is about to be at a new
   // path, so the tabs open on them are handed over too (actions.ts
   // renameFolderTo freezes the saves and carries the open folders over).
@@ -284,8 +320,8 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
   // restore commands reach it through (row menus, `d`/`r`, ⌘⌫, the palette).
   // Every one of those lands in the same trash-with-undo behavior. Held in a
   // ref because the handlers close over the live state.
-  const hooks = useRef({ trash, restore, file, rename, removeFolder });
-  hooks.current = { trash, restore, file, rename, removeFolder };
+  const hooks = useRef({ trash, restore, file, rename, removeFolder, moveAcross });
+  hooks.current = { trash, restore, file, rename, removeFolder, moveAcross };
   useEffect(() => {
     configureUi({
       deleteNoteWithUndo: (note) => hooks.current.trash(note),
@@ -293,6 +329,10 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
       // Move to Folder… and New Folder… both stop here for a destination.
       // `picked` below decides what happens after, by which request it was.
       pickFolder: (request) => setPicking(request),
+      pickWorkspace: (note) => setPickingWorkspace(note),
+      // The strip's drop on a workspace row lands here, the same path the
+      // chooser's pick takes.
+      moveNoteToWorkspace: (note, folder) => hooks.current.moveAcross(note, folder),
       // The field replaces a row, so only the list can put it there.
       beginRenameFolder: (folder) => setRenaming(folder),
       confirmDeleteFolder: (folder) => setDeletingFolder(folder),
@@ -607,6 +647,11 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
             target={{ kind: "note", path: menu.path }}
             onClose={() => setMenu(null)}
           />
+          <CommandMenuItem
+            id="note.moveToWorkspace"
+            target={{ kind: "note", path: menu.path }}
+            onClose={() => setMenu(null)}
+          />
           {/* The two lock faces, one at a time (locking.md §7): Lock This
               Note… on a plain row, disabled on a template note (locking.md
               §2), and Remove Lock… on a locked one. A locked row also carries
@@ -684,6 +729,22 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
           initialQuery={picking.kind === "new" ? picking.parent : ""}
           onPick={picked}
           onCancel={() => setPicking(null)}
+        />
+      )}
+
+      {/* The workspace chooser (components/WorkspacePicker.tsx): the strip's
+          rows minus this one, since the note is already here. */}
+      {pickingWorkspace && (
+        <WorkspacePicker
+          title="Move to Workspace"
+          description={`Where should “${pickingWorkspace.title}” go? It lands at that workspace's top level, and its images go with it.`}
+          workspaces={state.workspaces.filter((w) => w.id !== selected.id && workspaceKind(w.folder) !== "docs")}
+          onPick={(folder) => {
+            const note = pickingWorkspace;
+            setPickingWorkspace(null);
+            moveAcross(note, folder);
+          }}
+          onCancel={() => setPickingWorkspace(null)}
         />
       )}
     </div>
@@ -905,13 +966,6 @@ function TrashRow({
 // grew as the pointer crossed it, since a title is shorter than a star.
 const ROW_CLASS =
   "group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring hoverable:min-h-8 touch:min-h-[44px]";
-
-// The drag's own MIME type, carrying the dragged note's path. A custom type
-// rather than text/plain because dataTransfer.types is readable during
-// dragover while the data is not. A drop target checks the type before it
-// claims the drop, so a drag from outside the app (a file, a selection) falls
-// through to the page instead.
-const NOTE_DRAG = "application/x-ledge-note";
 
 // How far a row indents per level, in pixels. Small because the sidebar is
 // narrow: a note three folders down still has to show enough of its title to

@@ -24,6 +24,7 @@ import {
   favoriteNote as markFavorite,
   listTrash,
   moveNote as moveFile,
+  moveNoteToWorkspace as moveFileToWorkspace,
   renameFolder as renameFolderFile,
   restoreNote as untrashFile,
   type NoteMeta,
@@ -162,6 +163,31 @@ export async function moveNoteTo(
   // editor, its undo history and the note's shells carry through the move.
   dispatch({ type: "noteRenamed", path, note });
   return { note, error: null };
+}
+
+// Move a note to another workspace's top level (interactions.md §3, Move to
+// Workspace…). The freeze is moveNoteTo's. On success the docs are aimed at
+// the new path and told their new folder (store.ts retargetDoc), and the
+// reducer lifts the tabs across (workspace/store.tsx noteMovedWorkspace).
+// `backlinks` is how many notes of the old workspace linked to it by title.
+export async function moveNoteToWorkspace(
+  path: string,
+  folder: string,
+  docIds: string[],
+  dispatch: (action: Action) => void,
+): Promise<{ note: NoteMeta | null; backlinks: number; error: string | null }> {
+  for (const id of docIds) freezeDoc(id);
+  let res: { note: NoteMeta; backlinks: number };
+  try {
+    res = await moveFileToWorkspace(path, folder);
+  } catch (err) {
+    for (const id of docIds) retargetDoc(id, path); // it did not move
+    console.error("[notes] move to workspace failed", err);
+    return { note: null, backlinks: 0, error: err instanceof Error ? err.message : String(err) };
+  }
+  for (const id of docIds) retargetDoc(id, res.note.path, folder);
+  dispatch({ type: "noteMovedWorkspace", path, folder, note: res.note });
+  return { note: res.note, backlinks: res.backlinks, error: null };
 }
 
 // Favorite a note, or unfavorite it. The row's menu, its bare `f`, and the

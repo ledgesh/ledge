@@ -184,6 +184,12 @@ export type Action =
   // into another folder (notes/actions.ts moveNoteTo). Never before Bun has
   // done the rename: the tab must not show a name the file does not have.
   | { type: "noteRenamed"; path: string; note: NoteMeta }
+  // A note's file moved to another workspace (notes/actions.ts
+  // moveNoteToWorkspace). `path` is where it was, `folder` the workspace it
+  // joined, `note` where it is now. Its tabs go with it, docId and all: a tab
+  // left behind would name a file in another workspace's folder, which the
+  // restore path prunes (architecture.md §6).
+  | { type: "noteMovedWorkspace"; path: string; folder: string; note: NoteMeta }
   // A note's file is gone (trashed). Closes its tabs wherever they are.
   | { type: "noteDeleted"; path: string }
   // One workspace folder's trash was re-read (at boot and at every refresh).
@@ -487,6 +493,42 @@ export function reducer(state: AppState, action: Action): AppState {
         ? state.notes
         : mapNoteLists(state.notes, (n) => (n.path === path ? { ...n, title: action.label } : n));
       return { ...state, workspaces, notes };
+    }
+
+    case "noteMovedWorkspace": {
+      // Every tab on the old path, out of whichever tree holds it, and into
+      // the destination's focused pane (its first pane if that id is stale),
+      // the first one active. A note open in two panes arrives as two tabs.
+      const moving: TabState[] = [];
+      let workspaces = state.workspaces.map((ws) => {
+        const hits = tabsBy(ws.root, (t) => t.path === action.path);
+        if (hits.length === 0) return ws;
+        moving.push(...hits);
+        return { ...ws, root: removeTabsBy(ws.root, (t) => t.path === action.path) };
+      });
+      const dest = workspaces.find((w) => w.folder === action.folder);
+      if (dest && moving.length > 0) {
+        const carried = moving.map((t) => ({ ...t, path: action.note.path, title: action.note.title }));
+        const paneId = findLeaf(dest.root, dest.focusedPaneId) ? dest.focusedPaneId : firstLeaf(dest.root).id;
+        const root = updateLeaf(dest.root, paneId, (leaf) => ({
+          ...leaf,
+          tabs: [...leaf.tabs, ...carried],
+          activeTabId: carried[0]!.id,
+        }));
+        workspaces = workspaces.map((w) => (w.id === dest.id ? { ...w, root, focusedPaneId: paneId } : w));
+      }
+      // Out of the old list and into the new one, sorted where its mtime puts
+      // it (noteAppeared's rule). A destination list the view has not read
+      // yet is left alone: the read that fills it will list this note too.
+      const notes = mapNoteLists(state.notes, (n) => (n.path === action.path ? null : n));
+      const list = notes[action.folder];
+      return {
+        ...state,
+        workspaces,
+        notes: list
+          ? { ...notes, [action.folder]: [...list, action.note].sort((a, b) => b.mtimeMs - a.mtimeMs) }
+          : notes,
+      };
     }
 
     case "noteDeleted": {

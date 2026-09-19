@@ -768,6 +768,7 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
     "noteFromTemplate",
     "noteLock",
     "noteMove",
+    "noteMoveToWorkspace",
     "noteRemoveLock",
     "noteRetitle",
     "noteStash",
@@ -888,6 +889,17 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
       // one of the three that needs the key rather than only the file.
       await refuseLockedFrom(device, path);
       return { note: await moveNote(path, folder) };
+    },
+    noteMoveToWorkspace: async ({ path, root }) => {
+      await refuseLockedFrom(device, path); // moveNote's reason, above
+      // Counted before the move, while the note is still in the workspace
+      // whose wikilinks name it: a title resolves within one root (notes.ts
+      // backlinksTo), so every link to it from there breaks when it leaves.
+      // Distinct notes, not lines, since that is what the strip says. Zero
+      // when the "other" workspace is its own, where the move is a no-op.
+      const crossing = root !== rootContaining(path);
+      const backlinks = crossing ? new Set((await backlinksTo(path)).backlinks.map((b) => b.path)).size : 0;
+      return { note: await moveNote(path, null, root), backlinks };
     },
     folderRename: ({ root, folder, name }) => renameFolder(root, folder, name),
     folderDelete: ({ root, folder }) => deleteFolder(root, folder),

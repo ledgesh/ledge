@@ -26,6 +26,7 @@ import {
   FileText,
   Folder,
   FolderInput,
+  FolderOutput,
   FolderOpen,
   FolderPlus,
   Hash,
@@ -1046,6 +1047,21 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       run: (ctx) => {
         const note = targetNote(ctx);
         if (note) ctx.ui.pickFolder?.({ kind: "move", note });
+      },
+    }),
+    // Move to Workspace…: the note leaves for the top level of another
+    // workspace (interactions.md §3 has what travels and what does not).
+    // Enabled only while the strip has a second row. The chooser and the
+    // Undo strip are the browser's (NoteBrowser.tsx moveAcross), and a drag
+    // of the row onto a workspace row is the same operation (R4).
+    cmd("note.moveToWorkspace", {
+      icon: FolderOutput,
+      targetKind: "note",
+      when: (ctx) =>
+        !!targetNote(ctx) && !docsSelected(ctx) && stripWorkspaces(ctx).some((w) => w.id !== ctx.selected.id),
+      run: (ctx) => {
+        const note = targetNote(ctx);
+        if (note) ctx.ui.pickWorkspace?.(note);
       },
     }),
     // A folder row's own create verb. No dialog: the folder is the row, and

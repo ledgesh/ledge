@@ -250,6 +250,9 @@ export const COMMANDS = {
   // §2). `m` is the note row's spare mnemonic. The folder row's Enter is its
   // disclosure, because a folder's primary action is showing what is in it.
   "note.move": { title: "Move to Folder…", listKeys: ["m"] },
+  // No bare key: `m` is spent on the folder move, and a note leaves its
+  // workspace rarely enough that the menu and a drag onto the strip serve.
+  "note.moveToWorkspace": { title: "Move to Workspace…" },
   "note.newInFolder": { title: "New Note in Folder" },
   "folder.new": { title: "New Folder…" },
   "folder.toggle": { title: "Expand", listKeys: ["Enter"] },

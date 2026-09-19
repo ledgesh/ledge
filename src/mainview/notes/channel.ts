@@ -70,6 +70,10 @@ interface NoteHandlers {
   retitle: (path: string, text: string) => Promise<NoteMeta>;
   // Move a note into another folder of its own workspace (rpc noteMove).
   move: (path: string, subfolder: string | null) => Promise<NoteMeta>;
+  // Move a note to the top level of another workspace (rpc
+  // noteMoveToWorkspace). `backlinks` is how many notes of the workspace it
+  // left linked to it; those links no longer resolve.
+  moveToWorkspace: (path: string, folder: string) => Promise<{ note: NoteMeta; backlinks: number }>;
   // Add or remove the note's `favorite: true` frontmatter line (rpc
   // noteFavorite). One line of the file changes, so an open buffer picks the
   // edit up the way it picks up any external one (editorPool
@@ -187,6 +191,16 @@ export function createNote(folder: string, text: string, subfolder?: string | nu
 // editor and shell hanging off that docId.
 export function moveNote(path: string, subfolder: string | null): Promise<NoteMeta> {
   return bridge().move(path, subfolder);
+}
+
+// Move a note to another workspace's top level (rpc noteMoveToWorkspace).
+// `folder` is the destination workspace's root handle. The note keeps its
+// name, its docId, and the editor and shell hanging off that docId; Bun
+// copies its images into the destination's asset pool and rewrites the
+// references. The wikilinks that named it from the workspace it left stop
+// resolving, and `backlinks` is how many notes those are.
+export function moveNoteToWorkspace(path: string, folder: string): Promise<{ note: NoteMeta; backlinks: number }> {
+  return bridge().moveToWorkspace(path, folder);
 }
 
 // Rename a folder of the selected workspace, keeping it where it sits (rpc

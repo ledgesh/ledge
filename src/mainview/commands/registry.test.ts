@@ -533,6 +533,19 @@ describe("registry", () => {
     expect(asked).toEqual([{ kind: "move", note: { path: `${FOLDER}/a.md`, title: "A", mtimeMs: 1 } }]);
   });
 
+  test("note.moveToWorkspace waits for a second workspace, then asks the browser for one", () => {
+    const state = initialState(FOLDER, [note(`${FOLDER}/a.md`, "A")]);
+    const cmd = find(commands, "note.moveToWorkspace");
+    const target = { kind: "note", path: `${FOLDER}/a.md` } as const;
+    expect(cmd.when!({ ...makeCtx(state), target })).toBe(false); // nowhere to go
+    const two = apply(state, secondWs, { type: "selectWorkspace", id: state.selectedId });
+    const asked: unknown[] = [];
+    const ctx: CommandCtx = { ...makeCtx(two), ui: { pickWorkspace: (n) => asked.push(n) }, target };
+    expect(cmd.when!(ctx)).toBe(true);
+    cmd.run(ctx);
+    expect(asked).toEqual([note(`${FOLDER}/a.md`, "A")]);
+  });
+
   test("folder.new seeds the chooser with the row's folder, and with nothing from the palette", () => {
     const state = initialState(FOLDER, []);
     const asked: unknown[] = [];

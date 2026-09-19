@@ -25,7 +25,7 @@
 // and that is the trade: an orphan costs disk, joining that list costs a guard
 // and a confirmation. The one unlink below is the temp-file discard on a
 // failed save, the same pattern as writeNote.
-import { dirname, join, relative, resolve, extname, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, extname, sep } from "node:path";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { ASSETS_DIRNAME } from "../shared/rpc-schema";
 import { assertRegisteredRoot, assertWritableRoot, isInside, uniqueName } from "./workspaces";
@@ -202,6 +202,27 @@ export async function savePastedImage(root: string, bytes: Uint8Array, ext = ".p
   // marks a sealed asset, not the filename.
   await writeAsset(assetsDir, join(assetsDir, name), seal ? sealAssetBytes(bytes) : bytes);
   return assetRefFor(root, join(assetsDir, name), from);
+}
+
+/**
+ * Copy the image at `src` into `root`'s asset pool and return where it
+ * landed, or null when the source is not on disk. A copy and not a move,
+ * because another note in the old workspace may show the same image
+ * (architecture.md §3). The bytes are copied as they are: a sealed asset is
+ * wrapped by the master key, so it opens in the new pool as it did in the old
+ * (locking.md §5). uniqueName suffixes the name only where the pool has it.
+ */
+export async function copyAssetInto(root: string, src: string): Promise<string | null> {
+  const bytes = await readFile(src).catch(() => null);
+  if (bytes === null) return null;
+  const assetsDir = assetsDirOf(assertWritableRoot(assertRegisteredRoot(root)));
+  await mkdir(assetsDir, { recursive: true });
+  const taken = new Set(await readdir(assetsDir));
+  const ext = extname(src);
+  const name = uniqueName(basename(src, ext), taken, ext);
+  const path = join(assetsDir, name);
+  await writeAsset(assetsDir, path, bytes);
+  return path;
 }
 
 /** Re-write one asset's bytes in place (temp+rename): the lock sweep's seal

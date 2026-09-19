@@ -154,7 +154,15 @@ describe("the schema's shape against the protocol version", () => {
   // two that have to agree, and they ship together. A phone's shell sends both
   // empty and its view shows no code. Nothing was retyped or narrowed. The pin
   // moves and the version does not.
-  const PINNED = { protocol: 5, shape: "aab72ab95a95982e" };
+  // Then moving a note to another workspace (architecture.md §3):
+  // noteMoveToWorkspace, one new method. folderRename's case: a server that
+  // predates it refuses the name at the handshake's method check, so the
+  // move fails loudly and the note stays where it was. It is a new method
+  // and not an optional `root` on noteMove for exactly that reason: a `root`
+  // an old server ignored would move the note to its own top level with no
+  // sign. No existing payload changed. The pin moves and the version does
+  // not.
+  const PINNED = { protocol: 5, shape: "9bd05ea4c515a805" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));
