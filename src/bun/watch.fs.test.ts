@@ -45,10 +45,45 @@ test("a temp-plus-rename save (how agents and Ledge itself write) fires via the 
   await writeFile(join(root, "note.md"), "# Old\n");
   const fired = nextChange((cb) => syncWatchers([root], cb));
   await settle();
-  // The platform coalesces this pair into one event named for the temp file.
-  // That is why relevantChange matches ".md" inside a name, not just at the end.
+  // Bun before 1.4 reported this pair under the temp name alone, which is why
+  // relevantChange matches ".md" inside a name, not just at the end.
   await writeFile(join(root, ".note.md.tmp-1"), "# New\n");
   await rename(join(root, ".note.md.tmp-1"), join(root, "note.md"));
+  expect(await fired).toBe(root);
+});
+
+// GNU `sed -i` and `mktemp` + `mv` save through a temp file whose name has no
+// ".md" in it, so only the rename's target names a note. Bun 1.3 on Linux
+// reported that rename under the temp name alone, and an edit made on a server
+// never reached the clients (issue #5). The Linux half of these runs in the
+// glibc suite (remote.md §13).
+test("a save through a temp file with no .md in its name fires under the note's name", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ledge-watch-"));
+  await writeFile(join(root, "note.md"), "# Old\n");
+  const fired = nextChange((cb) => syncWatchers([root], cb));
+  await settle();
+  await writeFile(join(root, "sedAbc123"), "# New\n");
+  await rename(join(root, "sedAbc123"), join(root, "note.md"));
+  expect(await fired).toBe(root);
+});
+
+test("the same save in a subfolder fires too", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ledge-watch-"));
+  await mkdir(join(root, "sub"));
+  await writeFile(join(root, "sub", "deep.md"), "# Old\n");
+  const fired = nextChange((cb) => syncWatchers([root], cb));
+  await settle();
+  await writeFile(join(root, "sub", "tmp.Xy12Zq"), "# New\n");
+  await rename(join(root, "sub", "tmp.Xy12Zq"), join(root, "sub", "deep.md"));
+  expect(await fired).toBe(root);
+});
+
+test("a file renamed into a note fires: a note can appear by rename alone", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ledge-watch-"));
+  await writeFile(join(root, "draft.txt"), "# Fresh\n");
+  const fired = nextChange((cb) => syncWatchers([root], cb));
+  await settle();
+  await rename(join(root, "draft.txt"), join(root, "fresh.md"));
   expect(await fired).toBe(root);
 });
 

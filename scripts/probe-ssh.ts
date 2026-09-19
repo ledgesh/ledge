@@ -352,13 +352,19 @@ try {
   //
   // Both halves have to be asserted. That `ledge` is absent from the output
   // would also be true if authentication had simply failed, which is how this
-  // check first passed for the wrong reason. The server's own handshake in that
-  // same output is what says the session opened and was then redirected.
+  // check first passed for the wrong reason.
+  //
+  // The session opening is read from the banner `serve` writes to stderr once
+  // it has attached to the daemon, not from the hello on stdout. stdin is
+  // closed at once and `serve` hangs up when either end does, so the hello
+  // races that hangup. On a first session, where the dial also autostarts the
+  // daemon, the hello often loses on Bun 1.4. The banner is there every time.
+  const attached = (err: string) => err.includes(`[serve] ledge ${BUILD_VERSION} attached to`);
   const asked = run([...argv.slice(0, -1), "whoami"], { quiet: true });
-  check("the session opened", asked.out.includes(BUILD_VERSION), asked.err.split("\n")[0]?.slice(0, 60));
+  check("the session opened", attached(asked.err), asked.err.split("\n")[0]?.slice(0, 60));
   check("but ran the forced command, not the one asked for", !/^ledge$/m.test(asked.out));
   const shell = run([...argv.slice(0, -1)], { quiet: true });
-  check("asking for a shell gets the protocol instead", shell.out.includes(BUILD_VERSION) && !/\$ $|# $/.test(shell.out));
+  check("asking for a shell gets the protocol instead", attached(shell.err) && !/\$ $|# $/.test(shell.out));
 
   step("[pin] a changed host key is refused, with no way to say yes anyway");
   const badPin = join(SCRATCH, "known_hosts.bad");
@@ -558,6 +564,25 @@ try {
     (reload.note?.text ?? "").includes("typed on the small screen") && reload.note?.mtimeMs === typed.mtimeMs,
     `mtime ${reload.note?.mtimeMs} vs ${typed.mtimeMs}`,
   );
+
+  // An edit made on the server itself rather than through a client. GNU
+  // `sed -i` saves through a temp file named `sedXXXXXX`, so the watcher sees
+  // a note only if Bun reports the rename under its target's name. Bun 1.3 on
+  // Linux did not, and the edit never reached an open note (issue #5).
+  const phoneHeard = (m: string) => phoneEars.heard.filter(([k]) => k === m).length;
+  await Bun.sleep(1000); // past the watcher's debounce, so the phone's save above is not counted here
+  const [macBefore, phoneBefore] = [macHeard("notesChanged"), phoneHeard("notesChanged")];
+  const told = () => macHeard("notesChanged") > macBefore && phoneHeard("notesChanged") > phoneBefore;
+  const overSsh = mine[0]!.path;
+  run(["docker", "exec", "-u", "ledge", NAME, "sed", "-i", "s/written across the wire/edited on the server/", overSsh]);
+  for (let i = 0; i < 100 && !told(); i++) await Bun.sleep(100);
+  check(
+    "a note edited on the server with sed -i is pushed to both clients unasked",
+    told(),
+    `${macHeard("notesChanged") - macBefore} to the Mac, ${phoneHeard("notesChanged") - phoneBefore} to the phone`,
+  );
+  const edited = await phone.requests.noteRead({ path: overSsh });
+  check("and the phone reads back the server's text", (edited.note?.text ?? "").includes("edited on the server"));
 
   // The one case that push cannot settle: both of them editing it, so neither
   // buffer may be reloaded and the second save arbitrates instead. Over ssh

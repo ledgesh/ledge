@@ -2547,6 +2547,11 @@ Per `testing.md`'s categories:
   `bun test src/bun src/shared` inside it. It found the two Linux bugs §11
   records, and a latent flake in `notes.fs.test.ts` that had put a pause
   AFTER the write it was meant to separate rather than before it.
+  Run it with `docker run --init`. Without an init, `bun test` is PID 1 and
+  never reaps the daemons the tests start, so `stopDaemon` waits out its
+  timeout on a zombie. Tests that read `ios/`, `npm/` or `release/` fail in the
+  image, since `.dockerignore` keeps those out, and so does `pair`'s default
+  address, since `pair` refuses inside a container.
 - **The backup against a bucket** (`bun run probe:backup`, testing.md §6):
   an S3 server in Docker, the pinned restic fetched and checksummed by
   `setup` itself, then every verb and the daemon's idle-exit backup against a
@@ -2599,6 +2604,14 @@ Per `testing.md`'s categories:
   connects with the argv `connections.ts` actually builds. A probe that
   hand-wrote an ssh command line would prove that ssh works, which was never
   in doubt.
+- **An edit made on the server**, in the same probe's `[two]` step: `sed -i`
+  run in the container as the daemon's own account must reach both connected
+  clients as `notesChanged`. `sed -i` saves through a temp file with no `.md`
+  in its name. Bun 1.3 on Linux reported that rename under the temp name
+  alone, so the watcher dropped it and an open note never followed the edit
+  (issue #5). `watch.fs.test.ts` holds the same shapes in the glibc suite. Both
+  run on the image's Bun, so the `Dockerfile` builds on `BUN_VERSION`, the Bun
+  `server.sh` installs, and `serverRelease.test.ts` keeps the two equal.
 - **A wire that actually drops**, in the same probe's `[drop]` step. The
   fixture carries `iptables` and the probe runs it with `NET_ADMIN`, so the
   container can cut its own wire: a rule dropping the server's replies leaves

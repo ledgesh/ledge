@@ -23,13 +23,11 @@ const DEBOUNCE_MS = 250;
 
 // True when an event names something that could be (or hide) a note.
 //
-// The last segment must contain ".md" rather than end with it. A probe showed
-// this platform reporting a temp-plus-rename save (the shape Ledge's own
-// saves and most atomic-writing agents use) as one coalesced event named for
-// the dotted temp file (".plan.md.tmp-123-1"), with no separate event under
-// the target name. The temp name embeds the note's name, so matching ".md"
-// anywhere in it keeps those saves visible. Requiring a trailing ".md" made
-// the watcher blind to them. watch.fs.test.ts covers the rename choreography.
+// The last segment must contain ".md" rather than end with it, so a save's
+// temp file counts too (".plan.md.tmp-123-1"). Bun before 1.4 could report a
+// temp-plus-rename save under the temp name alone, and this match kept Ledge's
+// own saves visible then. Bun 1.4 also reports the rename under the note's
+// name, the only name a `sed -i` save has. watch.fs.test.ts covers both shapes.
 //
 // Dotted directory segments are still dropped: .git churn (constant while an
 // agent works in an attached project folder), .ledge-trash's internal moves

@@ -183,6 +183,16 @@ describe("the release's pins", () => {
     expect(ci.match(/bun-version:\s*([\d.]+)/)?.[1]).toBe(BUN_VERSION);
   });
 
+  test("the Docker image the probes and the glibc suite use is built on that Bun too", () => {
+    const dockerfile = readFileSync(join(ROOT, "Dockerfile"), "utf8");
+    expect(dockerfile.match(/^ARG BUN_VERSION=([\d.]+)$/m)?.[1]).toBe(BUN_VERSION);
+    // Every stage built on Oven's image takes the pinned version, so a new
+    // stage cannot bring back a moving tag such as `1-debian`.
+    const tags = [...dockerfile.matchAll(/^FROM oven\/bun:(\S+)/gm)].map((m) => m[1]);
+    expect(tags.length).toBeGreaterThan(0);
+    for (const tag of tags) expect(tag).toBe("${BUN_VERSION}-debian");
+  });
+
   test("every target the package serves has Oven's Bun package pinned, x64 as the baseline build", () => {
     expect(Object.keys(BUN_PACKAGES).sort()).toEqual([...KEYS].sort());
     for (const [key, pkg] of Object.entries(BUN_PACKAGES)) {

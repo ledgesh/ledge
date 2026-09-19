@@ -15,12 +15,11 @@ describe("relevantChange", () => {
     expect(relevantChange(null)).toBe(true);
   });
 
-  test("a temp-plus-rename save counts UNDER ITS TEMP NAME — the platform reports it no other way", () => {
-    // A temp-plus-rename save coalesces into one event. That event is named
-    // for the dotted temp file, and the note's name is embedded in the temp
-    // name. So the filter accepts a ".md" followed by a dot, not only one at
-    // the end of the name. Requiring a trailing ".md" would blind the watcher
-    // to Ledge's own saves and to atomic-writing agents.
+  test("a temp-plus-rename save counts under its temp name too, since the note's name is inside it", () => {
+    // Bun before 1.4 could report such a save under the temp name alone. So
+    // the filter accepts a ".md" followed by a dot, not only one at the end of
+    // the name. Requiring a trailing ".md" blinded the watcher to Ledge's own
+    // saves then.
     expect(relevantChange(".plan.md.tmp-123-1")).toBe(true);
     expect(relevantChange("sub/.plan.md.tmp-123-1")).toBe(true);
   });

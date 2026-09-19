@@ -7,7 +7,8 @@ import { NATIVE_TARGETS, PACKAGE_NAME } from "./npmPackage";
 
 /**
  * The Bun every install gets. The same version CI runs the suite on
- * (`.github/workflows/ci.yml`), which serverRelease.test.ts holds.
+ * (`.github/workflows/ci.yml`) and the Dockerfile builds on, which
+ * serverRelease.test.ts holds.
  */
 export const BUN_VERSION = "1.4.2";
 

@@ -34,7 +34,13 @@
 # debian-slim and not alpine, per remote.md §11: the PTY layer is bun:ffi over
 # posix_spawn and forkpty, and musl has no posix_spawn_file_actions_addchdir_np
 # at all.
-FROM oven/bun:1-debian AS native
+#
+# The Bun is the one server.sh installs: BUN_VERSION in
+# src/bun/serverRelease.ts, and serverRelease.test.ts holds the two equal. A
+# moving tag such as `1-debian` means whatever image this machine pulled last,
+# so the probes and the glibc suite could run a Bun no install ships.
+ARG BUN_VERSION=1.4.2
+FROM oven/bun:${BUN_VERSION}-debian AS native
 
 # The one thing the build needs that the runtime must not have: a compiler.
 # `pty.ts` falls back to compiling the trampolines in-process, which needs the

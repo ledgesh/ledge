@@ -308,11 +308,11 @@ skips drafts and pre-releases, so publishing the release is what gives
 **The Bun it installs is pinned in `src/bun/serverRelease.ts`**, as a version
 and the SHA-256 of each target's `@oven/bun-<target>` tarball, and
 `serverRelease.test.ts` fails when that version differs from the one CI runs
-the suite on. npm lists a sha512 rather than a SHA-256, so raising it means
-downloading the four tarballs at the new version, checking each against `npm
-view @oven/bun-<target>@<version> dist.integrity`, and copying in their
-SHA-256s. `build:server` then checks the pins against the registry on every
-build.
+the suite on or from the `Dockerfile`'s `ARG BUN_VERSION`. npm lists a sha512
+rather than a SHA-256, so raising it means downloading the four tarballs at the
+new version, checking each against `npm view @oven/bun-<target>@<version>
+dist.integrity`, and copying in their SHA-256s. `build:server` then checks the
+pins against the registry on every build.
 
 ## 7. Updates
 
