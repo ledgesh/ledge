@@ -139,7 +139,10 @@ export type ToPage =
   // the same rule one domain along: the payload is the name of a key, and the
   // page turns that name into bytes (editor/inlineTerm.ts RUN_KEYS). Swift
   // never learns that Ctrl-C is one byte.
-  | { t: "key"; k: string };
+  | { t: "key"; k: string }
+  // A tap on the status bar. The page's scrolling is all in CSS, so iOS's
+  // scroll to the top has to be done here (lib/scrollToTop.ts).
+  | { t: "top" };
 
 /** What `@hello` answers: who this client is (remote.md §5), what to call the
  * machine it is pointed at (remote.md §8, so the indicator can name one), and
@@ -179,6 +182,8 @@ export interface Shell {
   onVerb(fn: (id: string) => void): void;
   /** Told when a key on the run's bar was tapped, by name. */
   onKey(fn: (name: string) => void): void;
+  /** Told when the status bar was tapped. */
+  onTop(fn: () => void): void;
   /** One message from Swift. */
   deliver(msg: ToPage): void;
 }
@@ -197,6 +202,7 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
   let resumed: (awayMs: number) => void = () => {};
   let verb: (id: string) => void = () => {};
   let key: (name: string) => void = () => {};
+  let top: () => void = () => {};
 
   function call(m: ShellCall, p: unknown): Promise<unknown> {
     const id = nextId++;
@@ -233,6 +239,10 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
 
     onKey(fn) {
       key = fn;
+    },
+
+    onTop(fn) {
+      top = fn;
     },
 
     async hello() {
@@ -284,6 +294,9 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
           return;
         case "key":
           key(msg.k);
+          return;
+        case "top":
+          top();
           return;
       }
     },

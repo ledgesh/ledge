@@ -730,3 +730,14 @@ describe("the client overlay", () => {
     expect(o.noteWrite({ path: "/notes/a.md", text: "", baseMtimeMs: null })).rejects.toThrow("reached the wire");
   });
 });
+
+describe("a tap on the status bar", () => {
+  test("reaches the subscriber, and is dropped before there is one", () => {
+    const { shell } = recorder();
+    expect(() => shell.deliver({ t: "top" })).not.toThrow();
+    let taps = 0;
+    shell.onTop(() => taps++);
+    shell.deliver({ t: "top" });
+    expect(taps).toBe(1);
+  });
+});

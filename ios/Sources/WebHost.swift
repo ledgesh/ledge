@@ -135,7 +135,19 @@ final class WebHost: UIViewController {
             // arrived: the bands beside the web view are this color or black.
             print("[shell] theme color \(web.themeColor.map { "\($0)" } ?? "none, system background")")
         }
+        // Behind the web view, and the only scroll view in the window that
+        // answers the status bar (`TopTap` below).
+        web.scrollView.scrollsToTop = false
+        let topTap = TopTap { [weak self] in self?.deliver(["t": "top"]) }
+        root.addSubview(topTap)
         root.addSubview(web)
+        topTap.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            topTap.topAnchor.constraint(equalTo: root.topAnchor),
+            topTap.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            topTap.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            topTap.heightAnchor.constraint(equalToConstant: 1),
+        ])
         web.translatesAutoresizingMaskIntoConstraints = false
         // The safe areas are the shell's job, not the page's (ios.html says so
         // where it declines to set viewport-fit). One set of constraints beats
@@ -604,5 +616,41 @@ extension WebHost: WKScriptMessageHandler {
         default:
             fail(id, "the Ledge shell has no \(method)")
         }
+    }
+}
+
+/// A tap on the status bar, for a page whose scrolling is all in CSS.
+///
+/// iOS scrolls one native scroll view to the top on that tap. The web view's
+/// own never moves (the page is a full-height app), so this stand-in takes the
+/// tap, refuses the scroll, and says so; the page scrolls itself (ios.md §7).
+final class TopTap: UIScrollView, UIScrollViewDelegate {
+    private let tapped: () -> Void
+
+    init(tapped: @escaping () -> Void) {
+        self.tapped = tapped
+        super.init(frame: .zero)
+        delegate = self
+        scrollsToTop = true
+        showsVerticalScrollIndicator = false
+        // Otherwise the safe area becomes an inset, and the offset below is
+        // measured from inside it.
+        contentInsetAdjustmentBehavior = .never
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("no storyboard") }
+
+    /// UIKit only offers the tap to a scroll view that is somewhere other
+    /// than its top, so this one is kept a point down a content it overflows.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        contentSize = CGSize(width: bounds.width, height: bounds.height + 2)
+        if contentOffset.y == 0 { contentOffset = CGPoint(x: 0, y: 1) }
+    }
+
+    func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
+        tapped()
+        return false
     }
 }

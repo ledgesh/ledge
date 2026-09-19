@@ -15,6 +15,7 @@ import { attachShell, barFaceOf, focusReporter, nativeOverlay, type Shell } from
 import { sendRunKey } from "./editor/inlineTerm";
 import { dispatchNativeCommand } from "./lib/menu";
 import { configureShell } from "./lib/shell";
+import { scrollToTop } from "./lib/scrollToTop";
 
 // Milestones, in milliseconds since the page began loading.
 //
@@ -188,6 +189,7 @@ async function start(): Promise<void> {
   // Ctrl-C would act on a focus that opening the palette has already taken
   // away.
   shell.onKey((name) => void sendRunKey(name));
+  shell.onTop(() => scrollToTop());
   watchEditorFocus(shell);
 
   // Choosing a server from the connection chrome, the same one or another, runs

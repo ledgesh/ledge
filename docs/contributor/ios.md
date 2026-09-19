@@ -1031,6 +1031,17 @@ Four decisions follow:
   hardware keyboard is a Mac-shaped client and the existing keymap is already
   right for it. Serving it is not a v1 goal; breaking it would be a v1
   mistake.
+- **A tap on the status bar scrolls whatever is under the middle of the
+  screen to its top.** iOS scrolls one native scroll view on that tap, and the
+  web view's own never moves, because every scroller in the page is a CSS
+  one. So the shell turns the web view's `scrollsToTop` off and puts a
+  one-point `TopTap` behind it that takes the tap, refuses the scroll and
+  sends `{ t: "top" }` (`WebHost.swift`). The page walks up from the element
+  at the middle of the viewport and scrolls the outermost scroller that is
+  off its top (`lib/scrollToTop.ts`): the note rather than a run's output
+  inside it. UIKit offers the tap only to a scroll view that is not already
+  at its top, so `TopTap` sits one point down with its safe-area inset off;
+  with the inset on, its offset was -62 and the tap never arrived.
 
 ## 8. What a phone does, and what it cuts
 
