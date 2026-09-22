@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://ledge.sh">Website</a> ·
   <a href="https://ledge.sh/docs">Documentation</a> ·
-  <a href="https://github.com/ledgesh/ledge/releases/latest">Download</a>
+  <a href="https://github.com/ledgesh/ledge/releases/latest/download/macos-arm64-Ledge.dmg">Download</a>
 </p>
 
 <p align="center">
@@ -37,9 +37,8 @@ side.
 
 ## Install
 
-**Mac.** Download the DMG from the
-[latest release](https://github.com/ledgesh/ledge/releases/latest) and drag
-Ledge to Applications. Ledge runs on macOS 13 or newer on Apple Silicon, and
+**Mac.** [Download the DMG](https://github.com/ledgesh/ledge/releases/latest/download/macos-arm64-Ledge.dmg)
+and drag Ledge to Applications. Ledge runs on macOS 13 or newer on Apple Silicon, and
 updates itself.
 
 **iPhone and iPad.** Get

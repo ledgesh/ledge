@@ -13,7 +13,7 @@ publishing.
 
 | File | What it is |
 | --- | --- |
-| `macos-arm64-Ledge.dmg` | What users download. Contains the self-extracting app and a symlink to `/Applications`. |
+| `macos-arm64-Ledge.dmg` | What users download. Contains the self-extracting app and a symlink to `/Applications`. The site's Download buttons and the README link to it by this name under `releases/latest/download/`, so a release that renames it breaks them. |
 | `stable-macos-arm64-Ledge.app.tar.zst` | The app itself, compressed. The updater downloads it when no patch applies. |
 | `stable-macos-arm64-update.json` | The manifest the updater reads (§7). |
 | `stable-macos-arm64-<hash>.patch` | A binary diff from the previous release's build, named by that build's hash, to this one. Written only when the update server was serving a previous release during the build. |
