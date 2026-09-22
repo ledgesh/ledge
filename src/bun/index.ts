@@ -527,7 +527,18 @@ function showDocs(page: string): void {
 // The displays' usable rectangles, primary first. fitFrame re-centers on
 // workAreas[0] when a saved frame matches no attached display, so a window
 // nobody can locate comes back in the middle of the main screen.
+//
+// The first call waits for the main thread's NSApplication. getAllDisplays runs
+// on this worker thread, and a display query racing the app's creation opens a
+// second WindowServer connection, closed at once, which makes macOS 27's Dock
+// report the app as not responding. isDockIconVisible is marshaled to the main
+// thread and returns only once the app exists.
+let mainThreadReady = false;
 function workAreas(): Rect[] {
+  if (!mainThreadReady) {
+    Utils.isDockIconVisible();
+    mainThreadReady = true;
+  }
   try {
     const displays = Screen.getAllDisplays();
     return displays
