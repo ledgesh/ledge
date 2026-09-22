@@ -1077,3 +1077,125 @@ test("a second daemon on the same socket refuses to start", async () => {
   const { socketPath, pidPath } = await daemonIn();
   await expect(startDaemon({ socketPath, pidPath, idleMs: 1000 })).rejects.toThrow();
 });
+
+// The stale-frontmatter hint, end to end through a real daemon (architecture.md
+// §6a, restart-applies).
+//
+// Tested here rather than in a unit, because the rule is about two things the
+// server alone holds together: the params a note last sent, and the shells it
+// actually has running. A unit over either half would pass while the pair
+// disagreed, which is the bug the hint exists to surface.
+describe("frontmatter the note's shells are not running", () => {
+  const params = (p: { cwd?: string; favorite?: boolean }) => ({
+    cwd: p.cwd ?? null,
+    profile: null,
+    envFile: null,
+    env: {},
+    hosts: [],
+    tags: [],
+    template: false as const,
+    confirm: false,
+    favorite: p.favorite ?? false,
+    locked: null,
+  });
+  const stale = (seen: Seen) => got<{ sessionId: string; stale: boolean }>(seen, "sessionStale");
+
+  test("a note with no shell is never stale, however its params move", async () => {
+    const { socketPath } = await daemonIn();
+    const mac = await joined(socketPath, "mac-1");
+
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/tmp" }), notePath: null });
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/usr" }), notePath: null });
+
+    // Nothing is running under the old cwd, so there is nothing to restart and
+    // nothing to say. The next shell reads the note as it is.
+    expect(stale(mac.seen)).toEqual([]);
+  });
+
+  test("editing the cwd under a live shell says so, and a restart clears it", async () => {
+    const { socketPath } = await daemonIn();
+    const mac = await joined(socketPath, "mac-1");
+
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/tmp" }), notePath: null });
+    // The drawer's shell is a persistent one, and spawning it is what makes
+    // the note's params a live fact rather than a stored one.
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/usr" }), notePath: null });
+    expect(await until(() => stale(mac.seen).length > 0)).toBe(true);
+    expect(stale(mac.seen).at(-1)).toEqual({ sessionId: "note-1", stale: true });
+
+    // What the hint's button runs. The shells are gone, so nothing is out of
+    // step and the hint comes down without waiting for the lazy respawn.
+    await mac.conn.requests.sessionRestart({ sessionId: "note-1" });
+    expect(await until(() => stale(mac.seen).length > 1)).toBe(true);
+    expect(stale(mac.seen).at(-1)).toEqual({ sessionId: "note-1", stale: false });
+  });
+
+  test("typing the old cwd back takes the hint down again", async () => {
+    // The flag is a comparison, not a latch. Undoing the edit is as good an
+    // answer as restarting, and the block must stop asking for one.
+    const { socketPath } = await daemonIn();
+    const mac = await joined(socketPath, "mac-1");
+
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/tmp" }), notePath: null });
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/usr" }), notePath: null });
+    expect(await until(() => stale(mac.seen).at(-1)?.stale === true)).toBe(true);
+
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/tmp" }), notePath: null });
+    expect(await until(() => stale(mac.seen).at(-1)?.stale === false)).toBe(true);
+  });
+
+  test("a frontmatter key that never feeds a spawn says nothing", async () => {
+    // Favoriting a note rewrites its frontmatter and sends fresh params. A
+    // hint on that would put "Restart Note Shell" on the block for an edit a
+    // restart cannot apply, because it already applied.
+    const { socketPath } = await daemonIn();
+    const mac = await joined(socketPath, "mac-1");
+
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/tmp" }), notePath: null });
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    await mac.conn.requests.sessionConfigure({
+      sessionId: "note-1",
+      params: params({ cwd: "/tmp", favorite: true }),
+      notePath: null,
+    });
+
+    // Given a moment to be wrong in: the push would ride the same tick the
+    // configure does.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(stale(mac.seen)).toEqual([]);
+  });
+
+  test("everyone with the note open is told, not just the drawer's owner", async () => {
+    // Staleness is a fact about the note's shells, so the hint has to appear on
+    // the phone's copy of the block too. The drawer's own pushes go to one
+    // client; this is deliberately not one of those.
+    const { socketPath } = await daemonIn();
+    const mac = await joined(socketPath, "mac-1");
+    const phone = await joined(socketPath, "phone-1");
+
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/tmp" }), notePath: null });
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/usr" }), notePath: null });
+
+    expect(await until(() => stale(phone.seen).at(-1)?.stale === true)).toBe(true);
+  });
+
+  test("a shell that exits on its own takes the hint with it", async () => {
+    // The drain loop reaps it, and nothing else would clear a flag that was
+    // raised by an edit. Left alone the block would keep offering a restart
+    // for a shell that is already gone.
+    const { socketPath } = await daemonIn();
+    const mac = await joined(socketPath, "mac-1");
+
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/tmp" }), notePath: null });
+    await mac.conn.requests.terminalAttach({ sessionId: "note-1" });
+    await mac.conn.requests.sessionConfigure({ sessionId: "note-1", params: params({ cwd: "/usr" }), notePath: null });
+    expect(await until(() => stale(mac.seen).at(-1)?.stale === true)).toBe(true);
+
+    await mac.conn.requests.terminalInput({ sessionId: "note-1", dataB64: b64("exit\n") });
+    expect(await until(() => stale(mac.seen).at(-1)?.stale === false)).toBe(true);
+  });
+});

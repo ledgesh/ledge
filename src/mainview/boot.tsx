@@ -10,7 +10,14 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../shared/rpc-schema";
 import type { RequestClient, ViewPush } from "../shared/wire";
-import { configureBridge, dispatchRunEvent, dispatchRunLink, reconcileRuns, setTerminalBusy } from "./editor/bridge";
+import {
+  configureBridge,
+  dispatchRunEvent,
+  dispatchRunLink,
+  reconcileRuns,
+  setSessionStale,
+  setTerminalBusy,
+} from "./editor/bridge";
 import {
   bytesToB64,
   configureTerminal,
@@ -63,6 +70,10 @@ export const viewPush: ViewPush = {
   terminalBusy: ({ sessionId, busy }) => setTerminalBusy(sessionId, busy),
   terminalExit: ({ sessionId }) => dispatchTerminalExit(sessionId),
   terminalDetached: ({ sessionId, by }) => dispatchTerminalDetached(sessionId, by),
+  // A note's live shells no longer match its frontmatter, or match it again
+  // (rpc-schema sessionStale). The editor draws the hint that offers the
+  // restart which applies it.
+  sessionStale: ({ sessionId, stale }) => setSessionStale(sessionId, stale),
   // Who else is on this server, for the connection bar and for naming the
   // device in the `terminalDetached` notice above (lib/connections.ts labelFor,
   // remote.md §7).

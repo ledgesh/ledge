@@ -157,6 +157,11 @@ interface BridgeHandlers {
   // notice strip). The editor's refusals answer through this rather than
   // dropping the chord in silence (locking.md §7).
   notice: (message: string) => void;
+  // Kill the note's shells so its current frontmatter applies at the next one
+  // (rpc-schema sessionRestart). editor/frontmatter.ts calls this from the
+  // stale-params hint, and it runs the same edge as the "Restart Note Shell"
+  // command. App wires both to terminal/channel.ts.
+  restartShell: (docId: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -362,4 +367,44 @@ export function onTerminalBusyChange(sink: () => void): () => void {
   return () => {
     busySinks.delete(sink);
   };
+}
+
+// --- stale frontmatter -------------------------------------------------------
+//
+// Which notes have a live shell running under frontmatter the note no longer
+// says, pushed from Bun (sessionStale in rpc-schema.ts). Params apply at spawn
+// (architecture.md §6a), so an edited `cwd:` reaches nothing that is already
+// running, and editor/frontmatter.ts draws this as a hint on the block with the
+// restart that applies it.
+//
+// Absent means current, so a note that has never run anything needs no entry.
+// Same shape as the busy set above, and for the same reason: a fact about one
+// note's shells that a decoration pass has to read synchronously.
+const staleParams = new Set<string>();
+const staleSinks = new Set<() => void>();
+
+export function setSessionStale(sessionId: string, stale: boolean): void {
+  if (stale === staleParams.has(sessionId)) return;
+  if (stale) staleParams.add(sessionId);
+  else staleParams.delete(sessionId);
+  for (const sink of staleSinks) sink();
+}
+
+export function isSessionStale(sessionId: string): boolean {
+  return staleParams.has(sessionId);
+}
+
+// Run `sink` whenever any note's staleness changes, so the frontmatter
+// decorations can rebuild. The push arrives outside CodeMirror's update cycle,
+// which is what lets the subscriber dispatch straight into the view.
+export function onSessionStaleChange(sink: () => void): () => void {
+  staleSinks.add(sink);
+  return () => {
+    staleSinks.delete(sink);
+  };
+}
+
+/** Kill the note's shells so the next one reads its current frontmatter. */
+export function restartShell(docId: string): void {
+  handlers.restartShell?.(docId);
 }

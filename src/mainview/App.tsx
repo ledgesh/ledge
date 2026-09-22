@@ -10,7 +10,13 @@ import { pushLayer } from "@/commands/layers";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
 import { configureBridge, requestHostPick, type HostPickRequest, type RunConfirmRequest } from "@/editor/bridge";
-import { sendTerminalPaste, closeSession, onTerminalExit, terminalStatus } from "@/terminal/channel";
+import {
+  sendTerminalPaste,
+  closeSession,
+  onTerminalExit,
+  restartSession,
+  terminalStatus,
+} from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
 import { LinkNotice } from "@/workspace/LinkNotice";
 import { BacklinksPanel } from "@/workspace/BacklinksPanel";
@@ -477,6 +483,10 @@ function Shell() {
       // A clicked #tag (rendered, frontmatter, or through the Open Link
       // command) opens the Tags panel drilled into it, like every tag click.
       openTag: (_docId, tag) => showTag(tag),
+      // The frontmatter block's stale-params hint runs the same edge as the
+      // "Restart Note Shell" command, on the note it is drawn in rather than
+      // on whichever one has focus.
+      restartShell: (docId) => restartSession(docId),
     });
     // The autosave outcome a user has to be told about: a save that displaced
     // another writer's version of the note into the trash. Same strip and the

@@ -1058,6 +1058,31 @@ alike, which is what keeps all three telling one story about the note.
   frontmatter edit can be newer than the persistent one — each shell reads
   the params at its own birth.) For remote hosts this is also how a
   drawer's shell moves machines: restart, reopen, pick again.
+- **And the rule says so on the block.** Restart-applies was for a long time
+  a rule with no surface: an edited `cwd:` simply did not take, the next
+  `pwd` printed the old one, and the way to apply it was a palette command
+  you had to already know. Quitting the app worked, which is how people
+  found it. So Bun now records what each *persistent* shell was born with
+  (`spawnKeyOf`, `spawnShell`), compares it with what the note last sent, and
+  pushes `sessionStale` when the two differ. The editor draws that as a
+  button on the frontmatter's closing fence, labelled with its reason rather
+  than only its verb, running the same restart. Three
+  properties make it advisory rather than nagging, and each is a test:
+  - **Only the keys that feed a spawn.** `cwd`, `profile`, `envFile`, `env`.
+    The rest of `NoteParams` rides in the block because the block has one
+    parser, and every one of them applies as it is typed. A key over the
+    whole object would put "restart to apply" on screen when a note is
+    favorited.
+  - **Only shells that outlive a run.** The note's own shell per host, and
+    the drawer's. An overflow shell reads the params current at its own
+    birth, so it can never be the stale one (`InlinePool.primaryHosts`).
+  - **Computed, never latched.** It is a comparison against live shells, so
+    typing the old value back lowers it, and so does the shell dying. Nothing
+    has to notice a `cd` or an `exit` to keep the hint honest.
+  `hosts` is deliberately not in the key: shells are keyed per (note, host),
+  so an edited `host:` line sends the next run to a machine that spawns its
+  own shell there and then. Nor is `notePath`, which moves on every
+  rename-by-heading.
 - **Everything degrades, nothing throws.** A missing profile, a stale cwd, a
   bad env name each cost themselves — warned in the Bun log, and the shell
   still spawns. A dead Run button diagnoses nothing.

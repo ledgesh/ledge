@@ -42,7 +42,7 @@ Profile variables merge into the shell environment at spawn, above the note's `e
 
 A `profile:` line naming a file that does not exist is skipped, and the shell spawns without it.
 
-A profile edit applies to newly spawned shells, like every frontmatter change. Run "Restart Note Shell" after changing one.
+A profile edit applies to newly spawned shells, like every frontmatter change. Changing which profile a note names raises the block's **Restart Note Shell** button; editing the values inside a profile file does not, so run the command yourself after that.
 
 ## Profiles stay with the notes
 

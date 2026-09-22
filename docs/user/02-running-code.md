@@ -104,7 +104,7 @@ The terminal drawer is a separate shell from the inline one. Both belong to this
 
 Comments mean the same thing on both chords. A `#` line inside a shell block is a comment whether you run the block inline or send it to the drawer, so you can annotate a block without breaking it.
 
-Frontmatter applies to newly spawned shells, so after editing it run "Restart Note Shell" from the palette. It kills the note's shells and lets them respawn. Use the same command when an experiment leaves a shell in a strange state.
+Frontmatter applies to newly spawned shells, so editing `cwd:` leaves a running shell where it was. The block grows a **Restart Note Shell** button when that happens, and pressing it lets the shells respawn with what the note now says. The same command is in the palette and the Note menu, for when an experiment leaves a shell in a strange state. [[Frontmatter and Environments]] has the detail.
 
 ## Change the shell
 

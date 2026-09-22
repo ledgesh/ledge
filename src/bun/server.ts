@@ -95,6 +95,7 @@ import {
   resolveShellArgs,
   resolveSpawn,
   shellRefusal,
+  spawnKeyOf,
   stampSessionFacts,
   type SessionFacts,
   type SpawnDeps,
@@ -432,6 +433,30 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
   // the params describe a live tab rather than a note file.
   const sessionParams = new Map<string, NoteParams>();
 
+  // What each of a session's live persistent shells was born with
+  // (spawnParams.ts spawnKeyOf), keyed by which shell: `inline:<host>` for the
+  // note's own run shell on that machine, `terminal` for its drawer. Overflow
+  // shells are absent, since each reads the params current at its own birth.
+  //
+  // This is the other half of restart-applies. sessionParams above is what the
+  // note says; this is what its shells are actually running under, and the two
+  // disagreeing is exactly when "Restart Note Shell" would change something.
+  // The view draws that as a hint on the frontmatter block, so the policy is
+  // visible where the edit was made rather than only in the manual
+  // (architecture.md §6a).
+  //
+  // Entries outlive the shells they describe rather than being reaped: a dead
+  // shell's host drops out of `primaryHosts`, so staleness already reads false
+  // for it, and the next spawn on that host overwrites the entry. closeSession
+  // clears the session's whole map, as it does its params.
+  const spawnKeys = new Map<string, Map<string, { host: string; key: string }>>();
+
+  // The stale flag each client was last told, so the push goes out on the flip
+  // rather than on every drain tick. Absent means "not stale", the same
+  // seeding as the view's own set (mainview/editor/bridge.ts): a note nobody
+  // has run is not stale, and saying so costs a message.
+  const sentStale = new Map<string, boolean>();
+
   // The session's validated location facts (spawnParams.ts stampSessionFacts).
   // Kept beside sessionParams rather than inside it: those params are what the
   // note said, these are what Bun has checked. sessionConfigure's notePath is
@@ -493,7 +518,32 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
   // (bun/remoteSpawn.ts), spawned with the base env in $HOME. The note's cwd
   // and env travel inside the ssh command to the machine they describe, so the
   // local resolution (profile files, cwd stat) does not run.
-  function spawnShell(sessionId: string, host: string, kind: "inline" | "terminal"): PtyProcess {
+  //
+  // `persistent` says whether this shell outlives its run, and only decides
+  // whether its birth params are recorded (see spawnKeys). The pool passes
+  // false for an overflow shell; the drawer's shell is always persistent.
+  function spawnShell(
+    sessionId: string,
+    host: string,
+    kind: "inline" | "terminal",
+    persistent = true,
+  ): PtyProcess {
+    // Recorded before the spawn rather than after it, so a shell that throws
+    // on the way up (shellRefusal below) leaves no entry claiming it is alive
+    // under these params. A spawn that succeeds is the next statement either
+    // way.
+    if (persistent) {
+      const born = spawnKeys.get(sessionId) ?? new Map<string, { host: string; key: string }>();
+      born.set(kind === "terminal" ? "terminal" : `inline:${host}`, {
+        host,
+        key: spawnKeyOf(sessionParams.get(sessionId), host),
+      });
+      spawnKeys.set(sessionId, born);
+      // This shell is current by definition, so the note may have stopped
+      // being stale. Deferred, because the caller has not put the shell in
+      // `terms` or in the pool yet, and staleness is read off those.
+      queueMicrotask(() => refreshStale(sessionId));
+    }
     if (host !== LOCAL_HOST) {
       const remote = buildRemoteSpawn(host, kind, sessionParams.get(sessionId), (msg) =>
         console.warn("[session]", msg),
@@ -536,7 +586,10 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
   // sliced per block. inlinePool.ts owns the policy: a persistent shell per
   // note, spawned on its first runBlock, so cwd and env carry across blocks,
   // plus an ephemeral overflow shell for each additional concurrent run.
-  const inlinePool = new InlinePool((sessionId, host) => spawnShell(sessionId, host, "inline"), NONCE);
+  const inlinePool = new InlinePool(
+    (sessionId, host, persistent) => spawnShell(sessionId, host, "inline", persistent),
+    NONCE,
+  );
 
   const terms = new Map<string, Term>();
   // Names the temp files behind interpreted blocks pasted to the terminal
@@ -568,6 +621,48 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
       wake();
     }
     return t;
+  }
+
+  // --- stale frontmatter ----------------------------------------------------
+  //
+  // Whether any of this note's live persistent shells was born under params the
+  // note no longer says. That is the whole condition behind the hint the view
+  // draws on the frontmatter block: something you edited is not what is
+  // running, and Restart Note Shell is what applies it.
+  //
+  // Read off the shells rather than remembered as a flag, so nothing has to
+  // notice a shell dying to clear it. A note whose only shell ran `exit` has no
+  // live shell to be stale, and answers false the moment the drain loop reaps
+  // it.
+  //
+  // The comparison is against `sessionParams`, which is the note's last SAVED
+  // frontmatter (the view sends it on autosave, mainview/notes/store.ts). So a
+  // freshly typed `cwd:` raises the hint when the save lands, up to half a
+  // second later. That is the right lag rather than a tolerated one: until the
+  // save, no shell anywhere is out of step with a file on disk.
+  function staleFor(sessionId: string): boolean {
+    const born = spawnKeys.get(sessionId);
+    if (!born) return false;
+    const params = sessionParams.get(sessionId);
+    const live = inlinePool.primaryHosts(sessionId).map((host) => `inline:${host}`);
+    if (terms.get(sessionId)?.term.exited === false) live.push("terminal");
+    for (const at of live) {
+      const was = born.get(at);
+      if (was && was.key !== spawnKeyOf(params, was.host)) return true;
+    }
+    return false;
+  }
+
+  // Push the flag when it flips, to everyone. Staleness is a fact about the
+  // note's shells, not about whose screen the note is on, so every client with
+  // that note open draws the same hint (the stance `terminalBusy` takes in the
+  // drain loop below). A client that has never heard of the session files it
+  // under an id it does not use (mainview/editor/bridge.ts).
+  function refreshStale(sessionId: string): void {
+    const stale = staleFor(sessionId);
+    if (stale === (sentStale.get(sessionId) ?? false)) return;
+    sentStale.set(sessionId, stale);
+    push.all.sessionStale({ sessionId, stale });
   }
 
   // Write whatever the paste policy says may go now (bun/paste.ts owns which of
@@ -612,6 +707,11 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
     terms.delete(sessionId);
     sessionParams.delete(sessionId);
     sessionFacts.delete(sessionId);
+    // The tab is gone, so there is no hint to draw and nothing left to compare
+    // against. Cleared without a push: the client that would read it is the one
+    // that just closed the note.
+    spawnKeys.delete(sessionId);
+    sentStale.delete(sessionId);
   }
 
   // Watch every available root for changes made outside the app (agents in the
@@ -1228,6 +1328,9 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
       const root = notePath !== null && /\.md$/i.test(notePath) ? rootContaining(notePath) : null;
       if (root) sessionFacts.set(sessionId, { note: resolve(notePath!), workspace: root });
       else sessionFacts.delete(sessionId);
+      // The edit that got here is the one that can strand a live shell, so this
+      // is where the hint is raised (and lowered again by an edit typed back).
+      refreshStale(sessionId);
       return { ok: true };
     },
     sessionRestart: ({ sessionId }) => {
@@ -1235,6 +1338,11 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
       // keep the params, and lazy respawn does the rest. The pool closes out
       // open runs through the same event path the drain loop uses.
       inlinePool.restartSession(sessionId, sendRunEvent);
+      // What the hint asks for. The shells are gone, so nothing is out of step
+      // any more, and the hint clears without waiting for the respawn it
+      // promises (which is lazy: the next run or drawer visit).
+      spawnKeys.delete(sessionId);
+      refreshStale(sessionId);
       wake();
       const t = terms.get(sessionId);
       if (t) {
@@ -1447,6 +1555,13 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
         terms.delete(sessionId);
       }
     }
+
+    // A shell can also die on its own: a block ran `exit`, or ssh dropped. The
+    // note then has nothing left running under old params, and the hint has to
+    // come down. Only the sessions currently showing one are rechecked, and
+    // only a death can change their answer, so this costs nothing on the
+    // ordinary tick where the map is empty.
+    for (const [sessionId, stale] of sentStale) if (stale) refreshStale(sessionId);
 
     if (awake) lastBusyAt = now;
     pace(now - lastBusyAt < DRAIN_SETTLE_MS ? DRAIN_FAST_MS : DRAIN_IDLE_MS);

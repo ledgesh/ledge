@@ -267,3 +267,131 @@ test("profile fields copy and paste through the clipboard bridge, mask notwithst
   await expect(valueField).toHaveValue("");
   expect(await page.evaluate(() => window.__harness.clipboard())).toBe("TOKEN");
 });
+
+// The stale-params hint on the closing fence (editor/frontmatter.ts).
+//
+// Params apply at spawn and never to a live shell (architecture.md §6a), and
+// the hint is the only thing that says so where the edit is made. Bun decides
+// when a note is stale, from shells this harness does not have, so the push is
+// simulated (window.__harness.setStale) and what is tested here is the half
+// the view owns: that the button appears on the right line, runs the restart,
+// and does not eat the caret on its way past.
+const hint = (page: Page) => page.locator("button.ledge-fm-stale");
+
+// The docId of the note the drawer just attached, which is the sessionId the
+// stale push is addressed to.
+const sessionOf = async (page: Page) =>
+  page.evaluate(() => {
+    const seen = window.__harness.termAttaches();
+    return seen[seen.length - 1]!.sessionId;
+  });
+
+test("the hint appears on the frontmatter block and restarts the note's shells", async ({ page }) => {
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+ArrowUp");
+  for (const line of ["---", "cwd: ~/Projects/a", "---", "# Stale Note"]) {
+    await page.keyboard.type(line);
+    await page.keyboard.press("Enter");
+  }
+  // Nothing is running yet, so nothing is out of step and the block says
+  // nothing. A hint on every frontmatter block would be noise.
+  await expect(hint(page)).toHaveCount(0);
+
+  // The drawer gives the note a shell, and names the session the push goes
+  // to. Any persistent shell would do; the drawer is the one a spec can open
+  // without a runnable block.
+  await page.getByTitle("Toggle Terminal", { exact: false }).click();
+  await expect(page.locator(".xterm")).toBeVisible();
+  await expect.poll(async () => (await page.evaluate(() => window.__harness.termAttaches())).length).toBeGreaterThan(0);
+  const sessionId = await sessionOf(page);
+
+  await page.evaluate((sid) => window.__harness.setStale(sid, true), sessionId);
+  await expect(hint(page)).toBeVisible();
+  // It wears the command's own title, so the palette and the block name the
+  // same verb (interactions.md, the registry is the single definition), plus
+  // the reason it is there: the verb alone does not say why an edit that looks
+  // applied is not.
+  await expect(hint(page)).toHaveText(/Restart Note Shell to apply changes/);
+  // A control, and it says so. CodeMirror puts widgets outside the editing
+  // context, which is what lets this one take a pointer cursor where the
+  // ⌘-clickable profile name in the same block cannot.
+  await expect(hint(page)).toHaveCSS("cursor", "pointer");
+  expect(await hint(page).evaluate((el) => el.closest("[contenteditable]")?.getAttribute("contenteditable"))).toBe(
+    "false",
+  );
+  // On the closing fence, at the foot of the block: the hint is about
+  // everything above it, not about any one line.
+  await expect(page.locator(".cm-line.ledge-fm-fence").last().locator("button.ledge-fm-stale")).toHaveCount(1);
+
+  await hint(page).click();
+  await expect.poll(() => page.evaluate(() => window.__harness.shellRestarts())).toEqual([sessionId]);
+
+  // Bun answers the restart by clearing the flag; the block stops asking.
+  await page.evaluate((sid) => window.__harness.setStale(sid, false), sessionId);
+  await expect(hint(page)).toHaveCount(0);
+});
+
+test("the hint is a button, not text: clicking it does not move the caret into the block", async ({ page }) => {
+  // The block stays ordinary editable text, so a click that landed as a caret
+  // move would put the cursor in the frontmatter every time the hint is used.
+  await page.keyboard.press("Meta+n");
+  await page.keyboard.press("Meta+ArrowUp");
+  for (const line of ["---", "cwd: ~/Projects/a", "---", "# Caret Note"]) {
+    await page.keyboard.type(line);
+    await page.keyboard.press("Enter");
+  }
+  await page.getByTitle("Toggle Terminal", { exact: false }).click();
+  await expect(page.locator(".xterm")).toBeVisible();
+  await expect.poll(async () => (await page.evaluate(() => window.__harness.termAttaches())).length).toBeGreaterThan(0);
+  const sessionId = await sessionOf(page);
+  await page.evaluate((sid) => window.__harness.setStale(sid, true), sessionId);
+  await expect(hint(page)).toBeVisible();
+
+  // Put the caret somewhere known, below the block, and check it is still
+  // there after the click.
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("Meta+ArrowDown");
+  const before = await page.evaluate(() => document.querySelector(".cm-content")?.parentElement?.scrollTop ?? 0);
+  await hint(page).click();
+  await expect.poll(() => page.evaluate(() => window.__harness.shellRestarts().length)).toBe(1);
+  // The selection never entered the block: its head is still past the closing
+  // fence, where ⌘↓ left it.
+  const inBlock = await page.evaluate(() => {
+    const sel = window.getSelection();
+    const line = sel?.anchorNode?.parentElement?.closest(".cm-line");
+    return line?.classList.contains("ledge-fm") ?? false;
+  });
+  expect(inBlock).toBe(false);
+  expect(before).toBeGreaterThanOrEqual(0);
+});
+
+test("the hint belongs to its own note, not to whichever tab is showing", async ({ page }) => {
+  // Staleness is per note. A second tab must not inherit the first one's hint,
+  // or the button would offer to restart shells that are current.
+  const note = async (title: string, cwd: string) => {
+    await page.keyboard.press("Meta+n");
+    await page.keyboard.press("Meta+ArrowUp");
+    for (const line of ["---", `cwd: ${cwd}`, "---", `# ${title}`]) {
+      await page.keyboard.type(line);
+      await page.keyboard.press("Enter");
+    }
+    await expect(page.locator("[data-tab]", { hasText: title })).toBeVisible();
+  };
+  await note("First Note", "~/Projects/a");
+  await note("Second Note", "~/Projects/b");
+
+  // Back to the first, and give it a shell to be out of step with.
+  await page.locator("[data-tab]", { hasText: "First Note" }).click();
+  await page.getByTitle("Toggle Terminal", { exact: false }).click();
+  await expect(page.locator(".xterm")).toBeVisible();
+  await expect.poll(async () => (await page.evaluate(() => window.__harness.termAttaches())).length).toBeGreaterThan(0);
+  const first = await sessionOf(page);
+  await page.evaluate((sid) => window.__harness.setStale(sid, true), first);
+  await expect(hint(page)).toBeVisible();
+
+  // The other note's block says nothing: its own shells, if it has any, are
+  // running what it says.
+  await page.locator("[data-tab]", { hasText: "Second Note" }).click();
+  await expect(page.locator(".cm-line.ledge-fm", { hasText: "Projects/b" })).toBeVisible();
+  await expect(hint(page)).toHaveCount(0);
+});

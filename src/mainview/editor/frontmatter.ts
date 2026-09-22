@@ -17,7 +17,21 @@
 // advisory (architecture.md §6a): it blocks no keystroke, no save, and no
 // spawn. A half-typed line is wrong until it is finished, so the message
 // stays quiet enough to write through.
-import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
+//
+// The closing fence carries the other half of that report: whether what the
+// block says is what the note's shells are running. Params apply at spawn and
+// never to a live shell (architecture.md §6a, restart-applies), which until
+// this hint was a rule with no surface. An edited `cwd:` looked ignored, and
+// the way to apply it was a palette command you had to already know about. Bun
+// says when the two disagree (rpc-schema `sessionStale`) and the hint is a
+// button running the same restart, on the block the edit was made in.
+import {
+  StateEffect,
+  StateField,
+  type EditorState,
+  type Extension,
+  type Range,
+} from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -33,7 +47,8 @@ import {
   unbracket,
   unquote,
 } from "../../shared/frontmatter";
-import { editProfile, openTag } from "./bridge";
+import { editProfile, isSessionStale, onSessionStaleChange, openTag, restartShell } from "./bridge";
+import { titleOf } from "../commands/keys";
 import { textPosAtCoords } from "./clickPos";
 import { sessionIdFacet } from "./session";
 
@@ -196,6 +211,73 @@ class ProblemWidget extends WidgetType {
   }
 }
 
+// The command's own glyph (registry.ts gives session.restart `RefreshCw`),
+// drawn as markup because this widget is plain DOM rather than React. Same
+// convention as the block controls' icons (blocks.ts): a 16 viewBox stroked in
+// currentColor. Not imported from there, which would make the two modules
+// circular, since blocks.ts already reads this one.
+const RESTART_ICON =
+  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/><path d="M13.6 2.3v3.2h-3.2"/></svg>';
+
+/**
+ * The stale-params hint, drawn at the end of the closing fence.
+ *
+ * A button rather than an annotation, unlike ProblemWidget above: a refused
+ * line is fixed by typing, and this one is fixed by a verb the person has no
+ * other way to reach from here. `ignoreEvent` therefore returns false, and the
+ * click runs the same edge as the "Restart Note Shell" command, whose title it
+ * borrows so the two surfaces cannot drift (interactions.md, the registry is
+ * the single definition).
+ *
+ * **It says why, not just what.** The verb's name answers "what will this do"
+ * and leaves "why is this here" to the reader, who has just typed a line that
+ * looks like it took. So the label carries the purpose clause and the tooltip
+ * carries the mechanism. There is no chord to show beside them
+ * (interactions.md §2: this verb is palette and menu only), and a label naming
+ * a key that does not exist would be worse than naming none.
+ *
+ * At the closing fence because that is the foot of the block: the hint is about
+ * everything above it, not about any one line, and the lines above it are the
+ * ones being edited.
+ */
+class StaleWidget extends WidgetType {
+  constructor(readonly docId: string) {
+    super();
+  }
+  eq(other: StaleWidget) {
+    return other.docId === this.docId;
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement("button");
+    el.className = "ledge-fm-stale";
+    el.type = "button";
+    el.innerHTML = RESTART_ICON;
+    // Appended rather than folded into innerHTML: the label is the only part
+    // of this element built from data, and appending it as a text node keeps
+    // it from ever being read as markup.
+    el.append(`${titleOf("session.restart")} to apply changes`);
+    el.title =
+      "This note's shells are still running the frontmatter they started with. " +
+      "Restarting them spawns fresh ones with what the block says now.";
+    el.addEventListener("mousedown", (e) => {
+      // The editor takes a mousedown as a caret move and would steal the click
+      // before it became one.
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      restartShell(this.docId);
+    });
+    return el;
+  }
+  ignoreEvent() {
+    return false;
+  }
+}
+
 function build(state: EditorState): DecorationSet {
   const head = state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length));
   const span = frontmatterLineSpan(head);
@@ -232,12 +314,27 @@ function build(state: EditorState): DecorationSet {
       }
     }
   }
+  const docId = state.facet(sessionIdFacet);
+  if (isSessionStale(docId)) {
+    ranges.push(
+      Decoration.widget({ widget: new StaleWidget(docId), side: 1 }).range(
+        state.doc.line(span.last).to,
+      ),
+    );
+  }
   return Decoration.set(ranges, true);
 }
 
+// Staleness changed for some note, so every open block has to be redrawn
+// against it. An effect rather than a second decoration source: the widget
+// belongs in the block's own set, beside the problems it sits under, and a
+// field rebuilds only on the transactions it is told about.
+const staleChanged = StateEffect.define<null>();
+
 const field = StateField.define<DecorationSet>({
   create: (state) => build(state),
-  update: (deco, tr) => (tr.docChanged ? build(tr.state) : deco),
+  update: (deco, tr) =>
+    tr.docChanged || tr.effects.some((e) => e.is(staleChanged)) ? build(tr.state) : deco,
   provide: (f) => EditorView.decorations.from(f),
 });
 
@@ -304,6 +401,23 @@ const metaHeld = ViewPlugin.fromClass(
   },
 );
 
+// Turns the bridge's stale set into a transaction this view can rebuild on.
+// Dispatching straight from the sink is safe because the sink is driven by an
+// arriving push (mainview/boot.tsx), never from inside an editor update.
+const staleWatcher = ViewPlugin.fromClass(
+  class {
+    private readonly off: () => void;
+    constructor(readonly view: EditorView) {
+      this.off = onSessionStaleChange(() => {
+        view.dispatch({ effects: staleChanged.of(null) });
+      });
+    }
+    destroy() {
+      this.off();
+    }
+  },
+);
+
 export function ledgeFrontmatter(): Extension {
-  return [field, clickToEdit, metaHeld];
+  return [field, clickToEdit, metaHeld, staleWatcher];
 }

@@ -6,6 +6,7 @@ import {
   resolveSpawn,
   shellCaveat,
   shellRefusal,
+  spawnKeyOf,
   stampSessionFacts,
   type SpawnDeps,
 } from "./spawnParams";
@@ -372,5 +373,64 @@ describe("stampSessionFacts", () => {
     stampSessionFacts(env, null);
     expect("LEDGE_NOTE" in env).toBe(false);
     expect("LEDGE_WORKSPACE" in env).toBe(false);
+  });
+});
+
+// The key behind the stale-frontmatter hint (rpc-schema `sessionStale`). What
+// it must cover is the difference a restart would make, and what it must
+// ignore is every other reason a note's frontmatter changes, since each of
+// those would put a "restart to apply" button on a block where restarting
+// applies nothing.
+describe("spawnKeyOf", () => {
+  test("the spawn-feeding keys each move it", () => {
+    const base = spawnKeyOf(params({}));
+    expect(spawnKeyOf(params({ cwd: "~/Projects/a" }))).not.toBe(base);
+    expect(spawnKeyOf(params({ profile: "work" }))).not.toBe(base);
+    expect(spawnKeyOf(params({ envFile: "./.env" }))).not.toBe(base);
+    expect(spawnKeyOf(params({ env: { A: "1" } }))).not.toBe(base);
+  });
+
+  test("one cwd edit is one key change", () => {
+    expect(spawnKeyOf(params({ cwd: "/a" }))).not.toBe(spawnKeyOf(params({ cwd: "/b" })));
+    expect(spawnKeyOf(params({ cwd: "/a" }))).toBe(spawnKeyOf(params({ cwd: "/a" })));
+  });
+
+  test("the keys that never feed a spawn leave it alone", () => {
+    // Every one of these is applied the moment it is typed, and all of them
+    // ride in NoteParams because the block has one parser. Favoriting a note
+    // rewrites its frontmatter, so this is the case that would misfire most.
+    const base = spawnKeyOf(params({}));
+    expect(spawnKeyOf(params({ favorite: true }))).toBe(base);
+    expect(spawnKeyOf(params({ tags: ["a", "b"] }))).toBe(base);
+    expect(spawnKeyOf(params({ template: "daily" }))).toBe(base);
+    expect(spawnKeyOf(params({ confirm: true }))).toBe(base);
+    expect(spawnKeyOf(params({ locked: "v1:abc" }))).toBe(base);
+  });
+
+  test("hosts are left out: a new host spawns its own shell", () => {
+    expect(spawnKeyOf(params({ hosts: ["web1"] }))).toBe(spawnKeyOf(params({})));
+  });
+
+  test("reordering env lines is not a change", () => {
+    expect(spawnKeyOf(params({ env: { B: "2", A: "1" } }))).toBe(
+      spawnKeyOf(params({ env: { A: "1", B: "2" } })),
+    );
+  });
+
+  test("a remote shell ignores the two keys that never leave this machine", () => {
+    // buildRemoteSpawn warns that `profile:` and `envFile:` are local-only, so
+    // changing either changes nothing about a shell on web1, and asking for a
+    // restart would respawn the identical shell.
+    const before = spawnKeyOf(params({ cwd: "/srv" }), "web1");
+    expect(spawnKeyOf(params({ cwd: "/srv", profile: "work" }), "web1")).toBe(before);
+    expect(spawnKeyOf(params({ cwd: "/srv", envFile: "./.env" }), "web1")).toBe(before);
+    // What does travel down the ssh command still moves it.
+    expect(spawnKeyOf(params({ cwd: "/other" }), "web1")).not.toBe(before);
+    expect(spawnKeyOf(params({ cwd: "/srv", env: { A: "1" } }), "web1")).not.toBe(before);
+  });
+
+  test("a note that declares nothing keys the same as a session with no params", () => {
+    // The seeding the view relies on: a frontmatterless note is not stale.
+    expect(spawnKeyOf(undefined)).toBe(spawnKeyOf(params({})));
   });
 });

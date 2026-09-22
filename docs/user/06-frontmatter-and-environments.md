@@ -46,7 +46,13 @@ Three keys feed the environment, layered in this order, with later layers overri
 
 Frontmatter is read when a shell spawns, and a note's running shells keep the settings they started with.
 
-After editing the block, run "Restart Note Shell" from the command palette (⇧⌘P). It kills the note's shells, and the next run or drawer visit respawns them with the current frontmatter. Use the same command when an experiment leaves a shell in a strange state.
+So editing `cwd:` does not move a shell that is already running. A block that printed one directory keeps printing it until the note's shells are replaced.
+
+The block says when that has happened. Edit a key that feeds a shell while the note has one running, and a **Restart Note Shell** button appears at the end of the block. Pressing it kills the note's shells; the next run or drawer visit spawns them with the frontmatter as it now reads.
+
+The same command is in the palette (⇧⌘P) and the Note menu. Use it when an experiment leaves a shell in a strange state, too.
+
+The button is about the four keys a shell is spawned with: `cwd`, `profile`, `envFile`, and `env`. The rest of the block applies as you type it, so tagging or favoriting a note never raises it. Typing the old value back takes it down again, and so does the shell exiting on its own.
 
 ## Every key
 

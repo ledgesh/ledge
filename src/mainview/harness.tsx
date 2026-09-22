@@ -20,7 +20,13 @@ import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { knownHostsHost, SERVE_COMMAND, validatePassword } from "../shared/connections";
 import type { ConnectionInfo } from "../shared/rpc-schema";
-import { configureBridge, dispatchRunEvent, dispatchRunLink, reconcileRuns } from "./editor/bridge";
+import {
+  configureBridge,
+  dispatchRunEvent,
+  dispatchRunLink,
+  reconcileRuns,
+  setSessionStale,
+} from "./editor/bridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
 import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
@@ -987,6 +993,9 @@ const termResizes: { sessionId: string; cols: number; rows: number; afterAttach:
 // that wants one of the other two answers sets it before dropping the wire
 // (window.__harness.shellClaim).
 const termClaims: string[] = [];
+// Sessions a restart was asked for, in order (the hint's button, and the
+// "Restart Note Shell" command).
+const termRestarts: string[] = [];
 let claimAnswer: TerminalClaim = { state: "attached", dataB64: "", host: "local" };
 configureTerminal({
   sendInput: (sessionId, dataB64) => {
@@ -1009,7 +1018,12 @@ configureTerminal({
     return claimAnswer;
   },
   closeSession: () => {},
-  restartSession: () => {},
+  restartSession: (sessionId) => {
+    // Recorded rather than acted on: the shells here are inert, so what a spec
+    // can check is that the verb went out. The stale hint's button and the
+    // palette command both land here.
+    termRestarts.push(sessionId);
+  },
 });
 
 // In-memory layout file, like the clipboard below: saves are recorded, and a
@@ -1416,6 +1430,13 @@ declare global {
       // object for the same reason. `by` is that client's id, which the notice
       // turns into a name through the presence list below.
       terminalTaken: (sessionId: string, by?: string) => void;
+      // Every session a restart went out for, in order.
+      shellRestarts: () => string[];
+      // Simulate Bun's sessionStale push: this note's live shells were born
+      // with frontmatter it no longer says. Here for terminalTaken's reason,
+      // and more so: the real flag is computed from shells that this harness
+      // does not have, since its ptys are inert.
+      setStale: (sessionId: string, stale: boolean) => void;
       // Simulate the presence push: who else is connected to this server
       // (remote.md §7). Here for the same reason as the one above. The event is
       // another device arriving or leaving, which nothing in this page can do.
@@ -1523,6 +1544,8 @@ window.__harness = {
     runsStillRunning = [...ids];
   },
   shellClaims: () => [...termClaims],
+  shellRestarts: () => [...termRestarts],
+  setStale: (sessionId, stale) => setSessionStale(sessionId, stale),
   shellClaim: (claim) => {
     claimAnswer = claim;
   },

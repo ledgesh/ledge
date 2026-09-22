@@ -1154,6 +1154,17 @@ export type LedgeRPC = {
       // than run, and without this the queue is invisible and the run button
       // shows the wrong state.
       terminalBusy: { sessionId: string; busy: boolean };
+      // Whether any of this note's live shells was born with frontmatter the
+      // note no longer says, so a "Restart Note Shell" would change something
+      // (bun/server.ts staleFor). Params are read at spawn and never applied to
+      // a running shell (sessionConfigure above), and before this push nothing
+      // on screen said so: an edited `cwd:` simply did not take, and the app
+      // looked broken rather than restart-applied. The editor draws it as a
+      // hint on the frontmatter block, which is where the edit was made.
+      //
+      // Pushed to everyone, like `terminalBusy`: it is a fact about the note's
+      // shells rather than about one client's drawer.
+      sessionStale: { sessionId: string; stale: boolean };
       // A note's terminal shell exited on its own (the user typed `exit`). The
       // Bun side has already torn the shell down, and the view closes the
       // drawer if it is showing that note. Reopening the drawer spawns a fresh

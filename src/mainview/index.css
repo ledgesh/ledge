@@ -408,6 +408,52 @@ body {
   -webkit-user-select: none;
 }
 
+/* The stale-params hint on the closing fence (editor/frontmatter.ts): the
+   note's shells are running with frontmatter the block no longer says, and
+   this button restarts them.
+
+   Drawn in the link color on a tint of it, not in the block's muted gray. The
+   first version was muted and italic like the refusal messages beside it, and
+   it read as one more piece of dimmed frontmatter: the one element in the
+   block that is a control disappeared into the text around it. The refusals
+   are annotations about a line, and staying quiet is right for them; this is
+   the answer to "why did my edit not take", and it has to be found.
+
+   Still small. It sits on one dimmed line rather than in a card's corner, so
+   it takes the block's own font size and a chip's padding, and it is the only
+   thing in the block wearing a color.
+
+   Three classes for the specificity `.cm-line.ledge-fm span` forces, plus
+   `button`, which carries a UA font and color of its own. */
+.cm-line.ledge-fm button.ledge-fm-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 1.5ch;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--link) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--link) 12%, transparent);
+  color: var(--link);
+  font: inherit;
+  line-height: 1.5;
+  /* The hand is available here, unlike on the ⌘-clickable profile name above:
+     CodeMirror sets contenteditable=false on a widget's own DOM, so this
+     button is not inside the editing context WebKit pins the I-beam in. */
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cm-line.ledge-fm button.ledge-fm-stale:hover {
+  border-color: var(--link);
+  background: color-mix(in srgb, var(--link) 22%, transparent);
+}
+/* The glyph is decorative: the label beside it carries the verb. */
+.cm-line.ledge-fm button.ledge-fm-stale svg {
+  flex: none;
+  opacity: 0.9;
+}
+
 /* --- The stacking ladder ----------------------------------------------------
    Two layers in this app are parented to <body> rather than to the pane whose
    editor they cover (.ledge-linklayer here and .ledge-overlay below, both for

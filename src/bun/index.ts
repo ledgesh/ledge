@@ -656,6 +656,7 @@ async function buildWindow(want: string, frame?: Rect, docs?: { page: string }):
       terminalBusy: (p) => rpc?.send.terminalBusy(p),
       terminalExit: (p) => rpc?.send.terminalExit(p),
       terminalDetached: (p) => rpc?.send.terminalDetached(p),
+      sessionStale: (p) => rpc?.send.sessionStale(p),
       presence: (p) => rpc?.send.presence(p),
       notesChanged: (p) => rpc?.send.notesChanged(p),
       openExternal: (p) => rpc?.send.openExternal(p),

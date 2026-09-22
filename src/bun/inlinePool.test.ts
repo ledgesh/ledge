@@ -60,11 +60,16 @@ class FakeShell implements InlineShellIO {
 
 function makePool() {
   const shells: FakeShell[] = [];
+  // What each spawn was asked for. server.ts reads `persistent` to decide
+  // whether to record the shell's birth params (the stale-frontmatter hint),
+  // so the pool has to pass it truthfully.
+  const spawns: Array<{ sessionId: string; host: string; persistent: boolean }> = [];
   const clock = { t: 1_000_000 };
   const pool = new InlinePool(
-    () => {
+    (sessionId, host, persistent) => {
       const s = new FakeShell();
       shells.push(s);
+      spawns.push({ sessionId, host, persistent });
       return s;
     },
     NONCE,
@@ -75,7 +80,7 @@ function makePool() {
     pool.drain((ev) => events.push(ev));
     return events;
   };
-  return { pool, shells, drained, clock };
+  return { pool, shells, spawns, drained, clock };
 }
 
 const textOf = (events: InlineEvent[]): string =>
@@ -883,5 +888,70 @@ describe("installing the hook that ends a block", () => {
     expect(shells[0].closed).toBe(false);
     shells[0].emit(ended("a", 130));
     expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
+  });
+});
+
+// What the pool tells server.ts about the shells behind the stale-frontmatter
+// hint: which of them can still be holding params the note has since edited,
+// and which are spawned fresh per run and so never can.
+describe("which shells outlive their run", () => {
+  test("the note's own shell is persistent, an overflow shell is not", () => {
+    const { pool, spawns } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    expect(spawns).toEqual([{ sessionId: "note", host: "local", persistent: true }]);
+    // A second run while the first is still going cannot have the note's
+    // shell, so it gets one of its own, spawned for this run alone.
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
+    expect(spawns[1]).toEqual({ sessionId: "note", host: "local", persistent: false });
+  });
+
+  test("each host's first run spawns that host's persistent shell", () => {
+    const { pool, spawns } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC, host: "web1" });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC, host: "db2" });
+    expect(spawns).toEqual([
+      { sessionId: "note", host: "web1", persistent: true },
+      { sessionId: "note", host: "db2", persistent: true },
+    ]);
+  });
+});
+
+describe("primaryHosts", () => {
+  test("empty for a note that has never run anything", () => {
+    const { pool } = makePool();
+    expect(pool.primaryHosts("note")).toEqual([]);
+  });
+
+  test("names every host the note has a live shell on", () => {
+    const { pool } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC, host: "web1" });
+    expect(pool.primaryHosts("note").sort()).toEqual(["local", "web1"]);
+  });
+
+  test("overflow shells are not in it", () => {
+    const { pool } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
+    expect(pool.primaryHosts("note")).toEqual(["local"]);
+  });
+
+  test("a shell that died drops out before the drain loop reaps it", () => {
+    // The gap this closes: a block ran `exit`, and the note is asked whether
+    // its frontmatter is stale before the next tick notices. Nothing is
+    // running under the old params, so the answer has to be no already.
+    const { pool, shells } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    shells[0]!.exited = true;
+    expect(pool.primaryHosts("note")).toEqual([]);
+  });
+
+  test("a restarted note has none until its next run", () => {
+    const { pool } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.restartSession("note", () => {});
+    expect(pool.primaryHosts("note")).toEqual([]);
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
+    expect(pool.primaryHosts("note")).toEqual(["local"]);
   });
 });

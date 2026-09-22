@@ -170,10 +170,14 @@ export class InlinePool {
   // `spawn` takes the session id and host so the shell starts with that note's
   // params (cwd and env from its frontmatter) on the machine the run named.
   // The pool decides when a shell spawns, and only the caller's spawn can act
-  // on whose note it is and where it lives. `now` is injectable so the silence
-  // rule is testable without waiting on a clock; nothing else here reads one.
+  // on whose note it is and where it lives. `persistent` separates the note's
+  // own shell from an overflow one: only the first outlives its run, so only
+  // the first can end up holding frontmatter the note has since edited, which
+  // is what server.ts records it to report (`sessionStale`). `now` is
+  // injectable so the silence rule is testable without waiting on a clock;
+  // nothing else here reads one.
   constructor(
-    private readonly spawn: (sessionId: string, host: string) => InlineShellIO,
+    private readonly spawn: (sessionId: string, host: string, persistent: boolean) => InlineShellIO,
     private readonly nonce: string,
     private readonly now: () => number = Date.now,
   ) {}
@@ -195,11 +199,11 @@ export class InlinePool {
     }
     let slot = session.primaries.get(host);
     if (!slot) {
-      slot = this.newSlot(sessionId, host);
+      slot = this.newSlot(sessionId, host, true);
       session.primaries.set(host, slot);
     }
     if (slot.activeRun !== null) {
-      slot = this.newSlot(sessionId, host);
+      slot = this.newSlot(sessionId, host, false);
       session.overflow.set(id, slot);
     }
     slot.activeRun = id;
@@ -403,6 +407,27 @@ export class InlinePool {
     }
   }
 
+  /**
+   * The hosts this note has a live persistent shell on.
+   *
+   * The pool's answer to "would the next run reuse a shell that already
+   * exists?", which is the question behind the stale-frontmatter hint
+   * (server.ts `sessionStale`). Overflow shells are left out because each one
+   * is spawned for its own run and reads the params current at that moment, so
+   * none of them can be holding an older answer than the note's.
+   *
+   * A shell whose block ran `exit` is dropped by the drain loop, not here, so
+   * `exited` is checked rather than assumed: this can be asked in the gap
+   * between the shell dying and the next tick noticing.
+   */
+  primaryHosts(sessionId: string): string[] {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+    const out: string[] = [];
+    for (const [host, slot] of session.primaries) if (!slot.shell.exited) out.push(host);
+    return out;
+  }
+
   /** Tear down all of a note's inline shells; its tab closed. */
   closeSession(sessionId: string): void {
     const session = this.sessions.get(sessionId);
@@ -481,8 +506,8 @@ export class InlinePool {
     if (out.length > 0) emit({ type: "output", blockId: slot.activeRun, data: out }, slot.client);
   }
 
-  private newSlot(sessionId: string, host: string): Slot {
-    const shell = this.spawn(sessionId, host);
+  private newSlot(sessionId: string, host: string, persistent: boolean): Slot {
+    const shell = this.spawn(sessionId, host, persistent);
     // Nothing is written here. The end-marker hook goes out in the same write
     // as the first block instead (see run): a hook and a block sent separately
     // can arrive separately, and a shell that got the block without the hook

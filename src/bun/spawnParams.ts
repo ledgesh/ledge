@@ -11,7 +11,7 @@
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import { isEnvName, isProfileName, type NoteParams } from "../shared/frontmatter";
+import { isEnvName, isProfileName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
 import { parseDotenv } from "../shared/dotenv";
 
 // Profiles live outside the notes root, because ~/.ledge is the folder people
@@ -281,4 +281,45 @@ function mergeDotenv(env: Record<string, string>, path: string, label: string, d
   const { vars, problems } = parseDotenv(text);
   for (const p of problems) deps.warn(`${label}: ${p}`);
   Object.assign(env, vars);
+}
+
+// --- what a live shell cannot pick up ----------------------------------------
+
+/**
+ * A key over the params that feed `host`'s spawn, for deciding whether a live
+ * shell was born with the frontmatter the note now says (server.ts, the
+ * `sessionStale` push).
+ *
+ * Restart-applies (architecture.md §6a) means an edited `cwd:` reaches the
+ * shell only at its next birth, and nothing on screen said so. The key is what
+ * makes "said so" cheap: record it when a shell spawns, compare it with the
+ * note's current one, and a difference is exactly the case where a restart
+ * would change something.
+ *
+ * It covers the spawn-feeding keys and no others. `tags:`, `template:`,
+ * `confirm:`, `favorite:` and `locked:` ride in NoteParams because the block
+ * has one parser (shared/frontmatter.ts), and every one of them already
+ * applies the moment it is typed. A key over the whole object would raise the
+ * hint when a note is favorited.
+ *
+ * `hosts` is left out for the opposite reason: shells are keyed per (note,
+ * host) in inlinePool.ts, so an edited `host:` line sends the next run to a
+ * machine whose shell is spawned there and then. The live shell on the old
+ * host is unused rather than stale, and a restart it does not need is not
+ * worth asking for.
+ *
+ * `host` is which machine this shell is on, because the two answer differently.
+ * A remote spawn carries only `cwd:` and `env:` down the ssh command, and warns
+ * that `profile:` and `envFile:` stay on this machine (bun/remoteSpawn.ts). So
+ * on a remote shell those two change nothing, and the key ignores them rather
+ * than asking for a restart that would spawn the same shell again.
+ */
+export function spawnKeyOf(params: NoteParams | undefined, host: string = LOCAL_HOST): string {
+  // Sorted, so two notes that list the same vars in a different order key the
+  // same. The block's writer reorders lines; the shell cannot tell.
+  const env = Object.keys(params?.env ?? {})
+    .sort()
+    .map((key) => [key, params!.env[key]]);
+  if (host !== LOCAL_HOST) return JSON.stringify([env, params?.cwd ?? null]);
+  return JSON.stringify([env, params?.cwd ?? null, params?.profile ?? null, params?.envFile ?? null]);
 }

@@ -162,7 +162,16 @@ describe("the schema's shape against the protocol version", () => {
   // an old server ignored would move the note to its own top level with no
   // sign. No existing payload changed. The pin moves and the version does
   // not.
-  const PINNED = { protocol: 5, shape: "9bd05ea4c515a805" };
+  // Then the stale-frontmatter hint (architecture.md §6a): sessionStale, one
+  // new push. A push is the easy direction of a new method, because nothing
+  // asks for it. An old client drops a push whose name is not in its own
+  // PUSH_MESSAGES before anything indexes a handler (shared/transport.ts
+  // validates the name against that list), and an old server never sends one,
+  // so a new client shows the hint on a server that reports staleness and
+  // shows nothing on one that does not. That silence is exactly the behavior
+  // every build had before this push existed. Nothing was retyped, made
+  // required, or narrowed. The pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "a3be627a7185731f" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));
