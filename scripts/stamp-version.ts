@@ -19,6 +19,14 @@ if (!buildDir || !version) {
   process.exit(1);
 }
 
+// The short version string is an Info.plist key, and only a Mac build has
+// one. A Linux build is a directory with a .desktop file, and its version is
+// version.json, which electrobun writes itself.
+if (process.platform !== "darwin") {
+  console.log(`[version] nothing to stamp on ${process.platform}: version.json carries ${version}`);
+  process.exit(0);
+}
+
 // postWrap names its bundle outright. postBuild does not, so the app is found
 // by extension: it is `Ledge.app` on the stable channel and `Ledge-dev.app` on
 // the dev one, and a hardcoded name would fail on whichever of the two nobody

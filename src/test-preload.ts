@@ -7,8 +7,8 @@
 // reach the real ~/.ledge no matter what it does; without it, a filesystem test
 // that ran after some other file imported notes.ts would be pointed at real
 // notes.
-import { accessSync, constants, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { accessSync, constants, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env["LEDGE_NOTES_ROOT"] = mkdtempSync(join(tmpdir(), "ledge-test-"));
@@ -48,6 +48,21 @@ const zsh = ["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh"].find((path) => {
   }
 });
 if (zsh) process.env["SHELL"] = zsh;
+
+// A zsh with no startup files runs zsh-newuser-install instead of showing a
+// prompt (Ubuntu ships it that way), and the tests above would then wait on a
+// prompt that never comes. ZDOTDIR points such an account at a scratch dir
+// holding an empty .zshrc, which zsh reads as "configured". An account with
+// any of the four files keeps its own.
+if (zsh) {
+  const dot = process.env["ZDOTDIR"] || homedir();
+  const configured = [".zshenv", ".zprofile", ".zshrc", ".zlogin"].some((f) => existsSync(join(dot, f)));
+  if (!configured) {
+    const scratch = mkdtempSync(join(tmpdir(), "ledge-test-zdotdir-"));
+    writeFileSync(join(scratch, ".zshrc"), "");
+    process.env["ZDOTDIR"] = scratch;
+  }
+}
 
 // And the login shell a server reads its base environment from at boot
 // (bun/loginEnv.ts): skipped, so no test runs the profile of the account

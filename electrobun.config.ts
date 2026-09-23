@@ -1,4 +1,10 @@
 import type { ElectrobunConfig } from "electrobun";
+import { nativeLibName } from "./src/bun/ptyNative";
+
+// The PTY trampolines' filename on the platform this build runs on: a dylib on
+// a Mac, a .so on Linux. Hutch builds for its host, so process.platform is the
+// target.
+const NATIVE_LIB = nativeLibName(process.platform);
 
 // Signing and notarization are on for every non-dev build (electrobun ignores
 // both for `--env=dev`). They need ELECTROBUN_DEVELOPER_ID and the notarization
@@ -37,7 +43,7 @@ export default {
   },
   build: {
     // Bun, not the 2.x default of Cottontail. The server the app starts calls
-    // into libledge_pty.dylib through bun:ffi (ptyNative.ts) and runs on
+    // into the PTY library through bun:ffi (ptyNative.ts) and runs on
     // Contents/MacOS/bun, as does the `ledge` shim against
     // serve.js (cliShim.ts), so the runtime is part of the native seam here.
     // Moving to Cottontail is a separate project rather than a config edit.
@@ -63,7 +69,7 @@ export default {
       // The PTY trampolines, beside index.js for the same reason: pty.ts finds
       // them at import.meta.dir, which reads the same in the bundle and in a
       // checkout.
-      "dist-native/libledge_pty.dylib": "bun/libledge_pty.dylib",
+      [`dist-native/${NATIVE_LIB}`]: `bun/${NATIVE_LIB}`,
     },
     // Vite owns view rebuilds and HMR, so electrobun's watcher stays off its
     // output, and off the CLI and native prebuilds for the same reason.
