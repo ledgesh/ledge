@@ -12,7 +12,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { APP_HOME } from "./workspaces";
-import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, PORT_UNSET, saveConnections, type Connection } from "./connections";
+import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, LOCAL_NAME, PORT_UNSET, saveConnections, type Connection } from "./connections";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { createConnectionStore, type Secrets } from "./connectionStore";
 import { CONNECTION_METHODS } from "../shared/wire";
@@ -281,7 +281,7 @@ describe("naming the window", () => {
   test("a window that fell back is named for the machine it landed on", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const { names } = await named({ attach: fakeAttach(new Set([LAPTOP.id])).attach });
-    expect(names).toEqual(["This Mac"]);
+    expect(names).toEqual([LOCAL_NAME]);
   });
 
   test("switching renames the window", async () => {
@@ -289,7 +289,7 @@ describe("naming the window", () => {
     const { m, names } = await named({ attach: fakeAttach().attach });
     await m.requests.connectionSelect({ id: LAPTOP.id });
     await m.requests.connectionSelect({ id: LOCAL_ID });
-    expect(names).toEqual(["This Mac", "Laptop", "This Mac"]);
+    expect(names).toEqual([LOCAL_NAME, "Laptop", LOCAL_NAME]);
   });
 
   test("a switch that did not happen renames nothing", async () => {
@@ -297,7 +297,7 @@ describe("naming the window", () => {
     const { m, names } = await named({ attach: fakeAttach(new Set([LAPTOP.id])).attach });
     await m.requests.connectionSelect({ id: LAPTOP.id });
     await m.requests.connectionSelect({ id: "nope" });
-    expect(names).toEqual(["This Mac"]);
+    expect(names).toEqual([LOCAL_NAME]);
   });
 
   // A rename is the one change `onSelect` cannot report. The window moved
@@ -333,7 +333,7 @@ describe("naming the window", () => {
       password: null,
       hostKey: null,
     });
-    expect(names).toEqual(["This Mac"]);
+    expect(names).toEqual([LOCAL_NAME]);
   });
 });
 
@@ -350,7 +350,7 @@ describe("adding and removing", () => {
       hostKey: "vps ssh-ed25519 AAAA",
     });
     expect(error).toBe("");
-    expect((await m.requests.connectionList({})).connections.map((c) => c.name)).toEqual(["This Mac", "VPS"]);
+    expect((await m.requests.connectionList({})).connections.map((c) => c.name)).toEqual([LOCAL_NAME, "VPS"]);
     expect(JSON.parse(await readFile(CONNECTIONS_PATH, "utf8")).connections).toHaveLength(1);
     expect((await m.requests.connectionSelect({ id })).ok).toBe(true);
   });

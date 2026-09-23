@@ -70,7 +70,7 @@ describe("the askpass helper on disk", () => {
   test("writes it even when the client home does not exist yet", async () => {
     await rm(CLIENT_HOME, { recursive: true, force: true });
     await ensureAskpass();
-    expect(await readFile(ASKPASS_PATH, "utf8")).toContain("find-generic-password");
+    expect(await readFile(ASKPASS_PATH, "utf8")).toBe(askpassScript());
   });
 
   // ensureAskpass writes through a temp file and a rename, like every other

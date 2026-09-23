@@ -2,7 +2,7 @@
 // its output is read. The script itself runs only against a real Mac
 // (testing.md §6), since a lookup reads the developer's own dictionary.
 import { describe, expect, test } from "bun:test";
-import { isSpellableWord, parseCheck } from "./spelling";
+import { isSpellableWord, parseCheck, parseEnchant } from "./spelling";
 
 describe("the words a lookup accepts", () => {
   test("letters, with apostrophes and hyphens inside", () => {
@@ -37,5 +37,35 @@ describe("reading the script's answer", () => {
       misspelled: true,
       guesses: ["receive"],
     });
+  });
+});
+
+// Enchant's pipe mode answers one line per word after a version banner, in
+// ispell's grammar. The Linux menu is built from that line, so a misread
+// would offer the wrong fix or none.
+describe("reading Enchant's answer", () => {
+  const banner = "@(#) International Ispell Version 3.1.20 (but really Enchant 2.3.3)\n";
+
+  test("a misspelling carries at most five guesses, in Enchant's order", () => {
+    expect(parseEnchant(`${banner}& helo 23 0: hello, helot, help, halo, hell, heal, heel\n\n`)).toEqual({
+      misspelled: true,
+      guesses: ["hello", "helot", "help", "halo", "hell"],
+    });
+  });
+
+  test("a misspelling with no guesses is still a misspelling", () => {
+    expect(parseEnchant(`${banner}# zzqxv 1\n\n`)).toEqual({ misspelled: true, guesses: [] });
+  });
+
+  test("an accepted word, in each of the three marks Enchant uses for one", () => {
+    for (const line of ["*", "+ hello", "-"]) {
+      expect(parseEnchant(`${banner}${line}\n\n`)).toEqual({ misspelled: false, guesses: [] });
+    }
+  });
+
+  test("output it cannot read, or no output, counts as a correct word", () => {
+    for (const out of [null, "", banner, "garbage\n"]) {
+      expect(parseEnchant(out)).toEqual({ misspelled: false, guesses: [] });
+    }
   });
 });

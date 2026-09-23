@@ -161,11 +161,12 @@ export function startLogging(basename?: string): void {
 // Opens the log folder rather than revealing one file. The previous session's
 // log sits beside the current one, and after a crash that is the one the user
 // needs. `open -R` on a directory selects it in its parent, one level too
-// high, so plain `open` on the directory is used.
+// high, so plain `open` on the directory is used, and `xdg-open` is the
+// same verb on a Linux desktop.
 export function revealLog(): boolean {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
-    Bun.spawn(["open", LOG_DIR]);
+    Bun.spawn([process.platform === "darwin" ? "open" : "xdg-open", LOG_DIR]);
     return true;
   } catch {
     return false;

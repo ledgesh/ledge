@@ -41,7 +41,7 @@ import { reconnectingClient, Refused, SESSION_HOLD_MS, type Duplex } from "../sh
 import { spawnDuplex } from "./transport";
 import { localServer, SERVE_ENTRY } from "./localServer";
 import { installShims, tildify } from "./cliShim";
-import { checkWord, learnWord } from "./spelling";
+import { checkWord, hasDictionary, learnWord } from "./spelling";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
 
@@ -119,8 +119,24 @@ const sharedNative: ClientNative = {
       return null;
     }
   },
-  // The Mac's dictionary, the one WebKit draws the squiggles from.
-  spelling: { check: checkWord, learn: learnWord },
+  // This machine's dictionary, the one WebKit draws the squiggles from. Left
+  // out where there is none (a Linux desktop without enchant-2), so every
+  // word answers correct and the menu shows no spelling group.
+  ...(hasDictionary() ? { spelling: { check: checkWord, learn: learnWord } } : {}),
+  // On Linux the pasteboard is read through Electrobun's GTK binding: text
+  // and images both, and the HTML flavor not at all, so a paste from a
+  // browser arrives there as plain text. A Mac keeps bun/clipboard.ts's
+  // route, which reads the HTML flavor and fixes pbcopy's text encoding.
+  ...(process.platform === "darwin"
+    ? {}
+    : {
+        clipboard: {
+          read: async () => Utils.clipboardReadText() ?? "",
+          write: async (text: string) => Utils.clipboardWriteText(text),
+          readHtml: async () => "",
+        },
+        readImage: async () => Utils.clipboardReadImage(),
+      }),
   // Insert Image…, on the machine with the screen. This one is the file
   // dialog; the phone's answer to the same verb is PHPicker (ios.md §11).
   // bun/clipboard.ts imageFromFile turns the picked file into bytes assetWrite
@@ -324,7 +340,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
       // password that is right on a server that is fine. The fault is on this
       // Mac, and this is the only place that can say so.
       if (!(await hasPassword(conn.id))) {
-        throw new Error(`no password is stored for ${conn.name} on this Mac. Edit the connection and enter it again`);
+        throw new Error(`no password is stored for ${conn.name} on this computer. Edit the connection and enter it again`);
       }
       // Written here rather than at boot, because only a password connection
       // needs it. A Mac that never uses one never grows the file, and a
@@ -458,8 +474,13 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
 // instead of routing between them.
 let focused: Win | null = null;
 
+// Only a Mac has an application menu bar in Electrobun (devkit proc/linux.md).
+// On Linux every push would log a warning and change nothing, so the bar is
+// skipped there and the view's commands live in the palette alone.
+const HAS_MENU_BAR = process.platform === "darwin";
+
 function applyMenu(win: Win): void {
-  if (win.menu) ApplicationMenu.setApplicationMenu(win.menu as ApplicationMenuItemConfig[]);
+  if (win.menu && HAS_MENU_BAR) ApplicationMenu.setApplicationMenu(win.menu as ApplicationMenuItemConfig[]);
 }
 
 /** This window's half of the client seams: the menu bar it fills while it is
@@ -536,7 +557,7 @@ function showDocs(page: string): void {
 let mainThreadReady = false;
 function workAreas(): Rect[] {
   if (!mainThreadReady) {
-    Utils.isDockIconVisible();
+    if (process.platform === "darwin") Utils.isDockIconVisible();
     mainThreadReady = true;
   }
   try {
@@ -776,7 +797,7 @@ const wanted: WindowState[] = restore.length > 0 ? restore : [{ frame: fitFrame(
 // (commands/menu.ts, pushed through menuSet). Without an application menu there
 // is no ⌘Q, so a view that fails to load would leave a window with no way out.
 // Quit and the edit roles are the whole fallback; a push replaces it wholesale.
-ApplicationMenu.setApplicationMenu([
+if (HAS_MENU_BAR) ApplicationMenu.setApplicationMenu([
   {
     label: "Ledge",
     submenu: [

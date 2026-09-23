@@ -24,7 +24,19 @@ import type { UpdateState } from "../shared/rpc-schema";
 import { openableUrl } from "../shared/links";
 import { NATIVE_METHODS, type NativeMethod, type RequestHandlers } from "../shared/wire";
 
+/** The pasteboard's text, and its HTML flavor where the shell can read one. */
+export interface TextClipboard {
+  read(): Promise<string>;
+  write(text: string): Promise<void>;
+  readHtml(): Promise<string>;
+}
+
 export interface ClientNative {
+  // The pasteboard's text, where this shell reads it some way other than
+  // bun/clipboard.ts's pbcopy and osascript: Electrobun's GTK binding on
+  // Linux (bun/index.ts). Absent on a Mac, which keeps the route that fixes
+  // pbcopy's text encoding and reads the HTML flavor.
+  clipboard?: TextClipboard;
   // The pasteboard's available flavors, or null where they cannot be read.
   // Null means "ask the pasteboard anyway" (clipboardReadRich fails open).
   clipboardFormats?(): string[] | null;
@@ -81,6 +93,9 @@ export interface ClientNative {
     install(): Promise<boolean>;
   };
 }
+
+// The desktop's own verb for a URL: `open` on a Mac, `xdg-open` on Linux.
+const OPENER = process.platform === "darwin" ? "open" : "xdg-open";
 
 const NO_UPDATES: UpdateState = { phase: "off", version: "", detail: "This app does not update itself." };
 const NO_CLI = { ok: false, message: "This app has no shell command to install." };
@@ -144,15 +159,16 @@ export function clientSeams(
   native: ClientNative,
   server: Pick<RequestHandlers, "assetWrite"> = { assetWrite: async () => ({ src: null }) },
 ): Pick<RequestHandlers, NativeMethod> {
+  const clip: TextClipboard = native.clipboard ?? { read: readClipboardText, write: writeClipboard, readHtml: readClipboardHtml };
   return {
     // Copy and paste are an RPC rather than a browser API because the webview
     // cannot reach the pasteboard. A views:// page is not a secure context, so
     // navigator.clipboard is absent there (bun/clipboard.ts).
     clipboardWrite: async ({ text }) => {
-      await writeClipboard(text);
+      await clip.write(text);
       return { ok: true };
     },
-    clipboardRead: async () => ({ text: await readClipboardText() }),
+    clipboardRead: async () => ({ text: await clip.read() }),
     // Text and the HTML flavor together, for the editor's ⌘V. The two reads
     // run concurrently because the HTML one is an osascript spawn, and
     // serializing about 100ms onto every paste is a visible delay.
@@ -163,8 +179,8 @@ export function clientSeams(
     // alone) and for a terminal selection.
     clipboardReadRich: async () => {
       const [text, html] = await Promise.all([
-        readClipboardText(),
-        wantsHtml(native.clipboardFormats?.() ?? null) ? readClipboardHtml() : Promise.resolve(""),
+        clip.read(),
+        wantsHtml(native.clipboardFormats?.() ?? null) ? clip.readHtml() : Promise.resolve(""),
       ]);
       return { text, html };
     },
@@ -245,15 +261,16 @@ export function clientSeams(
     updateCheck: async () => native.updates?.check() ?? NO_UPDATES,
     updateInstall: async () => ({ ok: (await native.updates?.install()) ?? false }),
     // openableUrl is the guard, not a convenience. `open` treats a non-URL
-    // argument as a file path and launches .app bundles, so only the
-    // allowlisted schemes pass (shared/links.ts). The url arrives from a note,
+    // argument as a file path and launches .app bundles, and `xdg-open` runs
+    // a file with its handler the same way, so only the allowlisted schemes
+    // pass (shared/links.ts). The url arrives from a note,
     // so this is the boundary. The view's own check is styling
     // (architecture.md §2).
     linkOpen: async ({ url }) => {
       const target = openableUrl(url);
       if (!target) return { ok: false };
       try {
-        Bun.spawn(["open", target]);
+        Bun.spawn([OPENER, target]);
       } catch (err) {
         console.warn("[links] could not open", target, err);
         return { ok: false };

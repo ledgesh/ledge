@@ -17,6 +17,7 @@ import {
   loadConnections,
   LOCAL_CONNECTION,
   LOCAL_ID,
+  LOCAL_NAME,
   pinConflict,
   pinFitsHost,
   probeHostKey,
@@ -228,7 +229,7 @@ export async function createConnectionStore(deps: {
     },
 
     reviewUpdate: async ({ id, name, destination, port, keyPath, auth, password, hostKey }) => {
-      if (id === LOCAL_ID) return { conn: null, error: "This Mac is not a connection you can edit." };
+      if (id === LOCAL_ID) return { conn: null, error: `${LOCAL_NAME} is not a connection you can edit.` };
       const before = connections.find((c) => c.id === id);
       if (!before) return { conn: null, error: "There is no such connection." };
       const refusal = validateConnection({ name, destination, keyPath, port });
@@ -287,7 +288,7 @@ export async function createConnectionStore(deps: {
 
     remove: async (id) => {
       // All three refusals are about leaving the app somewhere it can work from.
-      if (id === LOCAL_ID) return { ok: false, error: "This Mac is always here; it cannot be removed." };
+      if (id === LOCAL_ID) return { ok: false, error: `${LOCAL_NAME} is always here; it cannot be removed.` };
       for (const held of inUse()) {
         if (held === id) return { ok: false, error: "Switch somewhere else before removing this connection." };
       }

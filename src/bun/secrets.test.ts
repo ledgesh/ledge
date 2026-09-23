@@ -17,6 +17,7 @@ import {
   askpassScript,
   fromHex,
   KEYCHAIN_SERVICE,
+  SECRET_TOOL_PATH,
   SECURITY_PATH,
   storeCommand,
   toHex,
@@ -108,7 +109,7 @@ describe("the store command", () => {
 });
 
 describe("the askpass helper", () => {
-  const script = askpassScript();
+  const script = askpassScript("darwin");
 
   // ssh executes this file directly, so the shebang is what lets it run.
   // Without one the exec fails, and the authentication fails with nothing to
@@ -167,5 +168,40 @@ describe("the askpass helper", () => {
   test("does not read the prompt ssh passes it", () => {
     expect(script).not.toContain("$1");
     expect(script).not.toContain("password:");
+  });
+});
+
+// The Linux helper is shorter: `secret-tool lookup` prints the stored bytes
+// and exits 1 with nothing printed when there is no item, so it is the whole
+// script after the guard. What secrets.fs.test.ts checks of the file holds
+// for both.
+describe("the askpass helper on Linux", () => {
+  const script = askpassScript("linux");
+
+  test("is a shell script that execs secret-tool by absolute path", () => {
+    expect(script.startsWith("#!/bin/sh\n")).toBe(true);
+    expect(script).toContain(`exec ${SECRET_TOOL_PATH} lookup`);
+  });
+
+  test("looks the password up by the same two attributes the store wrote", () => {
+    expect(script).toContain(`service ${KEYCHAIN_SERVICE} account "$${ASKPASS_ACCOUNT_ENV}"`);
+  });
+
+  test("exits without printing when it was not told a connection", () => {
+    expect(script).toContain(`[ -n "\${${ASKPASS_ACCOUNT_ENV}:-}" ] || exit 1`);
+  });
+
+  test("decodes nothing: the stored bytes are the password", () => {
+    expect(script).not.toContain("xxd");
+    expect(script).not.toContain("hex");
+  });
+
+  test("does not read the prompt ssh passes it", () => {
+    expect(script).not.toContain("$1");
+    expect(script).not.toContain("password:");
+  });
+
+  test("the file ensureAskpass writes is this platform's", () => {
+    expect(askpassScript()).toBe(askpassScript(process.platform));
   });
 });

@@ -50,7 +50,7 @@ export function ConnectionBar() {
       : link.state === "lost"
         ? "disconnected"
         : "";
-  const detail = state || (local ? "This Mac" : conn.destination);
+  const detail = state || (local ? conn.name : conn.destination);
   // Who else is on this machine (remote.md §7). Nothing is drawn while nobody
   // else is, which is nearly always: "1 device" would be noise in a strip that
   // must stay readable at a glance. One other device is named, since it is the

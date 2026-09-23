@@ -82,9 +82,13 @@ export interface Connection {
   lastReached: number;
 }
 
+/** What the local connection is called: the machine in front of the user,
+ * named by what it is. The view shows it as the connection's `name`. */
+export const LOCAL_NAME = process.platform === "darwin" ? "This Mac" : "This Computer";
+
 export const LOCAL_CONNECTION: Connection = Object.freeze({
   id: LOCAL_ID,
-  name: "This Mac",
+  name: LOCAL_NAME,
   destination: "",
   port: PORT_UNSET,
   keyPath: "",
