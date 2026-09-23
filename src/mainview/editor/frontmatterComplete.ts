@@ -6,6 +6,7 @@
 // outside the notes root, on the Bun side. The `profile` hint says so.
 import type { Completion, CompletionContext, CompletionResult } from "@codemirror/autocomplete";
 import { splitTagList } from "../../shared/frontmatter";
+import { keyChip } from "../commands/format";
 import { workspaceTags } from "./bridge";
 import { frontmatterLineSpan } from "./frontmatter";
 import { sessionIdFacet } from "./session";
@@ -18,17 +19,20 @@ const HEAD_BYTES = 4096;
 // accepting a key leaves the caret where the value goes. `detail` is the
 // one-line hint the popup shows beside the key. The hints carry the grammar,
 // so a writer does not have to go looking for it.
-const KEY_OPTIONS: readonly Completion[] = [
+// Built on first use rather than at load, so the details spell the chords the
+// way this client does (commands/modKey.ts).
+let keyOptions: readonly Completion[] | null = null;
+const KEY_OPTIONS = (): readonly Completion[] => (keyOptions ??= [
   { label: "cwd", apply: "cwd: ", detail: "working directory for this note's shells" },
   { label: "profile", apply: "profile: ", detail: "named secrets file, kept outside the notes" },
   { label: "envFile", apply: "envFile: ", detail: "project dotenv file, resolved against cwd" },
   { label: "env", apply: "env:\n  ", detail: "inline vars (indented NAME: value lines)" },
   { label: "host", apply: "host: ", detail: "machines blocks run on (ssh targets, or local)" },
   { label: "tags", apply: "tags: ", detail: "this note's tags (also spelled inline as #tag)" },
-  { label: "template", apply: "template: ", detail: "true joins the ⌥⌘N picker; daily seeds ⌘J" },
+  { label: "template", apply: "template: ", detail: `true joins the ${keyChip("note.fromTemplate")} picker; daily seeds ${keyChip("daily.open")}` },
   { label: "confirm", apply: "confirm: ", detail: "true makes every block here ask before it runs" },
   { label: "favorite", apply: "favorite: ", detail: "true keeps this note in the sidebar's Favorites" },
-];
+]);
 
 // true and false, nothing else, for the two boolean keys. The parser reports
 // any other value as a typo, so each popup lists that key's whole grammar.
@@ -44,11 +48,12 @@ const CONFIRM_VALUES: readonly Completion[] = [
 
 // The three values the parser accepts. It reports anything else as a typo,
 // so the popup lists the whole grammar.
-const TEMPLATE_VALUES: readonly Completion[] = [
-  { label: "true", detail: "a template; joins New Note from Template (⌥⌘N)" },
-  { label: "daily", detail: "the template ⌘J instantiates for each day" },
+let templateValues: readonly Completion[] | null = null;
+const TEMPLATE_VALUES = (): readonly Completion[] => (templateValues ??= [
+  { label: "true", detail: `a template; joins New Note from Template (${keyChip("note.fromTemplate")})` },
+  { label: "daily", detail: `the template ${keyChip("daily.open")} instantiates for each day` },
   { label: "false", detail: "explicitly not a template" },
-];
+]);
 
 // The keys the block already declares on other lines. Offering `cwd` twice
 // would only write a duplicate. The parser takes the last one. `skipLine` is
@@ -88,7 +93,7 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
   if (key) {
     if (!key[1] && !context.explicit) return null;
     const declared = declaredKeys(state, span.last, line.number);
-    const options = KEY_OPTIONS.filter((k) => !declared.has(k.label));
+    const options = KEY_OPTIONS().filter((k) => !declared.has(k.label));
     if (options.length === 0) return null;
     return { from: line.from, options, validFor: /^[A-Za-z]*$/ };
   }
@@ -104,7 +109,7 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
 
   if (value[1] === "template" || value[1] === "confirm" || value[1] === "favorite") {
     const options =
-      value[1] === "template" ? TEMPLATE_VALUES : value[1] === "confirm" ? CONFIRM_VALUES : FAVORITE_VALUES;
+      value[1] === "template" ? TEMPLATE_VALUES() : value[1] === "confirm" ? CONFIRM_VALUES : FAVORITE_VALUES;
     return { from: pos - token.length, options, validFor: /^[A-Za-z]*$/ };
   }
 

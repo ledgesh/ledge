@@ -207,6 +207,9 @@ export interface RegistryDeps {
   // Open another window, which is another client of another server (remote.md
   // §8a). Returns nothing: the new window is the feedback.
   newWindow(): void;
+  // Quit the app, on a client whose Quit is a command rather than a menu
+  // bar's role item (lib/shell.ts quitsByCommand). Returns nothing.
+  quitApp(): void;
   // Workspace lifecycle (workspace/actions.ts). Each needs a Bun round trip
   // (create a folder, register a path, trash or detach a folder), so the
   // reducer cannot do it alone. Create and attach resolve to an error message

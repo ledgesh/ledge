@@ -19,7 +19,7 @@ import { copyText, readClipboard } from "../lib/clipboard";
 import { activeConnection, labelFor, linkState, subscribeConnections } from "../lib/connections";
 import { settings } from "../lib/settings";
 import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
-import { eventToChord, matchesKey } from "../commands/keymap";
+import { eventToChord, matchesKey, terminalChord } from "../commands/keymap";
 import { keyOf } from "../commands/keys";
 
 function xtermTheme(dark: boolean) {
@@ -134,10 +134,12 @@ export function TerminalDrawer({
         onCloseRef.current?.();
         return false;
       }
-      const cmd = e.metaKey && !e.ctrlKey && !e.altKey;
-      // preventDefault on the handled keys. An unhandled Cmd-key reaches
-      // AppKit's key-equivalent path, which rings the system alert (the "blip")
-      // even though the copy or paste itself succeeded.
+      // The terminal's own chords: ⌘C/⌘V/⌘A on a Mac, Ctrl+Shift+C/V/A where
+      // Mod is Ctrl and the shell owns the plain form (commands/keymap.ts
+      // terminalChord). preventDefault on the handled keys. An unhandled
+      // Cmd-key reaches AppKit's key-equivalent path, which rings the system
+      // alert (the "blip") even though the copy or paste itself succeeded.
+      const cmd = terminalChord(e);
       if (cmd && (e.key === "c" || e.key === "C") && term.hasSelection()) {
         e.preventDefault();
         copyText(term.getSelection());

@@ -272,6 +272,9 @@ export function bootView(requests: RequestClient): Promise<void> {
     openDocs: (page) => {
       void requests.windowDocs({ page });
     },
+    quit: () => {
+      void requests.appQuit({});
+    },
   });
 
   // Note images: bytes for `![](.ledge-assets/…)` references, plus the two ways

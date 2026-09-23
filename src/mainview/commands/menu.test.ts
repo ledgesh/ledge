@@ -22,6 +22,7 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     checkForUpdates: noop,
     installUpdate: async () => null,
     newWindow: noop,
+    quitApp: noop,
     createWorkspace: async () => null,
     attachWorkspace: async () => null,
     removeWorkspace: async () => ({ error: null, undo: null }),

@@ -1,45 +1,79 @@
-// Render key bindings as macOS glyphs, and derive tooltips from the command
-// table. Pure: safe to import from anywhere, including non-React editor code
-// (editor/blocks.ts, editor/livePreview.ts).
+// Render key bindings the way this platform spells them, and derive tooltips
+// from the command table. Pure: safe to import from anywhere, including
+// non-React editor code (editor/blocks.ts, editor/livePreview.ts).
 import { COMMANDS, keyOf, titleOf, type CommandId } from "./keys";
+import { modKey } from "./modKey";
 
-const MOD_GLYPHS: Record<string, string> = {
-  Ctrl: "⌃",
-  Alt: "⌥",
-  Shift: "⇧",
-  Mod: "⌘",
+// Two spellings of one chord. A Mac prints glyphs run together in macOS
+// order (⌃⌥⇧⌘W). Everywhere else prints names joined with "+", in the order
+// VS Code and GNOME print them (Ctrl+Shift+Alt+W), with Mod as Ctrl and a
+// literal Meta as Super, the key's name on a Linux desktop.
+const MAC = {
+  mods: { Ctrl: "⌃", Alt: "⌥", Shift: "⇧", Mod: "⌘", Meta: "⌘" } as Record<string, string>,
+  order: ["Ctrl", "Alt", "Shift", "Mod", "Meta"],
+  join: "",
+  keys: {
+    Enter: "↩",
+    Backspace: "⌫",
+    Escape: "⎋",
+    Tab: "⇥",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    " ": "Space",
+  } as Record<string, string>,
 };
 
-// Modifiers render in macOS order (⌃ ⌥ ⇧ ⌘), whatever order the binding
-// lists them in.
-const MOD_ORDER = ["Ctrl", "Alt", "Shift", "Mod"] as const;
-
-const KEY_GLYPHS: Record<string, string> = {
-  Enter: "↩",
-  Backspace: "⌫",
-  Escape: "⎋",
-  Tab: "⇥",
-  ArrowUp: "↑",
-  ArrowDown: "↓",
-  ArrowLeft: "←",
-  ArrowRight: "→",
-  " ": "Space",
+const NAMED = {
+  mods: { Ctrl: "Ctrl", Mod: "Ctrl", Shift: "Shift", Alt: "Alt", Meta: "Super" } as Record<string, string>,
+  order: ["Ctrl", "Mod", "Shift", "Alt", "Meta"],
+  join: "+",
+  keys: {
+    Enter: "Enter",
+    Backspace: "Backspace",
+    Escape: "Esc",
+    Tab: "Tab",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    " ": "Space",
+  } as Record<string, string>,
 };
 
-// "Mod-Shift-w" → "⇧⌘W". The last token is the key, and everything before it
-// is a modifier. Three kinds of key:
+function spelling() {
+  return modKey() === "Meta" ? MAC : NAMED;
+}
+
+// "Mod-Shift-w" → "⇧⌘W" on a Mac, "Ctrl+Shift+W" elsewhere. The last token is
+// the key, and everything before it is a modifier. Three kinds of key:
 //   - a single letter, uppercased;
-//   - a named key, through the table above (" " gives "Space");
+//   - a named key, through the platform's table (" " gives "Space");
 //   - anything else as-is (digits, F3, `, ], [).
+// Mod and Ctrl both print as Ctrl where Mod is Ctrl, and once: "Ctrl-Mod-x"
+// is not a binding anything spells.
 export function formatKey(binding: string): string {
+  const s = spelling();
   const parts = binding.split("-");
   const key = parts[parts.length - 1] === "" ? "-" : parts.pop()!;
-  const mods = MOD_ORDER.filter((m) => parts.includes(m))
-    .map((m) => MOD_GLYPHS[m])
-    .join("");
-  const keyGlyph =
-    KEY_GLYPHS[key] ?? (/^[a-z]$/.test(key) ? key.toUpperCase() : key);
-  return mods + keyGlyph;
+  const mods = s.order.filter((m) => parts.includes(m)).map((m) => s.mods[m]!);
+  const keyGlyph = s.keys[key] ?? (/^[a-z]$/.test(key) ? key.toUpperCase() : key);
+  return [...new Set(mods), keyGlyph].join(s.join);
+}
+
+// The held-modifier badge's spelling of an indexed jump (workspace/Sidebar.tsx,
+// workspace/PaneTree.tsx): formatKey's, except that a Mac's ⌃ is an ASCII
+// caret, which reads at badge size where the glyph does not.
+export function jumpBadge(binding: string): string {
+  return formatKey(binding).replace("⌃", "^");
+}
+
+// The click that follows rather than edits: "⌘-click" on a Mac, "Ctrl-click"
+// elsewhere (keymap.ts modHeld). For the tooltips on links, tags and the
+// profile name.
+export function modClick(): string {
+  return modKey() === "Meta" ? "⌘-click" : "Ctrl-click";
 }
 
 // The `title=` string for a control bound to a command: "Close Tab (⌘W)", or

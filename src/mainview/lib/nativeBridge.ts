@@ -478,6 +478,9 @@ function clientSeams(
     // The one window a phone has is never the manual's. The manual is a
     // workspace inside it (mainview/workspace/actions.ts openDocs).
     windowRole: async () => ({ docs: false, page: "" }),
+    // A phone never quits by command (lib/shell.ts quitsByCommand), and nothing
+    // calls this. No Swift call.
+    appQuit: async () => ({ ok: false }),
     // A phone's app is updated by the store it came from, never by itself, so
     // the view leaves Check for Updates… out (lib/updates.ts). No Swift call.
     updateState: async () => PHONE_UPDATES,

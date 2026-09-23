@@ -34,6 +34,7 @@ function stubDeps(
       return { tone: "error", message: "Could not install the update: EACCES" };
     },
     newWindow: () => calls.push("newWindow"),
+    quitApp: () => calls.push("quitApp"),
     createWorkspace: async () => {
       calls.push("createWorkspace");
       return null;
@@ -1277,6 +1278,39 @@ describe("what this client has a surface for", () => {
     installs(false, (visible) => {
       shows(visible, "cli.install", false);
       shows(visible, "workspace.attach", true);
+    });
+  });
+});
+
+// Quit is a command only where no menu bar carries it (lib/shell.ts
+// quitsByCommand): a Mac's ⌘Q is the bar's role item and AppKit answers it
+// before the view sees a key, so there the verb would only duplicate the
+// palette entry. A Linux window has no bar, and Ctrl+Q runs this.
+describe("quit by command", () => {
+  function quits(next: boolean, check: (visible: (id: string) => boolean, cmds: Command[]) => void): void {
+    configureShell({ quitsByCommand: next });
+    try {
+      const calls: string[] = [];
+      const cmds = buildCommands(stubDeps(calls));
+      const ctx = makeCtx(initialState(FOLDER, []));
+      check((id) => find(cmds, id).when?.(ctx) ?? true, cmds);
+      if (next) {
+        find(cmds, "app.quit").run(ctx);
+        expect(calls).toEqual(["quitApp"]);
+      }
+    } finally {
+      configureShell({ quitsByCommand: false });
+    }
+  }
+
+  test("a Mac quits from its menu bar, so the verb is absent", () => {
+    quits(false, (visible) => expect(visible("app.quit")).toBe(false));
+  });
+
+  test("a desktop with no menu bar offers Quit Ledge, on Mod-q, and it asks the shell to quit", () => {
+    quits(true, (visible, cmds) => {
+      expect(visible("app.quit")).toBe(true);
+      expect(find(cmds, "app.quit").keys).toEqual(["Mod-q"]);
     });
   });
 });

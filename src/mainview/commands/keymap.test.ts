@@ -1,12 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   eventToChord,
   matchesKey,
+  modChord,
+  modHeld,
   parseKey,
   resolveChord,
+  terminalChord,
   type Chord,
   type FocusDomain,
 } from "./keymap";
+import { configureModKey } from "./modKey";
 
 function ev(partial: Partial<KeyboardEvent> & { key: string; code?: string }) {
   return {
@@ -182,5 +186,67 @@ describe("resolveChord in the list domain", () => {
     expect(
       resolveChord(commands, chord("d"), { domain: "list", modalOpen: true, targetKind: "note" }),
     ).toBeNull();
+  });
+});
+
+// The Ctrl grammar, which a Linux desktop gets (commands/modKey.ts): Mod is
+// Ctrl, and the terminal keeps the plain Ctrl chords for its shell.
+describe("where Mod is Ctrl", () => {
+  beforeEach(() => configureModKey("Ctrl"));
+  afterEach(() => configureModKey("Meta"));
+
+  test("Mod parses as Ctrl, and a literal Meta stays Meta", () => {
+    expect(parseKey("Mod-Shift-w")).toEqual({ key: "w", meta: false, ctrl: true, alt: false, shift: true });
+    expect(parseKey("Meta-x")).toEqual({ key: "x", meta: true, ctrl: false, alt: false, shift: false });
+    expect(parseKey("Ctrl-`")).toEqual({ key: "`", meta: false, ctrl: true, alt: false, shift: false });
+  });
+
+  test("a Ctrl+letter event matches a Mod binding, and a Super+letter one does not", () => {
+    expect(matchesKey("Mod-n", eventToChord(ev({ key: "n", ctrlKey: true })))).toBe(true);
+    expect(matchesKey("Mod-n", eventToChord(ev({ key: "n", metaKey: true })))).toBe(false);
+  });
+
+  test("the terminal keeps plain Ctrl chords; Ctrl with Shift or Alt reaches the app", () => {
+    const commands = [
+      { id: "tab.close", keys: ["Mod-w"] },
+      { id: "pane.close", keys: ["Mod-Shift-w"] },
+      { id: "sidebar.toggle", keys: ["Alt-Mod-b"] },
+    ];
+    const flags = { domain: "terminal" as FocusDomain, modalOpen: false };
+    expect(resolveChord(commands, parseKey("Mod-w"), flags)).toBeNull();
+    expect(resolveChord(commands, parseKey("Mod-Shift-w"), flags)?.id).toBe("pane.close");
+    expect(resolveChord(commands, parseKey("Alt-Mod-b"), flags)?.id).toBe("sidebar.toggle");
+    // The same plain chord fires everywhere else.
+    expect(resolveChord(commands, parseKey("Mod-w"), { ...flags, domain: "editor" })?.id).toBe("tab.close");
+  });
+
+  test("the click and chord helpers follow Ctrl", () => {
+    expect(modHeld({ metaKey: false, ctrlKey: true })).toBe(true);
+    expect(modHeld({ metaKey: true, ctrlKey: false })).toBe(false);
+    expect(modChord(ev({ key: "c", ctrlKey: true }))).toBe(true);
+    expect(modChord(ev({ key: "c", ctrlKey: true, altKey: true }))).toBe(false);
+    expect(modChord(ev({ key: "c", metaKey: true }))).toBe(false);
+    // The terminal's own chords carry Shift, since a shell hears Ctrl+C and
+    // Ctrl+Shift+C as one byte.
+    expect(terminalChord(ev({ key: "c", ctrlKey: true }))).toBe(false);
+    expect(terminalChord(ev({ key: "C", ctrlKey: true, shiftKey: true }))).toBe(true);
+  });
+});
+
+describe("where Mod is ⌘", () => {
+  test("every Ctrl chord stays out of the terminal, shifted or not", () => {
+    const commands = [{ id: "x", keys: ["Ctrl-Shift-x"] }];
+    const flags = { domain: "terminal" as FocusDomain, modalOpen: false };
+    expect(resolveChord(commands, parseKey("Ctrl-Shift-x"), flags)).toBeNull();
+    expect(resolveChord(commands, parseKey("Ctrl-Shift-x"), { ...flags, domain: "page" })?.id).toBe("x");
+  });
+
+  test("the click and chord helpers follow ⌘", () => {
+    expect(modHeld({ metaKey: true, ctrlKey: false })).toBe(true);
+    expect(modHeld({ metaKey: false, ctrlKey: true })).toBe(false);
+    expect(modChord(ev({ key: "c", metaKey: true }))).toBe(true);
+    expect(modChord(ev({ key: "c", metaKey: true, ctrlKey: true }))).toBe(false);
+    expect(terminalChord(ev({ key: "c", metaKey: true }))).toBe(true);
+    expect(terminalChord(ev({ key: "c", ctrlKey: true, shiftKey: true }))).toBe(false);
   });
 });

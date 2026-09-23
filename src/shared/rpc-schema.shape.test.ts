@@ -171,7 +171,13 @@ describe("the schema's shape against the protocol version", () => {
   // shows nothing on one that does not. That silence is exactly the behavior
   // every build had before this push existed. Nothing was retyped, made
   // required, or narrowed. The pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "a3be627a7185731f" };
+  // Then Quit as a command, for a desktop with no menu bar (interactions.md
+  // §10): appQuit, one new method, in NATIVE_METHODS. The shell in front of
+  // the user answers it and no frame ever carries it, so no server, old or
+  // new, sees the name. A view that predates it never sends it. Nothing was
+  // retyped, made required, or narrowed. The pin moves and the version does
+  // not.
+  const PINNED = { protocol: 5, shape: "66150ede1a4ef192" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

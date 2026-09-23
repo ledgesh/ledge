@@ -499,6 +499,9 @@ function nativeFor(win: Win): ClientNative {
     newWindow: () => void openWindow(LOCAL_ID),
     docsWindow: (page) => showDocs(page),
     windowRole: () => ({ docs: win.docs, page: win.page }),
+    // Electrobun's graceful quit: the same path ⌘Q takes through AppKit, so
+    // the exit handler below runs and the windows close in order.
+    quit: () => void Utils.quit(),
   };
 }
 

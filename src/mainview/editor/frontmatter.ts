@@ -48,6 +48,8 @@ import {
   unquote,
 } from "../../shared/frontmatter";
 import { editProfile, isSessionStale, onSessionStaleChange, openTag, restartShell } from "./bridge";
+import { modClick } from "../commands/format";
+import { modHeld } from "../commands/keymap";
 import { titleOf } from "../commands/keys";
 import { textPosAtCoords } from "./clickPos";
 import { sessionIdFacet } from "./session";
@@ -168,17 +170,25 @@ const BODY = Decoration.line({ class: "ledge-fm" });
 // The cursor stays an I-beam whatever this says: WebKit forces it inside the
 // editing context (see the .ledge-overlay comment in index.css). The
 // affordance is the link styling plus this tooltip.
-const PROFILE = Decoration.mark({
-  class: "ledge-fm-profile",
-  attributes: { title: "⌘-click to edit profile" },
-});
+// Both marks are built on first use rather than at load, so their tooltips
+// name the click this client's Mod key makes (commands/modKey.ts).
+let profileMark: Decoration | null = null;
+function PROFILE(): Decoration {
+  return (profileMark ??= Decoration.mark({
+    class: "ledge-fm-profile",
+    attributes: { title: `${modClick()} to edit profile` },
+  }));
+}
 // A declared tag, ⌘-clickable like the profile name, under the same grammar:
 // ⌘-click follows, a plain click edits. The click lands where every tag click
 // lands, the Tags panel.
-const FM_TAG = Decoration.mark({
-  class: "ledge-fm-tag",
-  attributes: { title: "⌘-click to show tagged notes" },
-});
+let fmTagMark: Decoration | null = null;
+function FM_TAG(): Decoration {
+  return (fmTagMark ??= Decoration.mark({
+    class: "ledge-fm-tag",
+    attributes: { title: `${modClick()} to show tagged notes` },
+  }));
+}
 // The line the parser refused, accented down its left edge (index.css). On a
 // narrow window the accent is what ties the message below to its own line.
 const PROBLEM = Decoration.line({ class: "ledge-fm ledge-fm-bad" });
@@ -300,9 +310,9 @@ function build(state: EditorState): DecorationSet {
     );
     if (n !== span.first && n !== span.last) {
       const p = profileValueSpan(line.text);
-      if (p) ranges.push(PROFILE.range(line.from + p.from, line.from + p.to));
+      if (p) ranges.push(PROFILE().range(line.from + p.from, line.from + p.to));
       for (const t of tagsValueSpans(line.text)) {
-        ranges.push(FM_TAG.range(line.from + t.from, line.from + t.to));
+        ranges.push(FM_TAG().range(line.from + t.from, line.from + t.to));
       }
       // side: 1 pins the widget after everything else at the line's end, so
       // the caret at end-of-line still sits before it and typing continues
@@ -347,7 +357,7 @@ const field = StateField.define<DecorationSet>({
 // split into fragments of the name.
 const clickToEdit = EditorView.domEventHandlers({
   mousedown: (event, view) => {
-    if (!event.metaKey || event.button !== 0) return false;
+    if (!modHeld(event) || event.button !== 0) return false;
     const pos = textPosAtCoords(view, event.clientX, event.clientY);
     if (pos === null) return false;
     const span = frontmatterLineSpan(

@@ -33,6 +33,7 @@ import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTer
 import { copyText } from "../lib/clipboard";
 import { settings } from "../lib/settings";
 import { keyOf, type CommandId } from "../commands/keys";
+import { modChord } from "../commands/keymap";
 import { tooltip } from "../commands/format";
 
 // One inline run of a code block. Output accumulates as bytes arrive from native.
@@ -755,7 +756,7 @@ const overlayPlugin = ViewPlugin.fromClass(
     }
 
     handleCopyKey(e: KeyboardEvent) {
-      if (!(e.metaKey && !e.ctrlKey && !e.altKey && (e.key === "c" || e.key === "C"))) return;
+      if (!(modChord(e) && (e.key === "c" || e.key === "C"))) return;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
       const anchor = sel.anchorNode;

@@ -54,6 +54,9 @@ export interface ClientNative {
   // Whether this window is the manual's, and the page it was opened to show.
   // Absent on a shell whose one window is never the manual's.
   windowRole?(): { docs: boolean; page: string };
+  // Quits the app, every window with it, the way the Mac's ⌘Q does. Absent on
+  // a shell that quits some other way or never quits (a phone).
+  quit?(): void;
   // This device's spelling dictionary (bun/spelling.ts on a Mac). Absent on a
   // shell with none, where every word answers correct and Learn does nothing.
   spelling?: {
@@ -255,6 +258,14 @@ export function clientSeams(
     // Which window this view is in, asked once at boot. A shell that has one
     // window answers for it: it is never the manual's.
     windowRole: async () => native.windowRole?.() ?? { docs: false, page: "" },
+    // Quit, where the view carries the verb (mainview/lib/shell.ts
+    // quitsByCommand). The shell's own exit path, so the frame writes and the
+    // connection shutdowns ⌘Q gets happen here too (bun/index.ts).
+    appQuit: async () => {
+      if (!native.quit) return { ok: false };
+      native.quit();
+      return { ok: true };
+    },
     // The app's update, which belongs to the process rather than to a window,
     // so every window's handlers reach the same one (bun/index.ts).
     updateState: async () => native.updates?.state() ?? NO_UPDATES,

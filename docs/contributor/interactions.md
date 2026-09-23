@@ -516,6 +516,32 @@ out, one of which is typing in the note.
   mechanism for holding a chord on purpose. ⌘D is the split key (iTerm/cmux
   muscle memory); `editor/find.ts` deliberately omits Mod-d
   select-next-occurrence for the same reason.
+- **Off macOS, Mod is Ctrl** (`commands/modKey.ts`, read from
+  `navigator.platform`, the fact CodeMirror reads for the same decision). Every
+  binding above is spelled with Mod, so a Linux desktop gets Ctrl+N, Ctrl+Shift+P
+  and Ctrl+Alt+B without a second table, and chips and tooltips print
+  `Ctrl+Shift+W` rather than glyphs (`commands/format.ts`). Windows, when it
+  comes, inherits the same grammar. What the swap changes:
+  - **The tab jump moves to Alt+1…9** (`tabSelectKey`), since Ctrl+1…9 is now
+    the workspace jump. Alt+number is what Firefox and GNOME Terminal spend on
+    tabs there. ⌃Tab and ⌃` keep their Ctrl spelling on both platforms.
+  - **The terminal keeps the plain Ctrl chords.** Ctrl+C is an interrupt and
+    Ctrl+W a deleted word, so the resolver refuses a Ctrl chord with neither
+    Shift nor Alt while the terminal has focus, whatever domains the command
+    declares (`keymap.ts` resolveChord). A shell hears Ctrl+C and Ctrl+Shift+C
+    as one byte, so the shifted and Alt forms are the app's from the terminal
+    too: Ctrl+Shift+P still opens the palette there. The terminal's own verbs
+    take the shifted form for the same reason: Ctrl+Shift+C, Ctrl+Shift+V,
+    Ctrl+Shift+A, and Ctrl+Shift+Esc for a pinned inline program's exit
+    (`terminalChord`).
+  - **Ctrl-click follows** a link, a tag or the profile name where ⌘-click
+    does on a Mac (`modHeld`), which is also CodeMirror's Mod-click there.
+  - **Ctrl+Q quits**, as a command (`app.quit`, §10), since no menu bar
+    carries a role item.
+  - Ubuntu's GNOME takes Ctrl+Alt+T (a terminal) and Ctrl+Alt+L (lock the
+    screen) before any app sees them, so Toggle Tags and Toggle Backlinks
+    reach the app from the palette there. The chords stay allocated: the
+    ⌥-tier is one rule, and a desktop that has rebound those keys gets them.
 
 ## 3. Keymap
 
@@ -524,7 +550,9 @@ human-readable mirror. Domains: where the *window* dispatcher fires the
 command (`page` | `editor` | `terminal` | `list`, by focus). `list` is a
 focused row and sits inside `page`, so page commands fire there too — focusing
 a note row must not cost you ⌘N. Editor-internal commands are bound inside
-CodeMirror and never at the window level.
+CodeMirror and never at the window level. The Key column is the Mac's
+spelling; off macOS read ⌘ as Ctrl, ⌃1…9 as Alt+1…9, and the terminal's own
+chords as Ctrl+Shift (§2).
 
 | Command               | Key                       | Notes |
 | --------------------- | ------------------------- | ----- |
@@ -536,7 +564,7 @@ CodeMirror and never at the window level.
 | Make This Note a Template / Remove Template Marker | — (palette) | adds/removes `template: true` in the current note's frontmatter, in its own editor (undoable; autosave + the watcher refresh carry it into the picker). Exactly one of the pair shows, per the note's live frontmatter — profile.open's move. Marked notes wear the LayoutTemplate glyph in the sidebar and the ⌘P rows — and the `template: daily` note wears ⌘J's own CalendarDays, so the icon column reads file = note, layout = template, calendar = what seeds each day (icons, not badges: same object, different kind; tabs stay plain — the marker line is on screen there). `ledge ls` appends `(template)` / `(daily template)`; `list_notes` carries the value |
 | Close Tab             | ⌘W                        | closes the focused pane's active tab |
 | Next / Previous Tab   | ⌃Tab / ⌃⇧Tab (alias ⇧⌘] / ⇧⌘[) | |
-| Go to Tab N           | ⌃1…9                      | focused pane; badge shows while ⌃ held |
+| Go to Tab N           | ⌃1…9 (Alt+1…9 off macOS)  | focused pane; badge shows while ⌃ (or Alt) held |
 | Split Right           | ⌘D                        | |
 | Split Down            | ⇧⌘D                       | |
 | Close Pane            | ⇧⌘W                       | |
@@ -551,6 +579,7 @@ CodeMirror and never at the window level.
 | Toggle Backlinks      | ⌥⌘L                       | right-hand panel: the notes whose `[[wikilinks]]` point at the current note (the same scan agents get from the MCP `backlinks` tool). Rows are the standard keyboard list; Enter/click opens the linking note with the link's line revealed and selected, the search overlay's open-at-the-hit |
 | Toggle Outline        | ⌥⌘O                       | the right panel's second face: the active note's headings, derived live from the editor doc (`headingsOf` — the fence-aware scan shared with the MCP appender and the heading reveal). The right-panel toggles are radio-with-off: opening one closes the others, since they share the one slot. Enter/click moves the caret to the heading in the note's own editor |
 | Toggle Tags           | ⌥⌘T                       | the right panel's third face: the workspace's tag directory — every tag its notes carry (inline `#hashtags` and frontmatter `tags:` lines, shared/tags.ts owns the grammar; the same scan agents get from the MCP `tags` tool), alphabetical with per-NOTE counts. Enter/click on a tag drills into its occurrences; Enter/click on an occurrence opens the bearing note with the tag's line revealed (the backlink grammar). Clicking a rendered `#tag` in the editor, a `#`-query tag row in the overlay, or ⌘-clicking a frontmatter `tags:` token all land in the same drill-in. Rendered tags open on plain click (they are pills, not editable text — the checkbox reasoning); a tag under the caret is revealed text: plain click moves the caret, ⌘-click follows. Typing `#` plus a character in the editor pops the tag picker (the workspace's own tags; a bare `#` stays quiet — headings start that way) |
+| Quit Ledge            | ⌘Q (menu bar) / Ctrl+Q off macOS | on a Mac the bar's `role: "quit"` item, which AppKit answers before the view sees a key; elsewhere the `app.quit` command, offered only where `lib/shell.ts` quitsByCommand says no menu bar carries it (§10) |
 | Settings…             | ⌘,                        | opens settings.jsonc in Ledge's own editor dialog — raw JSONC, comments as the documentation, launch-time problems previewed live but never blocking Save (architecture.md §6: the file is the UI; edits apply at the next launch) |
 | Documentation         | — (palette; the header's help button) | opens the built-in docs IN A WINDOW OF THEIR OWN (`remote.md` §8a): a window titled Documentation, on this Mac's own server whatever the window that asked was looking at, holding one read-only workspace and nothing else. One per app — asking again raises the window that is open rather than growing a second copy of the same fixed pages — and the workspace you were in is left exactly as it was, which is the whole point of the window. Pages are ordinary notes to every read surface (browser, ⌘P, ⌥⌘P, outline, wikilinks), and every fence in a runnable language is marked `norun` (§4e), so none of them runs; the welcome note a fresh start opens (`workspace/seeds.ts`) is where the same examples are live. Everything mutating is gated view-side (New Note hidden, Delete/lock absent from the row menu, the editor drops keystrokes) and refused Bun-side regardless (architecture.md §3b). IN THAT WINDOW the chrome that switches between workspaces or machines is gone — no strip (it would be an empty list: the docs workspace is never a row), no connection bar, no New Workspace / Attach Folder / Notes On… / ⌘J, and no help button, since the button that opens a window has nothing to say inside it. Third-Party Licenses stays, meaning "turn to that page". The way out is the window's own close button, and the way back to your notes is the window still sitting behind it; the manual's window saves no layout and is not reopened at the next launch. ON A CLIENT WITH ONE WINDOW AND NO WAY TO HAVE TWO (a phone, `ios.md` §4) it stays what it was: the docs open as a HIDDEN READ-ONLY workspace in that window — never a strip row, absent from ⌘1…9 — landing on Getting Started, and the header button is lit while it is selected and TOGGLES, selecting the workspace the manual was opened from and leaving its tabs where they were. Being no strip row is exactly what leaves the manual without a row to click away from, and there the strip is inside the drawer the manual covers, so the lit button is the only door. No chord either way: docs are a sometimes destination |
 | Restart Note Shell    | — (palette; the frontmatter block's hint) | kills the current note's shells; its frontmatter params apply at respawn (architecture.md §6a). The block says when that is owed: with a live shell born under params the note has since edited, Bun pushes `sessionStale` and the closing fence grows a button running this same verb on ITS note rather than on the focused one. The in-situ accelerator to a palette-only verb (R2), and the second half of the block's own report: the per-line refusals above say what could not be read, this says what was read and is not yet running. It is LABELLED WITH ITS REASON ("Restart Note Shell to apply changes", the command's title from the registry plus a purpose clause) and carries the verb's own glyph, because the person reading it has just typed a line that looks like it took, and the verb's name alone answers what the button does rather than why it is there. It is also the one thing in the block wearing a color and a pointer cursor. Drawn in the muted gray of the refusals beside it, the block's only control vanished into the dimmed text around it. A widget's DOM is `contenteditable=false` (CodeMirror sets it), which is what lets it take that cursor where the ⌘-clickable profile name on the line above cannot. No chord is shown, because §2 gives this verb none. Only the keys that feed a spawn count (`cwd`, `profile`, `envFile`, `env`), so favoriting a note or adding a tag rewrites the block in silence, and it is a comparison rather than a flag, so typing the old value back takes it down as surely as pressing it does |
@@ -1542,6 +1571,16 @@ through the same dispatcher the palette uses.
 - Bun sets a **minimal fallback menu at boot** (Quit, the edit roles) so a
   view that fails to load still leaves a way out. The first push replaces it
   wholesale.
+- **No bar off macOS.** A Linux window has no application menu bar:
+  Electrobun's menu calls are no-ops there, and the shell skips both the
+  fallback and the view's pushes (`bun/index.ts` HAS_MENU_BAR). The palette is
+  the whole surface, which R1 already guarantees: every item in the spec is a
+  palette entry, the edit roles are the editor's own commands (⌘X/⌘C/⌘V, as
+  Ctrl chords), and Quit is a command rather than a role item (`app.quit`,
+  Ctrl+Q, `lib/shell.ts` quitsByCommand), reaching the shell through the
+  `appQuit` native method and Electrobun's graceful quit. Closing the last
+  window quits, as on the Mac. Hide, Minimize and Zoom have no counterpart
+  and the window manager provides them.
 
 ## 11. The note editor's context menu
 

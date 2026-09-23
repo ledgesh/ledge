@@ -40,7 +40,7 @@ import { copyText } from "@/lib/clipboard";
 import { installCli } from "@/lib/cli";
 import { revealLog } from "@/lib/log";
 import { checkForUpdates, installUpdate } from "@/lib/updates";
-import { openDocsWindow, openWindow } from "@/lib/windows";
+import { openDocsWindow, openWindow, quitApp } from "@/lib/windows";
 import { restartSession } from "@/terminal/channel";
 import { attachWorkspace, closeDocs, createWorkspace, openDocs, removeWorkspace } from "@/workspace/actions";
 import { dailyWorkspaceRoot, docsFolder, trashedWorkspace, workspaceKind } from "@/workspace/channel";
@@ -75,6 +75,7 @@ export const registryDeps: RegistryDeps = {
   checkForUpdates,
   installUpdate,
   newWindow: openWindow,
+  quitApp,
   createWorkspace,
   attachWorkspace,
   removeWorkspace,

@@ -1,4 +1,4 @@
-// The Mac entry point: the view over Electrobun's typed RPC.
+// The desktop entry point, Mac and Linux: the view over Electrobun's typed RPC.
 //
 // One of the three entry points (ios.md §1), beside ios.tsx's socket and
 // harness.tsx's Map. boot.tsx holds everything the view does with a server.
@@ -7,6 +7,8 @@ import Electrobun, { Electroview } from "electrobun/view";
 import type { LedgeRPC } from "../shared/rpc-schema";
 import type { RequestClient } from "../shared/wire";
 import { bootView, viewPush } from "./boot";
+import { modKey } from "./commands/modKey";
+import { configureShell } from "./lib/shell";
 
 // The webview end of the typed RPC. Bun pushes `runEvent` and `terminalOutput`
 // messages here. The editor and terminal send requests the other way. The
@@ -21,6 +23,12 @@ const rpc = Electroview.defineRPC<LedgeRPC>({
 });
 
 const electrobun = new Electrobun.Electroview({ rpc });
+
+// The keyboard grammar is decided by modKey.ts from navigator.platform. What
+// follows from it here: a desktop where Mod is Ctrl has no menu bar, so Quit
+// is a command there (lib/shell.ts quitsByCommand, interactions.md §10). A Mac
+// keeps the shell's defaults, whose Quit is the menu bar's.
+configureShell({ quitsByCommand: modKey() === "Ctrl" });
 
 // The cast says two derivations of LedgeRPC agree. It is not a claim about
 // runtime shapes. Electrobun builds its per-method request map from the

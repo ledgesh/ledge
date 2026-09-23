@@ -15,6 +15,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { RunInfo } from "./blocks";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { terminalChord } from "../commands/keymap";
+import { modKey } from "../commands/modKey";
 import { settings } from "../lib/settings";
 import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
 
@@ -264,12 +266,13 @@ export class InlineTerm {
     // Clipboard keys, matching a normal terminal (and the drawer). xterm draws
     // its own selection and the WebView's native copy and paste do not fire
     // reliably, so Cmd+C, Cmd+V and Cmd+A go through the Bun clipboard. Ctrl+C
-    // is left alone so it still sends SIGINT to an inline program. Returning
-    // false consumes the key, so the unhandled Cmd chord does not ring the
-    // system alert.
+    // is left alone so it still sends SIGINT to an inline program, which is
+    // why the chords are Ctrl+Shift+C/V/A where Mod is Ctrl (commands/keymap.ts
+    // terminalChord). Returning false consumes the key, so the unhandled
+    // chord does not ring the system alert.
     this.term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
-      const cmd = e.metaKey && !e.ctrlKey && !e.altKey;
+      const cmd = terminalChord(e);
       // The way back to the prose for a run that took focus on its own (see
       // claimFocus). The program still receives the Escapes. The bare form
       // acts on the second one, so the first has already gone through. A
@@ -446,7 +449,8 @@ export class InlineTerm {
     // mid-sentence would be worse than the wait. So the hint says "not
     // connected" rather than "typing here".
     this.focusHint.textContent = this.unreachable ? "not connected" : "typing here";
-    this.exitKey.textContent = this.pinned ? "· ⌘esc to exit" : "· esc esc to exit";
+    const modEsc = modKey() === "Meta" ? "⌘esc" : "ctrl+shift+esc";
+    this.exitKey.textContent = this.pinned ? `· ${modEsc} to exit` : "· esc esc to exit";
   }
 
   write(bytes: Uint8Array): void {

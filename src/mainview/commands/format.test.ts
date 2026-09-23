@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
-import { chipOf, formatKey, keyChip, middleEllipsis, tooltip } from "./format";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chipOf, formatKey, jumpBadge, keyChip, middleEllipsis, modClick, tooltip } from "./format";
+import { configureModKey } from "./modKey";
 
 describe("formatKey", () => {
   test("letters uppercase with macOS glyph order ⌃⌥⇧⌘", () => {
@@ -83,5 +84,50 @@ describe("middleEllipsis", () => {
     for (const max of [5, 8, 13, 20]) {
       expect(middleEllipsis("a".repeat(50) + "-tail", max).length).toBeLessThanOrEqual(max);
     }
+  });
+});
+
+describe("formatKey where Mod is Ctrl", () => {
+  beforeEach(() => configureModKey("Ctrl"));
+  afterEach(() => configureModKey("Meta"));
+
+  test("names joined with +, in Ctrl Shift Alt order", () => {
+    expect(formatKey("Mod-Shift-w")).toBe("Ctrl+Shift+W");
+    expect(formatKey("Shift-Mod-w")).toBe("Ctrl+Shift+W");
+    expect(formatKey("Alt-Mod-b")).toBe("Ctrl+Alt+B");
+    expect(formatKey("Mod-Alt-f")).toBe("Ctrl+Alt+F");
+  });
+
+  test("Mod and Ctrl are both Ctrl, printed once", () => {
+    expect(formatKey("Ctrl-`")).toBe("Ctrl+`");
+    expect(formatKey("Ctrl-Tab")).toBe("Ctrl+Tab");
+    expect(formatKey("Ctrl-Mod-x")).toBe("Ctrl+X");
+  });
+
+  test("named keys are words, and a literal Meta is Super", () => {
+    expect(formatKey("Mod-Enter")).toBe("Ctrl+Enter");
+    expect(formatKey("Mod-Backspace")).toBe("Ctrl+Backspace");
+    expect(formatKey("Escape")).toBe("Esc");
+    expect(formatKey("Meta-x")).toBe("Super+X");
+    expect(formatKey("F3")).toBe("F3");
+  });
+
+  test("tooltips and chips follow", () => {
+    expect(tooltip("tab.close")).toBe("Close Tab (Ctrl+W)");
+    expect(keyChip("palette.commands")).toBe("Ctrl+Shift+P");
+    expect(modClick()).toBe("Ctrl-click");
+  });
+
+  test("the jump badges spell the platform's keys", () => {
+    expect(jumpBadge("Mod-1")).toBe("Ctrl+1");
+    expect(jumpBadge("Alt-1")).toBe("Alt+1");
+  });
+});
+
+describe("the jump badges on a Mac", () => {
+  test("⌘ for the workspace jump, an ASCII caret for the tab jump", () => {
+    expect(jumpBadge("Mod-1")).toBe("⌘1");
+    expect(jumpBadge("Ctrl-1")).toBe("^1");
+    expect(modClick()).toBe("⌘-click");
   });
 });

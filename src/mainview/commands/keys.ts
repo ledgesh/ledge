@@ -4,12 +4,14 @@
 // tooltips, menu chips, and the palette can all read it without pulling React
 // or the store into pure modules.
 //
-// Key strings use CodeMirror's spelling ("Mod-Shift-w", "Ctrl-`"). Mod is ⌘,
-// since this is a macOS-only app. The first key in a list is the one shown in
-// tooltips and menu chips. The rest are live aliases.
+// Key strings use CodeMirror's spelling ("Mod-Shift-w", "Ctrl-`"). Mod is ⌘
+// on a Mac and Ctrl elsewhere (modKey.ts); the comments here spell the Mac
+// form. The first key in a list is the one shown in tooltips and menu chips.
+// The rest are live aliases.
 //
 // The dispatch contract (interactions.md §7): a handler that consumes a chord
 // must call preventDefault, and the window dispatcher only sees leftovers.
+import { modKey } from "./modKey";
 
 export interface KeySpec {
   title: string;
@@ -173,6 +175,12 @@ export const COMMANDS = {
   // exactly one is live at a time. No chords, since both run a few times a year.
   "update.check": { title: "Check for Updates…" },
   "update.install": { title: "Restart to Install Update" },
+  // Quit, on a client with no menu bar to hold it (interactions.md §10). On a
+  // Mac the bar's `role: "quit"` item owns ⌘Q and AppKit answers it before the
+  // view sees a key, so this command never fires there and stays out of the
+  // palette (lib/shell.ts quitsByCommand). Ctrl+Q is the desktop convention
+  // wherever Mod is Ctrl.
+  "app.quit": { title: "Quit Ledge", keys: ["Mod-q"] },
 
   // Per-note params (frontmatter). Both verbs are palette and menu only, since
   // neither is frequent enough to spend a chord on. Restart kills the note's
@@ -369,13 +377,15 @@ export const RESERVED_KEYS: readonly string[] = [];
 
 // The indexed quick-jumps, generated per item rather than listed above:
 // ⌘1…9 switches workspace, ⌃1…9 selects a tab in the focused pane. The
-// held-modifier badges (lib/useCmdHeld.ts) advertise exactly these.
+// held-modifier badges (lib/useModHeld.ts) advertise exactly these.
 export function workspaceSelectKey(n: number): string {
   return `Mod-${n}`;
 }
 
+// Where Mod is Ctrl, Ctrl+1…9 is the workspace jump above, so the tab jump
+// moves to Alt+1…9: the key Firefox and GNOME Terminal spend on tabs there.
 export function tabSelectKey(n: number): string {
-  return `Ctrl-${n}`;
+  return modKey() === "Meta" ? `Ctrl-${n}` : `Alt-${n}`;
 }
 
 // Every binding for a command; empty when it is menu-only. (The lookup goes

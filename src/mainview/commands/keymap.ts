@@ -1,9 +1,10 @@
 // Pure key-event resolution for the window-level command dispatcher.
 //
-// Bindings use CodeMirror's spelling ("Mod-Shift-w"); Mod is ⌘ (macOS-only
-// app). The dispatcher (CommandProvider) turns each keydown into a Chord via
-// eventToChord, then resolveChord picks the command whose binding matches and
-// whose domains include where focus currently sits.
+// Bindings use CodeMirror's spelling ("Mod-Shift-w"); Mod is ⌘ on a Mac and
+// Ctrl elsewhere (modKey.ts). The dispatcher (CommandProvider) turns each
+// keydown into a Chord via eventToChord, then resolveChord picks the command
+// whose binding matches and whose domains include where focus currently sits.
+import { modKey } from "./modKey";
 
 // "list" is a focused row in a navigable list: the note list, the trash, the
 // workspace strip. It is the one domain where the resolver dispatches on
@@ -38,11 +39,38 @@ export interface KeyedCommand {
   targetKind?: string;
 }
 
-// A command that names no domains of its own fires in these three. ⌘ chords
+// A command that names no domains of its own fires in these three. Mod chords
 // are app-global: they bubble out of the editor and the terminal, whose
 // handlers consume the ones they own. A Ctrl chord must opt out of "terminal"
-// explicitly. The shell owns Ctrl there (interactions.md §2).
+// explicitly. The shell owns Ctrl there (interactions.md §2), and where Mod is
+// Ctrl, resolveChord keeps the plain Ctrl chords out of the terminal itself.
 export const DEFAULT_DOMAINS: readonly FocusDomain[] = ["page", "editor", "terminal"];
+
+// Whether Mod is held: the click grammar's question. ⌘-click follows a link
+// on a Mac, and Ctrl-click does on Linux, the way CodeMirror's Mod-click adds
+// a caret with either.
+export function modHeld(e: Pick<MouseEvent, "metaKey" | "ctrlKey">): boolean {
+  return modKey() === "Meta" ? e.metaKey : e.ctrlKey;
+}
+
+// Whether a key event is a plain Mod chord: Mod held, with neither Alt nor
+// the other command key, which would make it a different chord. Shift is not
+// checked, so ⇧⌘C counts as ⌘C, as it always has.
+export function modChord(e: Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey">): boolean {
+  if (e.altKey) return false;
+  return modKey() === "Meta" ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+}
+
+// Whether a key event carries the terminal's own modifier: the chords the
+// terminal keeps for itself (copy, paste, select all, the exit from a pinned
+// program). ⌘ on a Mac, where the shell never sees ⌘. Ctrl+Shift where Mod is
+// Ctrl, because a shell hears Ctrl+C and Ctrl+Shift+C as the same byte, so
+// the shifted form is free and is what every Linux terminal spends
+// (interactions.md §2).
+export function terminalChord(e: Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">): boolean {
+  if (e.altKey) return false;
+  return modKey() === "Meta" ? e.metaKey && !e.ctrlKey : e.ctrlKey && e.shiftKey && !e.metaKey;
+}
 
 // A list row is focusable page chrome, so a command bound for "page" fires
 // there too. Nothing widens the other way: naming "list" in domains does not
@@ -89,14 +117,17 @@ export function eventToChord(
 }
 
 // "Mod-Shift-w" → its Chord. The last token is the key, the rest modifiers.
+// "Mod" lands on whichever key it is here (modKey.ts); "Meta" and "Ctrl" name
+// their keys outright.
 export function parseKey(binding: string): Chord {
   const parts = binding.split("-");
   // A trailing empty token means the key itself was "-" ("Mod--").
   const key = parts[parts.length - 1] === "" ? "-" : parts.pop()!;
+  const mod = parts.includes("Mod");
   return {
     key: /^[A-Z]$/.test(key) ? key.toLowerCase() : key,
-    meta: parts.includes("Mod") || parts.includes("Meta"),
-    ctrl: parts.includes("Ctrl"),
+    meta: parts.includes("Meta") || (mod && modKey() === "Meta"),
+    ctrl: parts.includes("Ctrl") || (mod && modKey() === "Ctrl"),
     alt: parts.includes("Alt"),
     shift: parts.includes("Shift"),
   };
@@ -126,6 +157,14 @@ export function resolveChord<T extends KeyedCommand>(
   // Bare keys (no ⌘/⌃/⌥) are typing everywhere except on a focused list row,
   // where they are the row's verbs. Shift alone doesn't make a chord either.
   if (bare && flags.domain !== "list") return null;
+  // The shell owns Ctrl in the terminal (interactions.md §2). On a Mac that
+  // is every Ctrl chord, and the registry's domains already say so. Where Mod
+  // is Ctrl, the app's chords are Ctrl chords too, and the shell keeps the
+  // plain ones (Ctrl+C is an interrupt, Ctrl+D an end of input); the app keeps
+  // Ctrl with Shift or Alt, which no shell can hear apart from the plain form.
+  if (flags.domain === "terminal" && chord.ctrl && !chord.meta) {
+    if (modKey() === "Meta" || (!chord.shift && !chord.alt)) return null;
+  }
   for (const cmd of commands) {
     // A row verb only resolves on the kind of row it acts on.
     if (cmd.targetKind && cmd.targetKind !== flags.targetKind) continue;

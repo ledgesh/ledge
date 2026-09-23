@@ -6,6 +6,10 @@
 export interface WindowHandlers {
   open(): void;
   openDocs(page: string): void;
+  // Quit the whole app, every window with it. Bound where Quit is a command
+  // (lib/shell.ts quitsByCommand); on a Mac the menu bar's role item quits
+  // and nothing calls this.
+  quit(): void;
 }
 
 let handlers: WindowHandlers | null = null;
@@ -16,6 +20,10 @@ export function configureWindows(h: WindowHandlers): void {
 
 export function openWindow(): void {
   handlers?.open();
+}
+
+export function quitApp(): void {
+  handlers?.quit();
 }
 
 /** Show the manual in the window that holds it. `page` is a page title, for the

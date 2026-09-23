@@ -12,8 +12,9 @@
 // Three of the flags here withhold a verb that cannot work on this client, so
 // it is absent rather than present and failing: `runsBlocks`, `hasTerminal`
 // and `installsCli` (interactions.md §8). `picksFolders` withholds a button
-// inside a dialog the same way. `softKeyboard` changes an editor rather than
-// a verb, and `deviceKey` says which key authenticates (ios.md §8).
+// inside a dialog the same way. `quitsByCommand` adds a verb instead, where
+// no menu bar carries it. `softKeyboard` changes an editor rather than a
+// verb, and `deviceKey` says which key authenticates (ios.md §8).
 //
 // A configureX seam like the others (architecture.md §5). The entry point sets
 // it before bootView, the registry's `when` predicates and the chrome read it,
@@ -43,6 +44,9 @@ interface Shell {
   picksFolders: boolean;
   /** Whether this client has a PATH to put `ledge` on. */
   installsCli: boolean;
+  /** Whether Quit is one of this client's commands, because nothing native
+   * offers it. */
+  quitsByCommand: boolean;
 }
 
 let shell: Shell = {
@@ -55,6 +59,7 @@ let shell: Shell = {
   multiWindow: true,
   picksFolders: true,
   installsCli: true,
+  quitsByCommand: false,
 };
 
 export function configureShell(next: Partial<Shell>): void {
@@ -207,4 +212,18 @@ export function picksFolders(): boolean {
  */
 export function installsCli(): boolean {
   return shell.installsCli;
+}
+
+/**
+ * Whether Quit Ledge is a command here, with a chord and a palette entry
+ * (interactions.md §10).
+ *
+ * A Mac has a menu bar, and its Quit is the bar's `role: "quit"` item: AppKit
+ * answers ⌘Q before the view sees a key, so a command would never fire and
+ * would only duplicate the palette entry. A phone never quits by command. A
+ * Linux window has no menu bar, and without this verb Ctrl+Q would do nothing
+ * and the palette would have no way out but the window's close button.
+ */
+export function quitsByCommand(): boolean {
+  return shell.quitsByCommand;
 }

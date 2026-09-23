@@ -11,6 +11,7 @@ import {
   type CommandId,
 } from "./keys";
 import { parseKey } from "./keymap";
+import { configureModKey } from "./modKey";
 
 const ids = Object.keys(COMMANDS) as CommandId[];
 
@@ -42,6 +43,24 @@ describe("command key table", () => {
     for (let n = 1; n <= 9; n += 1) indexed.push(workspaceSelectKey(n), tabSelectKey(n));
     const statics = ids.flatMap((id) => [...keysOf(id)]);
     for (const key of indexed) expect(statics).not.toContain(key);
+  });
+
+  test("the indexed jumps do not collide with static bindings where Mod is Ctrl either", () => {
+    // Mod-1 is Ctrl+1 there, so the tab jump moves to Alt. Both are checked
+    // against the static table under that grammar, and against each other.
+    configureModKey("Ctrl");
+    try {
+      const norm = (k: string) => JSON.stringify(parseKey(k));
+      const statics = ids.flatMap((id) => [...keysOf(id)]).map(norm);
+      for (let n = 1; n <= 9; n += 1) {
+        expect(statics).not.toContain(norm(workspaceSelectKey(n)));
+        expect(statics).not.toContain(norm(tabSelectKey(n)));
+        expect(norm(workspaceSelectKey(n))).not.toBe(norm(tabSelectKey(n)));
+      }
+      expect(tabSelectKey(1)).toBe("Alt-1");
+    } finally {
+      configureModKey("Meta");
+    }
   });
 
   test("badge semantics are pinned: ⌘N = workspace, ⌃N = tab", () => {

@@ -226,6 +226,7 @@ function clientSeamRefusals(): Pick<RequestHandlers, ClientMethod> {
     windowNew: refuse("windowNew"),
     windowDocs: refuse("windowDocs"),
     windowRole: refuse("windowRole"),
+    appQuit: refuse("appQuit"),
     updateState: refuse("updateState"),
     updateCheck: refuse("updateCheck"),
     updateInstall: refuse("updateInstall"),

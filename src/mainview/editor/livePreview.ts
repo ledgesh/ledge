@@ -46,7 +46,8 @@ import {
 } from "@codemirror/view";
 import { openableUrl } from "../../shared/links";
 import { isTouchPointer } from "../lib/viewport";
-import { tooltip } from "../commands/format";
+import { modClick, tooltip } from "../commands/format";
+import { modHeld } from "../commands/keymap";
 import { textPosAtCoords } from "./clickPos";
 import { frontmatterRange } from "./frontmatter";
 import { openExternal, openTag, openWikiNote, wikiNotes } from "./bridge";
@@ -432,10 +433,15 @@ function liveLink(url: string): Decoration {
   }
   return mark;
 }
-const LINK_OPENABLE = Decoration.mark({
-  class: "ledge-mdlink",
-  attributes: { title: "⌘-click to open link" },
-});
+// Built on first use rather than at load, so the tooltip names the click this
+// client's Mod key makes (commands/modKey.ts).
+let linkOpenable: Decoration | null = null;
+function LINK_OPENABLE(): Decoration {
+  return (linkOpenable ??= Decoration.mark({
+    class: "ledge-mdlink",
+    attributes: { title: `${modClick()} to open link` },
+  }));
+}
 const LINK_PLAIN = Decoration.mark({ class: "ledge-mdlink" });
 const DONE = Decoration.mark({ class: "ledge-task-done" });
 
@@ -616,7 +622,7 @@ function buildDecorations(state: EditorState): DecorationSet {
       // opens it. The tooltip says so. Concealed links are emitted only when
       // untouched; bare URLs are emitted always.
       const live = s.url !== null && !touches(s, state.selection.ranges);
-      ranges.push((s.url ? (live ? liveLink(s.url) : LINK_OPENABLE) : LINK_PLAIN).range(s.from, s.to));
+      ranges.push((s.url ? (live ? liveLink(s.url) : LINK_OPENABLE()) : LINK_PLAIN).range(s.from, s.to));
     }
   }
   return Decoration.set(ranges, true);
@@ -676,7 +682,7 @@ const clickToOpen = EditorView.domEventHandlers({
     // the caret move, which reveals the raw title for fixing.
     const wiki = wikiTargetAt(view.state.doc, syntaxTree(view.state), pos);
     if (wiki) {
-      if (!event.metaKey && touches(wiki, view.state.selection.ranges)) return false;
+      if (!modHeld(event) && touches(wiki, view.state.selection.ranges)) return false;
       const docId = view.state.facet(sessionIdFacet);
       const parsed = parseWikiTarget(wiki.target);
       if (!parsed || !resolveWikiTitle(parsed.title, wikiNotes(docId))) return false;
@@ -690,14 +696,14 @@ const clickToOpen = EditorView.domEventHandlers({
     // even when the only note carrying it is this one.
     const tag = tagAt(view.state.doc, syntaxTree(view.state), pos);
     if (tag) {
-      if (!event.metaKey && touches(tag, view.state.selection.ranges)) return false;
+      if (!modHeld(event) && touches(tag, view.state.selection.ranges)) return false;
       event.preventDefault();
       openTag(view.state.facet(sessionIdFacet), tag.tag);
       return true;
     }
     const link = linkAt(view.state.doc, syntaxTree(view.state), pos);
     if (!link?.url) return false;
-    if (!event.metaKey && touches(link, view.state.selection.ranges)) return false;
+    if (!modHeld(event) && touches(link, view.state.selection.ranges)) return false;
     // Stop the native contenteditable click too. Without this the browser
     // still moves the DOM selection, CodeMirror syncs it back, and the caret
     // lands in the link, revealing the link that was just followed.

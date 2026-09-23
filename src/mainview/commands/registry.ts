@@ -66,6 +66,7 @@ import {
   SquareX,
   TableOfContents,
   AppWindow,
+  LogOut,
   TerminalSquare,
   TextSearch,
   TextSelect,
@@ -77,12 +78,12 @@ import { docIdsForPath, notesOf, trashOf } from "@/workspace/store";
 import { SCRATCH_DOC } from "@/workspace/seeds";
 import { parseFrontmatter } from "../../shared/frontmatter";
 import type { NoteMeta } from "../../shared/rpc-schema";
-import { hasTerminal, installsCli, multiWindow, runsBlocks, spawnsSessions } from "../lib/shell";
+import { hasTerminal, installsCli, multiWindow, quitsByCommand, runsBlocks, spawnsSessions } from "../lib/shell";
 import { docsWindow } from "../lib/windows";
 import { offersCheck, updateState } from "../lib/updates";
 import { activeConnection, linkState, reconnectLink } from "../lib/connections";
 import { keysOf, listKeysOf, tabSelectKey, titleOf, workspaceSelectKey, type CommandId } from "./keys";
-import { chipOf } from "./format";
+import { chipOf, keyChip } from "./format";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
 
 // A command whose identity (title/keys) comes from the key table; the rest is
@@ -138,7 +139,7 @@ function templateChoices(ctx: CommandCtx): TemplateChoice[] {
 // through instantiateTemplate, so the note teaches the syntax and expands it
 // when a note is made from it. The title is the app's placeholder word, since
 // the H1 is the rename UI.
-const STARTER_TEMPLATE = `---
+const starterTemplate = (): string => `---
 template: true
 ---
 # Untitled Template
@@ -146,7 +147,7 @@ template: true
 This note is a template because its frontmatter says \`template: true\` —
 that line is the whole mechanism. Mark any note the same way (or run
 "Make This Note a Template" from the palette) and it appears under
-New Note from Template… (⌥⌘N) immediately.
+New Note from Template… (${keyChip("note.fromTemplate")}) immediately.
 
 Creating a note from a template fills in these tokens:
 
@@ -156,19 +157,19 @@ Creating a note from a template fills in these tokens:
 - {{yesterday}} / {{tomorrow}} — adjacent days, handy in [[wikilinks]]
 
 Everything else copies as written: frontmatter (cwd, env, tags) carries into
-every instance, and a \`prompt\` fence arrives ready to run (⌘↩) — a
+every instance, and a \`prompt\` fence arrives ready to run (${keyChip("block.runInline")}) — a
 template that runs is the point. The H1 above is replaced by each new note's
 own title, so leave it, or spell it \`# {{title}}\`; both work.
 
 A template may say \`template: daily\` instead of \`true\`: that one is what
-⌘J (and \`ledge today\`) instantiates as each day's note — per workspace,
+${keyChip("daily.open")} (and \`ledge today\`) instantiates as each day's note — per workspace,
 each names its own (or run "New Daily Template" from the palette). Now make
 this skeleton yours.
 `;
 
 // What "New Daily Template" creates: the daily role's starter, pre-marked so
 // nobody hand-writes the frontmatter. The body is spare where
-// STARTER_TEMPLATE is a cheatsheet, because every line here lands verbatim in
+// starterTemplate is a cheatsheet, because every line here lands verbatim in
 // each day's note. The H1 is replaced by the date at instantiation.
 const DAILY_STARTER = `---
 template: daily
@@ -373,7 +374,7 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: LayoutTemplate,
       when: (ctx) => !docsSelected(ctx), // creates into the selected folder
       run: (ctx) => {
-        void deps.createNote(ctx.selected.folder, STARTER_TEMPLATE).then((note) => {
+        void deps.createNote(ctx.selected.folder, starterTemplate()).then((note) => {
           deps.revealTitle(note.path);
           ctx.dispatch({ type: "noteAppeared", folder: ctx.selected.folder, note });
           ctx.dispatch({ type: "openNote", note });
@@ -778,6 +779,14 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: AppWindow,
       when: () => multiWindow(),
       run: () => deps.newWindow(),
+    }),
+    // Quit, where no menu bar holds it (lib/shell.ts quitsByCommand). A Mac
+    // never fires this: AppKit answers ⌘Q from the bar's role item before the
+    // view sees a key (interactions.md §10).
+    cmd("app.quit", {
+      icon: LogOut,
+      when: () => quitsByCommand(),
+      run: () => deps.quitApp(),
     }),
     // Put `ledge` on this Mac's PATH. The outcome always
     // surfaces, so nobody has to go hunting in a bin dir: success (where they

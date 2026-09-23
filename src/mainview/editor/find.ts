@@ -15,6 +15,7 @@ import {
   setSearchQuery,
 } from "@codemirror/search";
 import { COMMANDS, keyOf } from "../commands/keys";
+import { modKey } from "../commands/modKey";
 
 // Find and replace on top of @codemirror/search. The stock panel always shows
 // both a find row and a replace row in a loose inline layout. SearchPanel
@@ -86,7 +87,7 @@ class SearchPanel implements Panel {
       this.toggleReplace(),
     );
     this.findField = field("Find", this.query.search);
-    const prev = btn("↑", "ledge-search-btn", "Previous match (⇧Enter)", () => findPrevious(this.view));
+    const prev = btn("↑", "ledge-search-btn", `Previous match (${modKey() === "Meta" ? "⇧Enter" : "Shift+Enter"})`, () => findPrevious(this.view));
     const next = btn("↓", "ledge-search-btn", "Next match (Enter)", () => findNext(this.view));
     this.allBtn = btn("All", "ledge-search-btn", "Select all matches (toggle)", () => this.toggleAll());
     // The previous, next and All buttons in one box, so they move as one.

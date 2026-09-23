@@ -2,13 +2,14 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Columns2, FilePlus, Plus, Rows2, SquareX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { softKeyboard } from "@/lib/shell";
-import { useCmdHeld, useCtrlHeld } from "@/lib/useCmdHeld";
+import { useModHeld, useTabModHeld } from "@/lib/useModHeld";
 import { useRowMenu } from "@/lib/useRowMenu";
 import { ContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { useCommands } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
-import { tooltip } from "@/commands/format";
+import { jumpBadge, tooltip } from "@/commands/format";
+import { tabSelectKey } from "@/commands/keys";
 import { workspaceKind } from "./channel";
 import { isNoteDirty, onDirtyChange } from "@/notes/store";
 import { linkState, subscribeConnections } from "@/lib/connections";
@@ -186,13 +187,13 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
 function TabBar({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   const { dispatch, selected } = useWorkspace();
   const { exec } = useCommands();
-  // Tab quick-jump is ⌃1…9 (commands/keys.ts tabSelectKey), and the badges
-  // show while either Command or Control is held. The jump acts on the focused
-  // pane, so only its tab bar badges: badging another pane's tabs would show
-  // numbers that do not switch to them.
-  const cmdHeld = useCmdHeld();
-  const ctrlHeld = useCtrlHeld();
-  const badges = focused && (cmdHeld || ctrlHeld);
+  // Tab quick-jump is ⌃1…9 on a Mac and Alt+1…9 elsewhere (commands/keys.ts
+  // tabSelectKey), and the badges show while either Mod or that modifier is
+  // held. The jump acts on the focused pane, so only its tab bar badges:
+  // badging another pane's tabs would show numbers that do not switch to them.
+  const modHeld = useModHeld();
+  const tabModHeld = useTabModHeld();
+  const badges = focused && (modHeld || tabModHeld);
   const canClosePane = leafIds(selected.root).length > 1;
   const stripRef = useRef<HTMLDivElement>(null);
   // The right-click menu: which tab, and where to anchor it. Null when closed.
@@ -551,7 +552,7 @@ function TabItem({
       </button>
       {hint != null && (
         <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 rounded bg-foreground/10 px-1 text-[10px] font-medium leading-tight text-foreground/80">
-          ^{hint}
+          {jumpBadge(tabSelectKey(hint))}
         </span>
       )}
     </div>

@@ -800,6 +800,11 @@ export type LedgeRPC = {
       // view is in is not a fact about the notes, so it never becomes a frame.
       // A shell with one window answers false.
       windowRole: { params: {}; response: { docs: boolean; page: string } };
+      // Quit the app: every window, and the connection each holds. The verb
+      // exists where no menu bar offers Quit (mainview/lib/shell.ts
+      // quitsByCommand); on a Mac the bar's role item quits and this is never
+      // called. `ok` is false on a shell that cannot quit itself.
+      appQuit: { params: {}; response: { ok: boolean } };
       // This app's own update, which is the client's and never a server's: a
       // server across a connection is a different program, updated by whoever
       // installed it (remote.md §11). All three are in NATIVE_METHODS and never

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useCmdHeld } from "@/lib/useCmdHeld";
+import { useModHeld } from "@/lib/useModHeld";
 import { useListNav } from "@/lib/useListNav";
 import { onBlankSpace, useRowMenu } from "@/lib/useRowMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
@@ -16,7 +16,8 @@ import { ConnectionBar } from "./ConnectionBar";
 import { useCommands, useCommandTitle } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { configureUi, uiHooks } from "@/commands/glue";
-import { keyChip, tooltip } from "@/commands/format";
+import { jumpBadge, keyChip, tooltip } from "@/commands/format";
+import { workspaceSelectKey } from "@/commands/keys";
 import { targetAttrs } from "@/commands/target";
 import { deleteDeletedWorkspace, restoreDeletedWorkspace } from "./actions";
 import {
@@ -126,7 +127,7 @@ let draggingWs: string | null = null;
 function WorkspaceStrip({ stacked }: { stacked: boolean }) {
   const { state, dispatch } = useWorkspace();
   const { exec } = useCommands();
-  const cmdHeld = useCmdHeld();
+  const modHeld = useModHeld();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // The right-click menu: which workspace, and where to anchor it. Null when closed.
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -266,7 +267,7 @@ function WorkspaceStrip({ stacked }: { stacked: boolean }) {
               selected={ws.id === state.selectedId}
               renaming={renamingId === ws.id}
               canClose={strip.length > 1}
-              hint={cmdHeld && i < 9 ? i + 1 : null}
+              hint={modHeld && i < 9 ? i + 1 : null}
               rowProps={nav.rowProps(ws.id, i)}
               onSelect={() => exec("workspace.open", { kind: "workspace", id: ws.id })}
               onBeginRename={() => setRenamingId(ws.id)}
@@ -502,7 +503,7 @@ function WorkspaceRow({
       )}
       {hint != null && (
         <span className="pointer-events-none absolute right-1.5 top-1 rounded bg-foreground/10 px-1 text-[10px] font-medium leading-tight text-foreground/80">
-          ⌘{hint}
+          {jumpBadge(workspaceSelectKey(hint))}
         </span>
       )}
     </div>

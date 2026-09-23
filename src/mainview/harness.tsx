@@ -52,6 +52,7 @@ import {
 } from "../shared/settings";
 import { applyAppearance } from "./lib/theme";
 import { configureShell } from "./lib/shell";
+import { configureModKey } from "./commands/modKey";
 import { configureLayout, restoredState } from "./workspace/persist";
 import { holdSaves } from "./notes/store";
 import { resolveStrandedNotes } from "./workspace/editorPool";
@@ -74,7 +75,16 @@ import { docsState } from "./workspace/store";
 // drawer, which is what `hasTerminal` below sets.
 const SHELL = new URLSearchParams(window.location.search).get("shell") ?? "";
 const FAKING_IOS = SHELL === "ios";
+// `?mod=ctrl` runs the Ctrl keyboard grammar, the one a Linux desktop gets
+// (commands/modKey.ts), in this Mac-hosted WebKit: Mod is Ctrl, the tab jump
+// is Alt+1…9, the terminal keeps plain Ctrl, and Quit is a command. Set
+// before configureShell, since the shell's Quit flag follows it.
+const CTRL_MOD = new URLSearchParams(window.location.search).get("mod") === "ctrl";
+if (CTRL_MOD) configureModKey("Ctrl");
 configureShell({
+  // Quit is a command only where no menu bar carries it (lib/shell.ts
+  // quitsByCommand), which is the Ctrl grammar's desktop.
+  quitsByCommand: CTRL_MOD,
   // `runsBlocks` is absent from this list because it is true of every shell the
   // harness can be. A phone runs a note's blocks inline as a Mac does, and the
   // two differ over the drawer alone (lib/shell.ts).
@@ -1369,6 +1379,7 @@ void loadUpdateState();
 // same seam. A spec in the ordinary harness window sees which page was asked
 // for; loading the harness with `?docs=1` renders that window itself.
 const windowOpens: number[] = [];
+const quitAsks: number[] = [];
 const docsOpens: string[] = [];
 configureWindows({
   open: () => {
@@ -1376,6 +1387,9 @@ configureWindows({
   },
   openDocs: (page) => {
     docsOpens.push(page);
+  },
+  quit: () => {
+    quitAsks.push(quitAsks.length + 1);
   },
 });
 
@@ -1400,6 +1414,8 @@ declare global {
       linkOpens: () => string[];
       // How many windows New Window asked the shell for.
       windowOpens: () => number;
+      // How many times a command asked the shell to quit.
+      quitAsks: () => number;
       // Every page the manual's window was asked for, in order ("" is the
       // landing page). The window itself is another webview, which a spec
       // reaches by loading the harness with `?docs=1`.
@@ -1515,6 +1531,7 @@ window.__harness = {
   settingsText: (home) => settingsFiles[home],
   linkOpens: () => [...linkOpens],
   windowOpens: () => windowOpens.length,
+  quitAsks: () => quitAsks.length,
   docsOpens: () => [...docsOpens],
   showDocs: (page) => dispatchDocsShow(page),
   setUpdate: (state) => pushUpdate(state),
