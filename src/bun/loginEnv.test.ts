@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanLoginEnv, dedupePath, envCommand, parseEnvOutput, RESOLVING_VAR } from "./loginEnv";
+import { cleanLoginEnv, dedupePath, envCommand, parseEnvOutput, RESOLVING_VAR, withUtf8Locale } from "./loginEnv";
 
 const N = "ledge-env-n";
 const wrap = (body: string, before = "", after = "") => `${before}${N}<${body}>${N}${after}`;
@@ -44,5 +44,38 @@ describe("cleanLoginEnv", () => {
 describe("dedupePath", () => {
   test("drops empty entries", () => {
     expect(dedupePath(":/a::/b:")).toBe("/a:/b");
+  });
+});
+
+describe("withUtf8Locale", () => {
+  const all = () => true;
+  const none = () => false;
+
+  test("an env with no locale gets LANG from the Mac's region", () => {
+    expect(withUtf8Locale({ PATH: "/bin" }, "pt_BR", all)).toEqual({ PATH: "/bin", LANG: "pt_BR.UTF-8" });
+  });
+
+  test("a region modifier after @ is dropped", () => {
+    expect(withUtf8Locale({}, "en_GB@rg=uszzzz", all).LANG).toBe("en_GB.UTF-8");
+  });
+
+  test("a region with no installed UTF-8 locale falls back to en_US.UTF-8", () => {
+    expect(withUtf8Locale({}, "xx_YY", none).LANG).toBe("en_US.UTF-8");
+  });
+
+  test("no region, or one that is not a region identifier, falls back to en_US.UTF-8", () => {
+    expect(withUtf8Locale({}, null, all).LANG).toBe("en_US.UTF-8");
+    expect(withUtf8Locale({}, "../../etc", all).LANG).toBe("en_US.UTF-8");
+  });
+
+  test("any locale variable the account set is left alone", () => {
+    const set: Record<string, string>[] = [{ LANG: "C" }, { LC_CTYPE: "UTF-8" }, { LC_ALL: "de_DE.UTF-8" }];
+    for (const env of set) {
+      expect(withUtf8Locale(env, "en_US", all)).toEqual(env);
+    }
+  });
+
+  test("an empty locale variable counts as unset", () => {
+    expect(withUtf8Locale({ LANG: "" }, "en_US", all).LANG).toBe("en_US.UTF-8");
   });
 });

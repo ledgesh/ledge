@@ -930,7 +930,11 @@ shells run `-i` without `-l`, so without it nothing reads `~/.zprofile`, where
 Homebrew puts its PATH. `-l` and not `-i`, because the note shell sources the
 rc files itself. A shell that fails, prints no env, or takes over five seconds
 leaves `process.env` as the base, with a warning in the launch log; the test
-preload skips it (`LEDGE_SKIP_LOGIN_ENV`). The base layer is first scrubbed of *host-terminal identity*
+preload skips it (`LEDGE_SKIP_LOGIN_ENV`). On macOS, a login env with no
+`LANG`, `LC_CTYPE` or `LC_ALL` gets `LANG` set to the Mac's region as UTF-8
+(`en_US.UTF-8` when that locale is not installed), the way Terminal sets it:
+bash's login files never set one, and in the C locale `pbcopy` writes UTF-8
+as MacRoman. The base layer is first scrubbed of *host-terminal identity*
 (`CMUX_*`, `GHOSTTY_*`, `ITERM_*`, `TERM_PROGRAM`, `TMUX`, …): the app
 inherits those from whatever terminal launched it, and inside a Ledge PTY
 every one is a false fact — cmux's `claude` shim, for one, keys on

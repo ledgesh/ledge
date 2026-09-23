@@ -4,7 +4,9 @@
 // without `-l`, so nothing reads ~/.zprofile, where Homebrew puts its PATH.
 // The resolving shell runs `-l` and not `-i`: the note shell sources the rc
 // files itself, and an rc that execs tmux or fish would never return here.
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 /** How long the login shell gets to print its env before boot gives up on it. */
 export const LOGIN_ENV_TIMEOUT_MS = 5_000;
@@ -125,6 +127,52 @@ export async function resolveLoginEnv(
     return fallback;
   }
   return cleanLoginEnv(env);
+}
+
+// The variables a Unix tool reads to choose its text encoding, in precedence
+// order. Any one of them set means the account chose a locale.
+const LOCALE_VARS = ["LC_ALL", "LC_CTYPE", "LANG"] as const;
+
+// A macOS region identifier such as `en_US` or `pt_BR`, checked before it
+// becomes a path under /usr/share/locale.
+const APPLE_LOCALE = /^[A-Za-z]{2,3}(_[A-Za-z0-9]{2,4})?$/;
+
+/**
+ * `env` with LANG set to a UTF-8 locale when no locale variable is set. A Mac
+ * app opened from the Dock has none, and Terminal sets LANG itself, so login
+ * files rarely do. Without it, note shells run in the C locale: pbcopy reads
+ * UTF-8 as MacRoman and zsh prints `’` as escape codes. `appleLocale` is the
+ * region from System Settings (`en_US`, or `en_GB@rg=…`), used when that
+ * locale is installed, else en_US.UTF-8.
+ */
+export function withUtf8Locale(
+  env: Record<string, string>,
+  appleLocale: string | null,
+  installed: (name: string) => boolean,
+): Record<string, string> {
+  if (LOCALE_VARS.some((key) => env[key])) return env;
+  const region = appleLocale?.split("@")[0] ?? "";
+  const own = APPLE_LOCALE.test(region) ? `${region}.UTF-8` : null;
+  return { ...env, LANG: own && installed(own) ? own : "en_US.UTF-8" };
+}
+
+/**
+ * `withUtf8Locale` against this Mac's region setting and installed locales.
+ * Off macOS it returns `env` unchanged: a Linux server's shells get their
+ * locale from sshd and the distribution, and which locales exist there varies.
+ */
+export async function resolveUtf8Locale(env: Record<string, string>): Promise<Record<string, string>> {
+  if (process.platform !== "darwin") return env;
+  if (LOCALE_VARS.some((key) => env[key])) return env;
+  let appleLocale: string | null = null;
+  try {
+    const p = Bun.spawn(["defaults", "read", "-g", "AppleLocale"], { stdout: "pipe", stderr: "ignore" });
+    appleLocale = (await new Response(p.stdout).text()).trim() || null;
+    await p.exited;
+  } catch {
+    // No region setting to read; en_US.UTF-8 below.
+  }
+  return withUtf8Locale(env, appleLocale, (name) => existsSync(join("/usr/share/locale", name)));
 }
 
 function definedOnly(env: Record<string, string | undefined>): Record<string, string> {

@@ -69,9 +69,16 @@ export function htmlFromScriptOutput(out: string): string {
   }
 }
 
+// pbcopy and pbpaste take their text encoding from the locale, and an app
+// launched from the Dock has no LANG or LC_CTYPE. Without one they fall back
+// to MacRoman, so a copied ’ (UTF-8 E2 80 99) lands on the pasteboard as ‚Äô.
+// LC_ALL is dropped because it would override LC_CTYPE.
+const { LC_ALL: _, ...inherited } = process.env;
+const UTF8_ENV = { ...inherited, LC_CTYPE: "UTF-8" };
+
 export async function writeClipboard(text: string): Promise<void> {
   try {
-    const p = Bun.spawn(["pbcopy"], { stdin: "pipe" });
+    const p = Bun.spawn(["pbcopy"], { stdin: "pipe", env: UTF8_ENV });
     p.stdin.write(text);
     await p.stdin.end();
     await p.exited;
@@ -82,7 +89,7 @@ export async function writeClipboard(text: string): Promise<void> {
 
 export async function readClipboardText(): Promise<string> {
   try {
-    const p = Bun.spawn(["pbpaste"], { stdout: "pipe" });
+    const p = Bun.spawn(["pbpaste"], { stdout: "pipe", env: UTF8_ENV });
     const text = await new Response(p.stdout).text();
     await p.exited;
     return text;

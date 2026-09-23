@@ -101,7 +101,7 @@ import {
   type SpawnDeps,
 } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
-import { resolveLoginEnv } from "./loginEnv";
+import { resolveLoginEnv, resolveUtf8Locale } from "./loginEnv";
 import { readFileSync, statSync } from "node:fs";
 import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
 
@@ -422,7 +422,10 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
   // through vaultUnlock.
   await loadVault();
 
-  const shellEnv: Record<string, string> = { ...(await loginEnv), TERM: "xterm-256color" };
+  const shellEnv: Record<string, string> = {
+    ...(await resolveUtf8Locale(await loginEnv)),
+    TERM: "xterm-256color",
+  };
 
   // Per-session spawn parameters, as the view parsed them from each note's
   // frontmatter (sessionConfigure). Read at spawn, never applied to a running
