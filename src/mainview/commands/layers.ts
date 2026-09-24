@@ -41,6 +41,9 @@ export function createLayerStack<T>() {
 
 const layers = createLayerStack<Layer>();
 let listening = false;
+// Told when the stack goes from empty to not, and back. One listener: the
+// Android shell's Back button is the only thing that asks (`watchLayers`).
+let opened: (open: boolean) => void = () => {};
 
 function onKey(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
@@ -61,14 +64,36 @@ export function pushLayer(kind: LayerKind, onEscape: () => void): () => void {
   if (!listening) {
     window.addEventListener("keydown", onKey, true);
     listening = true;
+    opened(true);
   }
   return () => {
     dispose();
     if (layers.size() === 0 && listening) {
       window.removeEventListener("keydown", onKey, true);
       listening = false;
+      opened(false);
     }
   };
+}
+
+/**
+ * Report whether any layer is open, now and on every change. Android's Back
+ * button closes the top layer while one is, and backgrounds the app while none
+ * is, and the shell has to know which before the press arrives (interactions.md
+ * §6).
+ */
+export function watchLayers(fn: (open: boolean) => void): void {
+  opened = fn;
+  fn(layers.size() > 0);
+}
+
+/** What Escape does, for a press that is not a key: close the top layer.
+ * False when nothing is open. */
+export function escapeTop(): boolean {
+  const top = layers.top();
+  if (!top) return false;
+  top.onEscape();
+  return true;
 }
 
 export function modalOpen(): boolean {

@@ -14,7 +14,8 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What Swift implements: twenty strings and a flat switch. The calls are
+/** What the shells implement: twenty strings and a flat switch in Swift, and
+ * the same plus `@back` in Kotlin (android/.../WebHost.kt). The calls are
  * their own vocabulary, `clipboard.read` and not `clipboardRead`: they are not
  * the schema's methods, and naming them as if they were is the invitation to
  * implement half the schema in Swift (ios.md §2). `clipboard.image` is the case
@@ -37,6 +38,11 @@ export const SHELL_CALLS = [
   // without this call it would offer Bold over a passphrase prompt. Three
   // answers, not two: a running block wants keys of its own (`barFaceOf` below).
   "@focus",
+  // Whether the page has a layer open for the system Back button to close
+  // (commands/layers.ts). Android's alone: a shell says it has that button in
+  // its `@hello`, and the page sends this only then, so Swift has no case for
+  // it.
+  "@back",
   // The device's four clipboard answers. `menu.set` below does nothing on a
   // phone (ios.md §11) and is on the list anyway: the page answers it without
   // asking, and Swift's case is there so a page that does ask gets a reply
@@ -142,7 +148,10 @@ export type ToPage =
   | { t: "key"; k: string }
   // A tap on the status bar. The page's scrolling is all in CSS, so iOS's
   // scroll to the top has to be done here (lib/scrollToTop.ts).
-  | { t: "top" };
+  | { t: "top" }
+  // Android's Back button, sent while `@back` last said a layer was open. The
+  // page closes the top one, as Escape would.
+  | { t: "back" };
 
 /** What `@hello` answers: who this client is (remote.md §5), what to call the
  * machine it is pointed at (remote.md §8, so the indicator can name one), and
@@ -156,6 +165,9 @@ export interface ShellHello {
   label: string;
   destination: string;
   key: string;
+  /** True for a shell with a system Back button (Android). Absent from iOS's
+   * answer. */
+  back?: boolean;
 }
 
 export interface Shell {
@@ -175,6 +187,10 @@ export interface Shell {
   /** Say what has focus, so the shell knows which bar to put on the keyboard it
    * is about to show. Idempotent and cheap: only transitions are sent. */
   focus(over: BarFace): void;
+  /** Say whether a layer is open, so Back knows whether it has anything to
+   * close here. Only transitions are sent, and only to a shell whose `@hello`
+   * said `back`. */
+  layered(open: boolean): void;
   /** Told when the app comes back to the foreground, and how many
    * milliseconds it was away. */
   onResume(fn: (awayMs: number) => void): void;
@@ -184,6 +200,8 @@ export interface Shell {
   onKey(fn: (name: string) => void): void;
   /** Told when the status bar was tapped. */
   onTop(fn: () => void): void;
+  /** Told when Back was pressed with a layer open. */
+  onBack(fn: () => void): void;
   /** One message from Swift. */
   deliver(msg: ToPage): void;
 }
@@ -203,6 +221,7 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
   let verb: (id: string) => void = () => {};
   let key: (name: string) => void = () => {};
   let top: () => void = () => {};
+  let back: () => void = () => {};
 
   function call(m: ShellCall, p: unknown): Promise<unknown> {
     const id = nextId++;
@@ -229,6 +248,10 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
       void call("@focus", { over }).catch(() => {});
     },
 
+    layered(open) {
+      void call("@back", { open }).catch(() => {});
+    },
+
     onResume(fn) {
       resumed = fn;
     },
@@ -243,6 +266,10 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
 
     onTop(fn) {
       top = fn;
+    },
+
+    onBack(fn) {
+      back = fn;
     },
 
     async hello() {
@@ -297,6 +324,9 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
           return;
         case "top":
           top();
+          return;
+        case "back":
+          back();
           return;
       }
     },

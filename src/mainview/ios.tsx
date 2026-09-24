@@ -14,6 +14,7 @@ import { hideBooting, showBooting } from "./lib/booting";
 import { attachShell, barFaceOf, focusReporter, nativeOverlay, type Shell } from "./lib/nativeBridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { dispatchNativeCommand } from "./lib/menu";
+import { escapeTop, watchLayers } from "./commands/layers";
 import { configureShell } from "./lib/shell";
 import { scrollToTop } from "./lib/scrollToTop";
 
@@ -54,7 +55,7 @@ async function start(): Promise<void> {
   // Asked before the first dial, because the client id keys the saved layout
   // (remote.md §5). Keying it stops a phone restoring a desktop's three-pane
   // tree onto a 390-point screen (ios.md §9).
-  const { client, label, destination, key } = await shell.hello();
+  const { client, label, destination, key, back } = await shell.hello();
   mark("hello");
 
   // A phone runs a note's blocks and has no terminal drawer (ios.md §8 gives
@@ -191,6 +192,13 @@ async function start(): Promise<void> {
   shell.onKey((name) => void sendRunKey(name));
   shell.onTop(() => scrollToTop());
   watchEditorFocus(shell);
+  // Android's Back button closes the top layer, the way Escape does
+  // (interactions.md §6). The shell is told while one is open, so a press with
+  // none open leaves the app without asking the page first.
+  if (back) {
+    shell.onBack(() => void escapeTop());
+    watchLayers((open) => shell.layered(open));
+  }
 
   // Choosing a server from the connection chrome, the same one or another, runs
   // this boot again. Everything workspace-scoped is scoped to a server

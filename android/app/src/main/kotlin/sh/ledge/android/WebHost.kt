@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -20,8 +21,9 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
-import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -61,6 +63,20 @@ class WebHost : ComponentActivity() {
      * ladder still dialling cannot ask for them twice. */
     private var leaving = false
 
+    private lateinit var bar: AccessoryBar
+    /** Whether the keyboard is up, from the insets: the bar shows only then. */
+    private var typing = false
+    /** Whether the page has a layer open for Back to close (`@back`). */
+    private var layered = false
+    /** Back closes the page's top layer while it has one, and otherwise puts
+     * the app behind the launcher. Not the default, which finishes this
+     * activity and takes the page, its runs and its socket with it. */
+    private val back = object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            if (layered) deliver(JSONObject().put("t", "back")) else moveTaskToBack(true)
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -99,6 +115,14 @@ class WebHost : ComponentActivity() {
 
             // The page never navigates away from itself. A link goes out through
             // `link.open` and its scheme check; anything else is refused here.
+            // A new page, including one the page reloaded itself: no layer
+            // open and no field focused, until it says otherwise.
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                layered = false
+                bar.wear("none")
+                showBar()
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                 request.url.host != ORIGIN_HOST
 
@@ -136,17 +160,27 @@ class WebHost : ComponentActivity() {
         // the keyboard are this window's to stay clear of. Padding by all
         // three keeps the page's own layout what it is on iOS: a full screen
         // that shrinks while the keyboard is up (ios.md §7). The padding is a
-        // container's, because a WebView draws its page under its own.
-        val frame = FrameLayout(this)
-        frame.addView(web, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        // container's, because a WebView draws its page under its own. The bar
+        // sits at the container's foot, which is the keyboard's top edge.
+        bar = AccessoryBar(
+            this,
+            verb = { deliver(JSONObject().put("t", "verb").put("id", it)) },
+            key = { deliver(JSONObject().put("t", "key").put("k", it)) },
+        )
+        val frame = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        frame.addView(web, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        frame.addView(bar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         ViewCompat.setOnApplyWindowInsetsListener(frame) { view, insets ->
             val clear = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime(),
             )
             view.setPadding(clear.left, clear.top, clear.right, clear.bottom)
+            typing = insets.isVisible(WindowInsetsCompat.Type.ime())
+            showBar()
             WindowInsetsCompat.CONSUMED
         }
         setContentView(frame)
+        onBackPressedDispatcher.addCallback(this, back)
         barIcons(resources.configuration)
 
         val server = store.selected()
@@ -158,6 +192,10 @@ class WebHost : ComponentActivity() {
             .onFailure { Log.e(TAG, "[shell] no device key: ${it.message}") }
         web.loadUrl(ENTRY)
         openCode(intent)
+    }
+
+    private fun showBar() {
+        bar.visibility = if (typing && bar.hasFace) View.VISIBLE else View.GONE
     }
 
     /** The bars are drawn over the theme's background, which follows the
@@ -308,7 +346,8 @@ class WebHost : ComponentActivity() {
                     .put("client", store.client)
                     .put("label", ServerStore.label(this))
                     .put("destination", store.selected()?.destination.orEmpty())
-                    .put("key", line))
+                    .put("key", line)
+                    .put("back", true))
             }
             "@open" -> open(id)
             "@close" -> {
@@ -321,9 +360,16 @@ class WebHost : ComponentActivity() {
                 Log.i(TAG, "[view] ${params.optString("text")}")
                 reply(id, null)
             }
-            // Which accessory bar the keyboard wears (ios.md §7). There is no
-            // bar here yet, so the answer is only acknowledged.
-            "@focus" -> reply(id, null)
+            // Which face the keyboard's bar wears (ios.md §7).
+            "@focus" -> {
+                bar.wear(params.optString("over"))
+                showBar()
+                reply(id, null)
+            }
+            "@back" -> {
+                layered = params.optBoolean("open")
+                reply(id, null)
+            }
 
             "clipboard.read" -> reply(id, clip()?.coerceToText(this)?.toString().orEmpty())
             "clipboard.write" -> {

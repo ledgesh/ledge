@@ -741,3 +741,16 @@ describe("a tap on the status bar", () => {
     expect(taps).toBe(1);
   });
 });
+
+describe("Android's Back button", () => {
+  test("the shell is told whether a layer is open, and a press reaches the subscriber", () => {
+    const { shell, sent } = recorder();
+    shell.layered(true);
+    expect(sent.at(-1)).toEqual({ t: "call", id: 1, m: "@back", p: { open: true } });
+    expect(() => shell.deliver({ t: "back" })).not.toThrow();
+    let presses = 0;
+    shell.onBack(() => presses++);
+    shell.deliver({ t: "back" });
+    expect(presses).toBe(1);
+  });
+});

@@ -107,7 +107,8 @@ section.
 | ⌘V of a picture | Paste in the text callout, which embeds a copied picture the way ⌘V does (ios.md §11); Insert Image…, on the bar and in the palette, for one nobody copied |
 | Ctrl-C, Ctrl-D, Escape, the arrows, at a running block | the same bar wearing its other face, which is a keyboard rather than a menu (§6a) |
 | ⌘Escape / Escape Escape out of a running block | a Back to note button in the run's own header, and the last key on that face (§6a) |
-| Nothing dismisses the keyboard | the bar's own last button, apart from the verbs, and on every face that is not a run's |
+| Nothing dismisses the keyboard | the bar's own last button, apart from the verbs, and on every face that is not a run's. Android has no such button: its Back and its navigation bar put the keyboard away |
+| Escape out of a layer | Android's Back, which closes the top layer while one is open and puts the app in the background while none is (§6) |
 | A run taking the keyboard on its own | a tap on its panel, or on the Tap to type button in its header — raising a software keyboard should cost a deliberate touch (§6a) |
 | A tab switch putting the caret in the note | a tap in the text; the switch only shows the note, and only a new note takes the caret on its own |
 
@@ -1213,6 +1214,15 @@ topmost layer only:
 While a layer of kind menu/dialog/overlay is open, the window keymap
 dispatcher is fully suppressed. New modals must register with `pushLayer`
 rather than adding their own capture-phase listeners.
+
+**Android's Back button is Escape for this stack.** The page tells the shell
+whether any layer is open (`watchLayers`, the `@back` bridge call), and a press
+while one is sends `{t: "back"}`, which closes the top layer (`escapeTop`). With
+none open, the shell puts the app behind the launcher (`moveTaskToBack`) rather
+than taking Android's default, which finishes the activity and drops the page,
+its runs and its socket with it. The keyboard is not a layer: the system closes
+it on Back before the app sees the press. The CodeMirror popups in row 4 are not
+layers either, so Back does not close them.
 
 **The inline terminal is not a layer** (`editor/inlineTerm.ts`): a focused live
 run pushes nothing and suppresses nothing — it is a place focus can *be*, not
