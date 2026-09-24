@@ -3,6 +3,10 @@
 # Xcode-shaped local setup that the next contributor would not have. The four
 # steps here are the same four CONTRIBUTING.md asks for by hand, in the same
 # order, so a red run names a step a human already knows how to reproduce.
+#
+# Twice: once on macOS and once on Linux, since the app ships on both. The
+# two jobs are the same four steps; what differs is the PTY library each
+# compiles, the bundle each assembles, and the WebKit each drives.
 name: CI
 
 on:
@@ -22,12 +26,14 @@ concurrency:
 
 jobs:
   green-bar:
-    # macOS only, and not for lack of ambition. The PTY dylib needs clang and
-    # the macOS SDK, the bundle needs actool, and the e2e suite needs WebKit,
-    # which is the engine the app ships inside. A cheap Linux job could run
-    # tsc and bun test, but it would be a green bar for a platform nobody runs
-    # this app on, and the divergence it hid would surface on a user's Mac.
-    runs-on: macos-latest
+    name: green-bar (${{ matrix.os }})
+    strategy:
+      # A red Mac is a finding on its own, and so is a red Linux; neither
+      # should hide behind the other's cancellation.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     # A hung run bills until something kills it, and macOS minutes bill at ten
     # times the rate of Linux ones. The whole suite is about five minutes.
     timeout-minutes: 20
@@ -62,22 +68,27 @@ jobs:
       - name: Unit and filesystem tests
         run: bun test
 
-      # `bun run build` is the view build, the CLI bundle, the PTY dylib, and
-      # the .app assembled from them. Building the bundle rather than just the
-      # view is what covers electrobun.config.ts: a copy map pointing at a path
-      # that no longer exists produces an app that is broken only once it is
-      # launched, which is a thing to learn here and not from a user.
+      # `bun run build` is the view build, the CLI bundle, the PTY library,
+      # and the app bundle assembled from them. Building the bundle rather
+      # than just the view is what covers electrobun.config.ts: a copy map
+      # pointing at a path that no longer exists produces an app that is
+      # broken only once it is launched, which is a thing to learn here and
+      # not from a user.
       - name: Build the app
         run: bun run build
 
       - name: Cache the Playwright browsers
         uses: actions/cache@v6
         with:
-          path: ~/Library/Caches/ms-playwright
+          path: |
+            ~/Library/Caches/ms-playwright
+            ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
+      # --with-deps installs WebKitGTK's shared libraries on the Linux
+      # runner; a Mac has WebKit already and the flag does nothing there.
       - name: Install WebKit
-        run: bunx playwright install webkit
+        run: bunx playwright install --with-deps webkit
 
       - name: UI tests (headless WebKit)
         run: bun run test:e2e
@@ -89,6 +100,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ runner.os }}
           path: playwright-report/
           retention-days: 7

@@ -7,6 +7,14 @@
 // write the mirror: the boot read, a check's answer, and the updateChanged push.
 import { useSyncExternalStore } from "react";
 import type { UpdateState } from "../../shared/rpc-schema";
+import { modKey } from "../commands/modKey";
+
+// Where Restart to Install Update is offered: the Ledge menu on a Mac, and
+// the palette on a desktop with no menu bar, which is every one whose Mod
+// is Ctrl (interactions.md §10).
+function installVerbPlace(): string {
+  return modKey() === "Meta" ? "in the Ledge menu" : "in the command palette";
+}
 
 export interface UpdateHandlers {
   state(): Promise<UpdateState>;
@@ -47,7 +55,7 @@ function notice(message: string): UpdateNotice {
 export function updateNotice(prev: UpdateState, next: UpdateState, asked: boolean): UpdateNotice | null {
   if (next.phase === "ready") {
     if (prev.phase === "ready" && !asked) return null;
-    return notice(`Ledge ${next.version} is ready. Choose Restart to Install Update in the Ledge menu.`);
+    return notice(`Ledge ${next.version} is ready. Choose Restart to Install Update ${installVerbPlace()}.`);
   }
   if (!asked) return null;
   switch (next.phase) {
@@ -57,7 +65,7 @@ export function updateNotice(prev: UpdateState, next: UpdateState, asked: boolea
     case "current":
       return notice(`Ledge ${next.version} is the latest version.`);
     case "downloading":
-      return notice(`Downloading Ledge ${next.version}. Restart to Install Update appears in the Ledge menu when it finishes.`);
+      return notice(`Downloading Ledge ${next.version}. Restart to Install Update appears ${installVerbPlace()} when it finishes.`);
     case "failed":
       return { tone: "error", message: `Could not update Ledge: ${next.detail}` };
     case "off":

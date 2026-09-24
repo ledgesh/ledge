@@ -63,6 +63,27 @@ describe("the release build config", () => {
     // starts, rather than minutes later when the build fails at signing.
     expect(pkg.scripts["release"]).toContain("release-preflight.ts");
   });
+
+  // The Linux installer copies this file beside the app and names it in the
+  // .desktop entry it writes (releasing.md §9). Hutch reads the path at build
+  // time on a runner, where nothing regenerates it, so a missing or renamed
+  // file would ship a launcher with no icon.
+  test("the Linux icon is a PNG in the tree", () => {
+    const icon = config.build.linux.icon;
+    expect(icon).toMatch(/\.png$/);
+    const bytes = readFileSync(join(ROOT, icon));
+    expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  });
+
+  // The Linux release is cut by the workflow, on GitHub's runners, with the
+  // same `bun run release` a Mac runs (releasing.md §9). A workflow that
+  // named some other command would build something the runbook does not
+  // describe.
+  test("the Linux release workflow runs the release script on both architectures", () => {
+    const workflow = readFileSync(join(ROOT, ".github", "workflows", "release-linux.yml"), "utf8");
+    expect(workflow).toContain("bun run release");
+    expect(workflow).toMatch(/runner: \[ubuntu-24\.04, ubuntu-24\.04-arm\]/);
+  });
 });
 
 // Every build carries its update address for as long as it is installed, so a

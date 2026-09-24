@@ -145,15 +145,16 @@ the system WebView. The same Bun code, without the window, is the
 `ledge-server` package, and the iOS app is a Swift shell around the same
 React view.
 
-You need a Mac, [Bun](https://bun.sh), and Xcode.
+You need [Bun](https://bun.sh), and either a Mac with the Xcode Command Line
+Tools or a Linux desktop with a C compiler and WebKitGTK.
 
 ```sh
 bun install
 bun run dev
 ```
 
-The first launch downloads the Electrobun core and assembles `Ledge.app` under
-`build/`.
+The first launch downloads the Electrobun core and assembles the app bundle
+under `build/`.
 
 ```sh
 bunx tsc --noEmit     # typecheck

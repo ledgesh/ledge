@@ -1,0 +1,84 @@
+# The Linux release (docs/contributor/releasing.md §9). A Mac release is cut
+# on the maintainer's Mac, because signing lives there. A Linux release has
+# nothing to sign and no Linux machine of each architecture here, so it is cut
+# on GitHub's runners instead: one x64, one arm64, each running the same
+# `bun run release` a Mac does, and each uploading what it built to the
+# GitHub release for the tag.
+#
+# Started by hand, on a tag, after the release exists as a draft with the Mac
+# assets on it. Publishing the release and then the update manifests
+# (`updates:publish` in ledge-www) stays a human step, as on the Mac.
+name: Release (Linux)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag to build and upload to, e.g. v0.1.3"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      # One failed architecture must not cancel the other: the assets are
+      # uploaded per architecture, and a half-uploaded release is fixed by
+      # re-running the failed half.
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      # The same pin as ci.yml, for the same reason.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # The tag names the version, and package.json is the copy the preflight
+      # compares the others against. A tag that disagrees with the tree it
+      # points at would upload assets whose version.json says something else.
+      - name: Check that the tag names this version
+        run: |
+          version="$(bun -e 'console.log(require("./package.json").version)')"
+          if [ "v$version" != "${{ inputs.tag }}" ]; then
+            echo "package.json is $version but the tag is ${{ inputs.tag }}" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The preflight, the view, the server bundle, the PTY .so and the
+      # bundle, then the installer archive, the update tarball, the manifest
+      # and, once a Linux release is published, the patch from it. Nothing
+      # here is signed, so no secret reaches the runner.
+      - name: Build the release
+        run: bun run release
+
+      - name: List the artifacts
+        run: ls -la artifacts/
+
+      # Onto the release the tag names. `--clobber` so a re-run replaces its
+      # own uploads. Uploading to a draft works, and the draft is where the
+      # Mac assets already are (releasing.md §4).
+      - name: Upload to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" artifacts/* --clobber
+
+      # Kept on the run as well, so a build can be inspected without
+      # touching the release.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ runner.arch }}
+          path: artifacts/
+          retention-days: 14

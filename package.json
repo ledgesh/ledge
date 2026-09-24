@@ -23,7 +23,7 @@
     "cli": "bun src/bun/serve.ts cli",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "test:e2e": "caffeinate -dimsu playwright test",
+    "test:e2e": "bun scripts/e2e.ts",
     "probe:ssh": "bun scripts/probe-ssh.ts",
     "probe:npm": "bun scripts/probe-npm.ts",
     "probe:install": "bun scripts/probe-install.ts",

@@ -10,9 +10,9 @@ import { APP_HOME } from "./workspaces";
 
 // The app home rather than `~/Library/Logs/Ledge`: every probe and test in
 // this repo redirects the app home with `LEDGE_NOTES_ROOT` and would
-// otherwise write to the real log. The Help menu's "Reveal Log in Finder"
-// opens this folder, so the rotated file is named `ledge.previous.log`
-// rather than `ledge.log.1`. The name says what the file is.
+// otherwise write to the real log. The Help menu's Reveal Log verb opens
+// this folder, so the rotated file is named `ledge.previous.log` rather than
+// `ledge.log.1`. The name says what the file is.
 export const LOG_DIR = join(APP_HOME, "logs");
 export const LOG_PATH = join(LOG_DIR, "ledge.log");
 export const PREV_LOG_PATH = join(LOG_DIR, "ledge.previous.log");

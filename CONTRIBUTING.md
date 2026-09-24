@@ -5,7 +5,9 @@ running, what "done" means here, and how to send a change.
 
 ## Getting set up
 
-Ledge is a macOS app. You need [Bun](https://bun.sh) and a Mac.
+Ledge is a macOS and Linux app. You need [Bun](https://bun.sh), and either a
+Mac with the Xcode Command Line Tools or a Linux desktop with a C compiler and
+WebKitGTK (`build-essential libgtk-3-0 libwebkit2gtk-4.1-0` on Ubuntu).
 
 ```sh
 bun install
@@ -69,9 +71,9 @@ Plus: live-verified in the real webview when the change touches the native
 seams (see docs/contributor/testing.md §6). Tests land in the same change as
 the feature. A feature whose logic is pure but untested is not done.
 
-CI runs the same bar on every pull request, on a macOS runner
+CI runs the same bar on every pull request, on a macOS runner and a Linux one
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)), and builds the whole
-`.app` rather than only the view. It cannot do the live-webview check: no one
+app bundle rather than only the view. It cannot do the live-webview check: no one
 is there to watch a window open. That one is yours, and saying you did it
 belongs in the PR description.
 

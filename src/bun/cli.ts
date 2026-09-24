@@ -32,6 +32,7 @@ import { basename, join, relative, resolve, sep } from "node:path";
 import { serve } from "./mcp";
 import { ledgeTools, resolveNoteForOpen } from "./mcpTools";
 import { tildify } from "./cliShim";
+import { openLinuxApp } from "./linuxApp";
 import { writeOpenRequest } from "./openRequest";
 import { loadWorkspaces, rootContaining, roots, workspaceMatches } from "./workspaces";
 
@@ -222,8 +223,9 @@ export interface CliIo {
   /** Piped stdin, whole; null on a TTY (nothing piped). */
   stdin(): Promise<string | null>;
   cwd(): string;
-  /** Launch or activate the app (`open -b`). Injected with the rest: a test
-   * driving the verbs must never actually launch Ledge. False = not opened. */
+  /** Launch or activate the app (`open -b` on a Mac, the launcher beside
+   * this bun on Linux). Injected with the rest: a test driving the verbs must
+   * never actually launch Ledge. False = not opened. */
   openApp(): Promise<boolean>;
 }
 
@@ -259,7 +261,7 @@ function targetArgs(
 
 async function openApp(io: CliIo): Promise<number> {
   if (await io.openApp()) return 0;
-  io.err(`ledge: could not open the app (bundle ${BUNDLE_ID}) — is Ledge installed? (macOS only)`);
+  io.err("ledge: could not open the app. Is this the `ledge` the app installed? (Install Shell Command)");
   return 1;
 }
 
@@ -497,6 +499,7 @@ export function processIo(): CliIo {
     stdin: async () => (process.stdin.isTTY ? null : await Bun.stdin.text()),
     cwd: () => process.cwd(),
     openApp: async () => {
+      if (process.platform === "linux") return openLinuxApp();
       if (process.platform !== "darwin") return false;
       const proc = Bun.spawn({ cmd: ["open", "-b", BUNDLE_ID], stdout: "ignore", stderr: "ignore" });
       return (await proc.exited) === 0;

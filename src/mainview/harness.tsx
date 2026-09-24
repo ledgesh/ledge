@@ -76,9 +76,10 @@ import { docsState } from "./workspace/store";
 const SHELL = new URLSearchParams(window.location.search).get("shell") ?? "";
 const FAKING_IOS = SHELL === "ios";
 // `?mod=ctrl` runs the Ctrl keyboard grammar, the one a Linux desktop gets
-// (commands/modKey.ts), in this Mac-hosted WebKit: Mod is Ctrl, the tab jump
-// is Alt+1…9, the terminal keeps plain Ctrl, and Quit is a command. Set
-// before configureShell, since the shell's Quit flag follows it.
+// (commands/modKey.ts), in a WebKit that harness.html otherwise makes a Mac:
+// Mod is Ctrl, the tab jump is Alt+1…9, the terminal keeps plain Ctrl, and
+// Quit is a command. Set before configureShell, since the shell's Quit flag
+// follows it.
 const CTRL_MOD = new URLSearchParams(window.location.search).get("mod") === "ctrl";
 if (CTRL_MOD) configureModKey("Ctrl");
 configureShell({

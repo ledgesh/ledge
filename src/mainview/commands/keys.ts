@@ -168,9 +168,10 @@ export const COMMANDS = {
   "cli.install": { title: "Install Shell Command (ledge)" },
   // Opens the log folder, so the previous session's copy sits next to the
   // current one. After a crash the previous one is the copy worth sending.
-  // Titled "Reveal" because it lands in Finder, not in Ledge: the log is not a
-  // note, and opening it in the editor would suggest it is.
-  "log.reveal": { title: "Reveal Log in Finder" },
+  // Titled "Reveal" because it lands in the file manager, not in Ledge: the
+  // log is not a note, and opening it in the editor would suggest it is. A ⌘
+  // keyboard means a Mac, whose file manager has a name.
+  "log.reveal": { title: modKey() === "Meta" ? "Reveal Log in Finder" : "Reveal Log in File Manager" },
   // The app's own update (lib/updates.ts). A two-faces pair in the Ledge menu:
   // exactly one is live at a time. No chords, since both run a few times a year.
   "update.check": { title: "Check for Updates…" },

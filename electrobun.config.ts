@@ -29,10 +29,11 @@ export default {
     version: "0.1.2",
   },
   scripts: {
-    // The PTY trampolines, compiled to a dylib before anything else runs. They
-    // are C that needs the macOS SDK's headers, and the machine that downloads
-    // Ledge may have no SDK at all, so building here is what keeps Ctrl-C
-    // working there. See scripts/build-native.ts and src/bun/ptyNative.ts.
+    // The PTY trampolines, compiled to a dylib (a .so on Linux) before
+    // anything else runs. They are C that needs the system headers, and the
+    // machine that downloads Ledge may have none, so building here is what
+    // keeps Ctrl-C working there. See scripts/build-native.ts and
+    // src/bun/ptyNative.ts.
     preBuild: "scripts/build-native.ts",
     // The same script twice: it adds CFBundleShortVersionString to a generated
     // Info.plist, and a stable build generates two of them (the app, then the
@@ -87,7 +88,10 @@ export default {
       codesign: signed,
       notarize: signed,
     },
-    linux: { bundleCEF: false },
+    // The system WebView here too (WebKitGTK). The icon is a PNG rather than
+    // the Icon Composer bundle: the installer writes it beside the app and
+    // names it in the .desktop entry. `bun run icon` regenerates both.
+    linux: { bundleCEF: false, icon: "assets/Ledge.png" },
     win: { bundleCEF: false },
   },
   release: {

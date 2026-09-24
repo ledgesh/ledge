@@ -1,11 +1,13 @@
 # Releasing Ledge
 
-How a build on this machine becomes a DMG someone else can open. Read this
-before cutting a release; it is run rarely enough that nobody remembers it.
+How a build becomes something someone else can install: a DMG from this Mac,
+and a Linux installer from GitHub's runners. Read this before cutting a
+release; it is run rarely enough that nobody remembers it.
 
-Everything here is macOS. `bun run release` is the whole procedure, and the
-sections below say what it needs, what it produces, and what to check before
-publishing.
+`bun run release` is the whole procedure on either platform. §1 to §5 are the
+Mac's: what it needs, what it produces, and what to check before publishing.
+§9 is the Linux build, which is the same command with nothing to sign, run
+by a workflow.
 
 ## 1. What a release consists of
 
@@ -19,7 +21,9 @@ publishing.
 | `stable-macos-arm64-<hash>.patch` | A binary diff from the previous release's build, named by that build's hash, to this one. Written only when the update server was serving a previous release during the build. |
 
 Every release uploads all of them. A missing patch costs installs a full
-download. A missing tarball or manifest breaks the update.
+download. A missing tarball or manifest breaks the update. A Linux release
+adds the same three kinds of file per architecture, built and uploaded by the
+workflow in §9.
 
 Two app bundles get built, and both are signed:
 
@@ -119,9 +123,12 @@ preflight first for that reason.
 3. `bun run release`. Expect several minutes: the tarball compresses for about
    ten seconds and notarization is two round trips to Apple.
 4. Verify the artifact (§5).
-5. Tag the commit `v<version>`, create the GitHub release on `ledgesh/ledge`
-   with every file in `artifacts/`, then publish that tag to the update server
-   (§7). Publishing the tag is the step that offers the release to every
+5. Tag the commit `v<version>` and push the tag. Create the GitHub release on
+   `ledgesh/ledge` as a draft, with every file in `artifacts/`.
+6. Run the Linux workflow on the tag (§9). It uploads the Linux files to the
+   draft.
+7. Publish the release, then publish the tag to the update server for every
+   prefix (§7). Publishing the tag is the step that offers the release to every
    existing install.
 
 Add `LEDGE_UNSIGNED=1` to package without signing or notarizing. That is for
@@ -329,13 +336,22 @@ Updates… still checks and downloads.
 asks it for as long as that build is installed. Moving it strands every install
 that has the old one. `release.test.ts` pins it.
 
-What an install requests, under that address:
+What an install requests, under that address, with `<prefix>` its own
+channel, platform and architecture:
 
 | Request | Served |
 | --- | --- |
-| `stable-macos-arm64-update.json?<random>` | The current release's manifest, or 404 while nothing is published |
-| `stable-macos-arm64-<its own hash>.patch` | The patch from that install's build, or 404, which falls back to the tarball |
-| `stable-macos-arm64-Ledge.app.tar.zst?cache=<random>` | The current release's tarball |
+| `<prefix>-update.json?<random>` | The current release's manifest, or 404 while nothing is published |
+| `<prefix>-<its own hash>.patch` | The patch from that install's build, or 404, which falls back to the tarball |
+| `<prefix>-Ledge.app.tar.zst?cache=<random>` (`<prefix>-Ledge.tar.zst` on Linux) | The current release's tarball |
+
+The prefixes a release publishes:
+
+| Prefix | Build |
+| --- | --- |
+| `stable-macos-arm64` | The Mac app (§1) |
+| `stable-linux-x64` | The Linux app on x86_64 (§9) |
+| `stable-linux-arm64` | The Linux app on arm64 (§9) |
 
 **A 404 for the manifest reads as up to date.** That is how every install
 behaves before the first release is published, and `noRelease` in
@@ -353,10 +369,12 @@ whenever the manifest's `hash` differs from its own. So:
   download.
 
 **Publishing is `bun run updates:publish v<version>` in `ledgesh/ledge-www`**,
+once per prefix, with `--prefix stable-linux-x64` and
+`--prefix stable-linux-arm64` for the Linux builds (the Mac's is the default),
 run after every asset has finished uploading to the GitHub release. It
 downloads that release's manifest, validates it against the rules Electrobun
 enforces, checks that the tarball downloads, and only then writes the manifest
-and the release's asset list into that repo's `updates/`. Committing those two
+and the release's asset list into that repo's `updates/`. Committing those
 files and deploying the site is what offers the release. The tarball and the
 patches redirect to the tagged release's assets. `updates/README.md` there is
 the site's half of this section.
@@ -389,12 +407,87 @@ it before relying on it.
 
 ## 8. What is not automated
 
-- **Publishing.** Nothing uploads `artifacts/` or `dist-server/`, nothing
-  publishes a tag to the update server (§7), and nothing runs `npm publish`
-  (§6). CI builds the app but does not release it.
+- **Publishing.** Nothing uploads this Mac's `artifacts/` or `dist-server/`,
+  nothing publishes a tag to the update server (§7), and nothing runs
+  `npm publish` (§6). CI builds the app but does not release it. The one
+  upload a workflow does is the Linux build's, onto a draft release a human
+  created and will publish (§9).
 - **The server in `bun run release`.** The release script builds the Mac app and
   stops; `bun run build:server` (which runs `build:npm`) is a second command,
   run by hand. Folding it in means the release depends on Docker being up,
   which is a fair trade to make later and not one to discover mid-release.
 - **The signed build in CI.** Signing needs the certificate and the credentials,
-  and both live on this machine only.
+  and both live on this machine only. The Linux build has nothing to sign,
+  which is why it is the one build a runner cuts.
+
+## 9. The Linux build
+
+`.github/workflows/release-linux.yml` cuts it: started by hand on a tag, it
+checks the tag out on an x64 runner (`ubuntu-24.04`) and an arm64 one
+(`ubuntu-24.04-arm`), refuses a tag that does not name `package.json`'s
+version, runs `bun run release` on each, and uploads what each built to the
+GitHub release for that tag with `gh release upload`. The preflight skips the
+architecture and signing checks off macOS and keeps the rest. Nothing on
+Linux is signed, so no secret reaches the runner.
+
+Hutch builds for its host, so a Linux build needs a Linux machine of its
+architecture. The runners are that machine. A Linux checkout builds the same
+files by hand with the same command, for its own architecture only.
+
+Each runner writes these files to `artifacts/`:
+
+| File | What it is |
+| --- | --- |
+| `linux-<arch>-Ledge-Setup.tar.gz` | What users download: `installer`, a self-extracting executable, and a `README.txt`. The site and the README link to it by this name under `releases/latest/download/`. |
+| `stable-linux-<arch>-Ledge.tar.zst` | The app itself, compressed. The updater downloads it when no patch applies. |
+| `stable-linux-<arch>-update.json` | The manifest the updater reads (§7). |
+| `stable-linux-<arch>-<hash>.patch` | The binary diff from the previous release, when the update server was serving one during the build. |
+
+`<arch>` is `x64` or `arm64`. Both ship: the server half of the app already
+runs on both in the Docker probes (`remote.md` §11), and the x64 desktop half
+is Electrobun's own most-run target. The arm64 build has been run by hand
+on an Ubuntu 24.04 desktop; the x64 build has not, and the first x64 user
+is the first test of its WebKitGTK path.
+
+What `./installer` does, all under the user's own home and with no root:
+
+| Path | What lands there |
+| --- | --- |
+| `~/.local/share/sh.ledge.app/stable/app/` | The app: `bin/launcher`, `bin/bun`, the Electrobun libraries, `Resources/app/` with the view, `serve.js` and the PTY `.so` |
+| `~/.local/share/applications/Ledge.desktop` | The launcher entry, with the absolute `Exec` and `Icon` paths written in, so the app is in the desktop's app grid |
+| `~/Desktop/Ledge.desktop` | A copy on the desktop; GNOME asks the user to allow it before the first launch |
+| `~/.local/share/sh.ledge.app/stable/self-extraction/<hash>.tar` | The app's own tarball, kept for the updater's patches (§7) |
+| `~/.local/share/sh.ledge.app/stable/uninstall` | The uninstaller, which removes all of the above |
+
+It launches the app when it is done. The app's own files stay where they are
+on a Mac: the app home is `~/.ledge`, and the log is under it (`bun/log.ts`).
+WebKit's storage goes beside the app, under `stable/WebKit/`. The runtime
+packages are GTK 3, WebKitGTK 4.1, libayatana-appindicator3 and librsvg2,
+which an Ubuntu desktop has.
+
+Two things a Linux install has no menu bar for. Check for Updates… and
+Restart to Install Update are commands in the palette (Ctrl+Shift+P), and
+Quit is Ctrl+Q (`interactions.md` §10). The updater is otherwise §7 as
+written: the same address, the Linux prefixes, and a manifest the site serves
+per prefix.
+
+**Verifying, on a Linux desktop of the release's architecture**, from the
+`Setup.tar.gz` a user would download, with the app not yet installed:
+
+- `tar xzf` it and run `./installer`. The app launches, and it is in the app
+  grid with its icon.
+- A shell block runs, and Ctrl-C stops it. This is `dlopen` of the PTY `.so`
+  the runner compiled.
+- Ctrl+Shift+V into the drawer pastes, and Ctrl-click on a link opens the
+  browser. Those are the GTK clipboard and `xdg-open`.
+- Run Install Shell Command (ledge), then `ledge ls` in a new terminal, and
+  `ledge <a note's title>` with the app closed: the shim starts the launcher
+  beside its own `bun` (`bun/linuxApp.ts`).
+- Check for Updates… answers "Ledge <version> is the latest version." That is
+  a 404 before the prefix is published and this build's own hash after.
+- `~/.local/share/sh.ledge.app/stable/uninstall` removes the app and both
+  desktop entries.
+
+Probing an update on Linux is the §7 recipe with two substitutions: the
+installer already saved the tar the patch applies to, and the app to run is
+`~/.local/share/sh.ledge.app/stable/app/bin/launcher`.

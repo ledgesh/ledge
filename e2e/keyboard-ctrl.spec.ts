@@ -1,12 +1,13 @@
 // The Ctrl keyboard grammar, which a Linux desktop gets (interactions.md §2,
 // commands/modKey.ts): Mod is Ctrl, the tab jump is Alt+1…9, the terminal
 // keeps plain Ctrl for its shell, chips spell Ctrl+…, and Quit is a command.
-// The harness runs it under `?mod=ctrl` in this Mac-hosted WebKit, which is
-// as close as a Mac can get to the keyboard a Linux window sees. The
-// editor's own chords are CodeMirror's and follow navigator.platform, so they
-// are not part of this spec; and since CodeMirror binds the Mac's emacs-style
-// Ctrl+N/P (line up and down) here, which a Linux build never does, every
-// chord below is pressed with focus on a list row rather than in the editor.
+// The harness runs it under `?mod=ctrl` in a WebKit that harness.html makes
+// a Mac on every host, which is as close as the suite gets to the keyboard a
+// Linux window sees. The editor's own chords are CodeMirror's and follow
+// navigator.platform, so they are not part of this spec; and since CodeMirror
+// binds the Mac's emacs-style Ctrl+N/P (line up and down) here, which a Linux
+// build never does, every chord below is pressed with focus on a list row
+// rather than in the editor.
 import { expect, test, type Page } from "@playwright/test";
 
 const noteRow = (page: Page, title: string) => page.locator('[data-target-kind="note"]', { hasText: title });

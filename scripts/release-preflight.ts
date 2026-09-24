@@ -8,11 +8,17 @@
 // This checks the inputs only. Whether the signed app runs under the hardened
 // runtime is a question only the signed build answers, and releasing.md §5
 // carries that checklist.
+//
+// On Linux the same script runs on the release workflow's runners
+// (releasing.md §9). A Linux build is not signed, so the architecture and
+// signing sections below are the Mac's alone; the version, the update address
+// and the README are every platform's.
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import config, { UPDATE_BASE_URL } from "../electrobun.config";
 
 const ROOT = resolve(import.meta.dir, "..");
+const MAC = process.platform === "darwin";
 const problems: string[] = [];
 const notes: string[] = [];
 
@@ -46,7 +52,13 @@ if (pkg.version === config.app.version) {
 // host instead, which moves the guarantee here: 0.1.0 is arm64-only because
 // its PTY dylib and the rest of the native seam have never run on an x86_64
 // Mac, and a release must not quietly become the first test of that.
-if (process.arch === "arm64") {
+//
+// Linux ships both architectures: its server half already runs on x64 and
+// arm64 in the Docker probes, and the release workflow builds each on a
+// runner of that architecture.
+if (!MAC) {
+  ok(`building for linux-${process.arch}`);
+} else if (process.arch === "arm64") {
   ok(`building on ${process.arch}`);
 } else {
   bad(
@@ -101,7 +113,9 @@ if (status.stdout.toString().trim().length > 0) {
 }
 
 // --- signing ------------------------------------------------------------------
-if (process.env["LEDGE_UNSIGNED"] === "1") {
+if (!MAC) {
+  console.log("  skip  signing and notarization: a Linux build is not signed");
+} else if (process.env["LEDGE_UNSIGNED"] === "1") {
   console.log("  skip  signing and notarization (LEDGE_UNSIGNED=1)");
   notes.push(
     "This is a dry run. The .app it produces runs on this Mac and nowhere else:\n" +
@@ -203,7 +217,7 @@ for (const note of notes) console.log(`  note  ${note.replace(/\n/g, "\n        
 if (problems.length > 0) {
   console.error(`\n${problems.length} problem${problems.length === 1 ? "" : "s"} to fix before releasing:\n`);
   for (const p of problems) console.error(`  - ${p}`);
-  console.error("\nTo package without signing anything, run: LEDGE_UNSIGNED=1 bun run release");
+  if (MAC) console.error("\nTo package without signing anything, run: LEDGE_UNSIGNED=1 bun run release");
   process.exit(1);
 }
 console.log("ready\n");

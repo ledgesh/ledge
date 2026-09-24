@@ -11,6 +11,13 @@
         ? "dark"
         : "light";
     </script>
+    <!-- The suite spells its chords with Meta on every host (testing.md §5).
+         CodeMirror and commands/modKey.ts both read navigator.platform as
+         they load, so this runs first, before the module below; `?mod=ctrl`
+         (harness.tsx) then opts a spec into the Ctrl grammar. -->
+    <script>
+      Object.defineProperty(Navigator.prototype, "platform", { get: () => "MacIntel", configurable: true });
+    </script>
   </head>
   <body>
     <div id="root"></div>
