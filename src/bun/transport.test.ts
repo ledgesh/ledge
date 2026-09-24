@@ -1098,6 +1098,27 @@ describe("a client that reconnects", () => {
     expect(states).toEqual(["reconnecting", "live"]);
   });
 
+  // A window whose webview had not attached threw from its connectionState
+  // push, inside the ladder, and the ladder never dialled again (issue #7).
+  test("an indicator that throws does not stop the ladder", async () => {
+    const states: string[] = [];
+    const wire = reconnectable(handlers());
+    const client = await reconnectingClient({
+      dial: wire.dial,
+      push: recordingPush().push,
+      build: "0.1.0",
+      onState: (s) => {
+        states.push(s);
+        throw new Error("no transport");
+      },
+      ...instant,
+    });
+    wire.cut();
+    expect(await quiet(() => client.requests.vaultState({}))).toEqual({ state: "locked" });
+    expect(wire.dials()).toBe(2);
+    expect(states).toEqual(["reconnecting", "live"]);
+  });
+
   // A handler saying no is an answer, so it is final. Only a transport failure
   // is replayed (shared/transport.ts ConnectionLost). Otherwise every refusal
   // would be retried against a server that already refused it.

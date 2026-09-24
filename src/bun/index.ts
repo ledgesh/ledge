@@ -727,10 +727,13 @@ async function buildWindow(want: string, frame?: Rect, docs?: { page: string }):
     throw err;
   }
 
+  // The URL is awaited before `rpc` is assigned. The RPC has no transport until
+  // the BrowserWindow is constructed, and sends in that gap throw (issue #7).
+  const url = await mainViewUrl();
   rpc = defineLedgeRPC(win.manager.requests);
   // spellCheck turns on WKWebView's continuous spell checking, which is off by
   // default. The editor decides which text it applies to (editor/spelling.ts).
-  const browser = new BrowserWindow({ title: win.title, url: await mainViewUrl(), rpc, frame: start, spellCheck: true });
+  const browser = new BrowserWindow({ title: win.title, url, rpc, frame: start, spellCheck: true });
   win.window = browser;
   win.id = browser.id;
 

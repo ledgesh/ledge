@@ -692,7 +692,13 @@ export async function reconnectingClient(opts: ReconnectOpts): Promise<ClientCon
     if (state === next && told === detail) return;
     state = next;
     told = detail;
-    opts.onState?.(next, detail);
+    // A listener that throws must not take the ladder with it: announce runs
+    // inside reconnect, and an escaped throw ends the climb (issue #7).
+    try {
+      opts.onState?.(next, detail);
+    } catch (err) {
+      console.error("[transport] onState threw:", err);
+    }
   }
 
   watch(conn);
