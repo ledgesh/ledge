@@ -177,7 +177,12 @@ describe("the schema's shape against the protocol version", () => {
   // new, sees the name. A view that predates it never sends it. Nothing was
   // retyped, made required, or narrowed. The pin moves and the version does
   // not.
-  const PINNED = { protocol: 5, shape: "66150ede1a4ef192" };
+  // Then a run's length measured on the server (remote.md §7): an optional
+  // `durationMs` on runEvent's `ended`. An old client never reads it and times
+  // the run on its own clock, as every build did before. A new client against
+  // an old server finds it absent and does the same. Nothing was retyped,
+  // made required, or narrowed. The pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "6bc63665c2e00b68" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

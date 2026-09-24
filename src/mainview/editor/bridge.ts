@@ -311,7 +311,8 @@ export function dispatchRunLink(up: boolean): void {
  * under it (bun/inlinePool.ts). The server holds run output for an absent
  * client and releases it ahead of the answer (bun/server.ts `missed`), so an
  * ordinary outage returns the real ending instead. An ending sent before the
- * server noticed the wire was dead is lost.
+ * server noticed the wire was dead is lost. Such a run is closed out with no
+ * duration too: when it ended is as unknown as how.
  */
 export async function reconcileRuns(): Promise<void> {
   const claim = handlers.claimRuns;
@@ -333,7 +334,7 @@ export async function reconcileRuns(): Promise<void> {
   // code with the blank "Session ended".
   const still = new Set([...runEventSinks].flatMap((sink) => sink.live()));
   for (const id of ids) {
-    if (!alive.has(id) && still.has(id)) dispatchRunEvent({ id, kind: "ended", exitCode: null });
+    if (!alive.has(id) && still.has(id)) dispatchRunEvent({ id, kind: "ended", exitCode: null, durationMs: null });
   }
 }
 

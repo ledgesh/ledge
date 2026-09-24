@@ -55,9 +55,11 @@ describe("reconcileRuns", () => {
 
     await reconcileRuns();
 
-    // Closed out as ended with no exit status. The run finished while nobody
-    // here was listening, so there is no code to report.
-    expect(editor.applied).toEqual([{ id: "gone", kind: "ended", exitCode: null }]);
+    // Closed out as ended with no exit status and no duration. The run
+    // finished while nobody here was listening, so there is no code to report
+    // and no time it ended at. Left undefined, the panel would time it on this
+    // client's clock and count the whole outage (blocks.ts endedDuration).
+    expect(editor.applied).toEqual([{ id: "gone", kind: "ended", exitCode: null, durationMs: null }]);
     editor.off();
   });
 

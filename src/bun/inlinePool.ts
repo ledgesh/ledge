@@ -44,12 +44,14 @@ export interface InlineShellIO {
 /**
  * MarkerEvent, widened at "ended". `exitCode: null` is the pool closing out a
  * run whose shell died under it: no prompt, no precmd, no D marker, so there
- * is no status to report, only that the run is over.
+ * is no status to report, only that the run is over. `durationMs` is measured
+ * here, from the block's write to the moment its ending was read, because the
+ * client may hear of the ending long after it happened (remote.md §7).
  */
 export type InlineEvent =
   | { type: "began"; blockId: string }
   | { type: "output"; blockId: string; data: Uint8Array }
-  | { type: "ended"; blockId: string; exitCode: number | null };
+  | { type: "ended"; blockId: string; exitCode: number | null; durationMs: number };
 
 /**
  * How the pool reports: what the shell did, and whose run it was.
@@ -174,8 +176,8 @@ export class InlinePool {
   // own shell from an overflow one: only the first outlives its run, so only
   // the first can end up holding frontmatter the note has since edited, which
   // is what server.ts records it to report (`sessionStale`). `now` is
-  // injectable so the silence rule is testable without waiting on a clock;
-  // nothing else here reads one.
+  // injectable so the silence rule and run durations are testable without
+  // waiting on a clock.
   constructor(
     private readonly spawn: (sessionId: string, host: string, persistent: boolean) => InlineShellIO,
     private readonly nonce: string,
@@ -327,8 +329,12 @@ export class InlinePool {
               slot.preambleLen = 0;
               slot.echo = "";
             }
-            emit(ev, slot.client);
-            if (ev.type === "ended") this.runEnded(session, slot, ev.blockId);
+            if (ev.type === "ended") {
+              emit(this.endedEvent(slot, ev.blockId, ev.exitCode), slot.client);
+              this.runEnded(session, slot, ev.blockId);
+            } else {
+              emit(ev, slot.client);
+            }
           }
         }
         // Silent too long: hand over what the shell has said, and keep handing
@@ -345,7 +351,7 @@ export class InlinePool {
         // from a state nobody can describe.
         if (slot.abandoned && slot.activeRun !== null) {
           this.flushPreamble(slot, emit);
-          emit({ type: "ended", blockId: slot.activeRun, exitCode: null }, slot.client);
+          emit(this.endedEvent(slot, slot.activeRun, null), slot.client);
           this.dropSlot(session, slot);
           continue;
         }
@@ -357,7 +363,7 @@ export class InlinePool {
           // ("Host key verification failed", "Permission denied"), so show it
           // even if the silence rule has not fired yet.
           if (open && !slot.began) this.flushPreamble(slot, emit);
-          if (open) emit({ type: "ended", blockId: open, exitCode: null }, slot.client);
+          if (open) emit(this.endedEvent(slot, open, null), slot.client);
           this.dropSlot(session, slot);
         }
       }
@@ -397,7 +403,7 @@ export class InlinePool {
     if (session) {
       for (const slot of this.slots(session)) {
         const open = slot.parser.openBlockId ?? slot.activeRun;
-        if (open) emit({ type: "ended", blockId: open, exitCode: null }, slot.client);
+        if (open) emit(this.endedEvent(slot, open, null), slot.client);
         slot.shell.close();
       }
       this.sessions.delete(sessionId);
@@ -561,6 +567,10 @@ export class InlinePool {
   // shell survives to carry cwd and env to its host's next block. An overflow
   // shell is keyed by this run alone, so nothing can be routed to it again and
   // keeping it would only leak a shell (and, remotely, an ssh connection).
+  private endedEvent(slot: Slot, blockId: string, exitCode: number | null): InlineEvent {
+    return { type: "ended", blockId, exitCode, durationMs: this.now() - slot.startedAt };
+  }
+
   private runEnded(session: Session, slot: Slot, id: string): void {
     if (slot.activeRun === id) slot.activeRun = null;
     if (session.overflow.get(id) === slot) {
