@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:label="Ledge" />
+    <application
+        android:label="Ledge"
+        android:theme="@style/Ledge">
+        <!-- The keyboard resizes nothing by itself: WebHost insets the web
+             view by the IME's height. The configuration changes are the
+             page's to lay out, so a rotation does not rebuild the activity and
+             drop the socket with it. -->
+        <activity
+            android:name=".WebHost"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>

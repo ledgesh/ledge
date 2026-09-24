@@ -29,6 +29,7 @@
     "probe:install": "bun scripts/probe-install.ts",
     "probe:backup": "bun scripts/probe-backup.ts",
     "ios": "bun scripts/ios-build.ts",
+    "android": "bun scripts/android-build.ts",
     "licenses": "bun scripts/licenses.ts"
   },
   "dependencies": {

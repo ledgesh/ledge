@@ -26,6 +26,8 @@ import {
   REQUEST_METHODS,
   restoreBinary,
   sessionHold,
+  toBase64Slow,
+  fromBase64Slow,
   WIRE_METHODS,
   WireError,
   type Frame,
@@ -540,6 +542,18 @@ describe("payloads that ride binary frames", () => {
   // prefix and drop the rest, putting short bytes on the wire as a success.
   test("a field that is not base64 is refused rather than truncated", () => {
     expect(() => hoistBinary({ sessionId: "s", dataB64: "not base64!" }, ["dataB64"])).toThrow();
+  });
+
+  // The fallback an older Android WebView runs. Past one chunk, so the
+  // stitching between `String.fromCharCode` calls is covered too.
+  test("the fallback encodes and decodes as the builtin does", () => {
+    const big = new Uint8Array(0x8000 * 2 + 7);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 131) & 0xff;
+    for (const sample of [new Uint8Array(0), bytes, big]) {
+      expect(toBase64Slow(sample)).toBe(sample.toBase64());
+      expect(fromBase64Slow(sample.toBase64())).toEqual(sample);
+    }
+    expect(() => fromBase64Slow("not base64!")).toThrow();
   });
 
   test("the caller's payload is not mutated", () => {

@@ -363,8 +363,10 @@ describe("a server that does not have every method", () => {
  * timer is injectable. */
 function ticker() {
   const ticks = new Set<() => void>();
+  let armed = 0;
   return {
     repeat: (_ms: number, tick: () => void) => {
+      armed++;
       ticks.add(tick);
       return () => void ticks.delete(tick);
     },
@@ -373,6 +375,8 @@ function ticker() {
     },
     /** How many timers are live. Cancelling a timer lowers this count. */
     running: () => ticks.size,
+    /** How many timers were ever started. */
+    armed: () => armed,
   };
 }
 
@@ -577,6 +581,19 @@ describe("a client whose wire has gone quiet", () => {
     beats.beat();
     expect(server.isClosed()).toBe(true);
     await expect(client.requests.vaultState({})).rejects.toThrow(/stopped answering/);
+  });
+
+  // The phase of the beat is what this guards. A tick already due when the
+  // probe goes out would judge it before its pong could be back, and a
+  // throttled tick lands just after Android's resume (android/.../WebHost.kt).
+  test("and the probe has a whole beat to be answered in", async () => {
+    const { server, beats, client } = connect();
+    server.greet();
+    await client.ready;
+    client.recheck();
+    expect(beats.armed()).toBe(2);
+    expect(beats.running()).toBe(1);
+    expect(server.isClosed()).toBe(false);
   });
 
   test("and asking a connection that already ended costs nothing", async () => {

@@ -419,6 +419,17 @@ export function clientConnection(
     unanswered = probesAllowed;
     raw(encodeControl({ t: "ping" }));
     sent = false;
+    // The beat starts over, so the answer has a whole beat to arrive in. A
+    // tick already due would otherwise judge this probe before its pong could
+    // be back. Android delivers the resume first and a throttled tick
+    // milliseconds after it, and that tick dropped a working wire.
+    if (probeEveryMs > 0) arm();
+  }
+
+  function arm(): void {
+    stopProbing?.();
+    stopProbing = (heartbeat.repeat ?? repeatEvery)(probeEveryMs, beat);
+    beatAt = clock();
   }
 
   duplex.onData = (chunk) => {
@@ -497,7 +508,7 @@ export function clientConnection(
   // the handshake a bound it never had: a server that accepts a connection and
   // then says nothing at all used to leave `ready` pending forever. The ssh
   // `ConnectTimeout` does not cover that, because the dial succeeded.
-  if (probeEveryMs > 0) stopProbing = (heartbeat.repeat ?? repeatEvery)(probeEveryMs, beat);
+  if (probeEveryMs > 0) arm();
 
   return {
     requests,

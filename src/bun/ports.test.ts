@@ -27,7 +27,7 @@ const REPO = join(import.meta.dir, "..", "..");
 
 // Everything that is checked in and compiled or run. The rest is either
 // generated (dist, build) or somebody else's (node_modules, .build).
-const SKIP = new Set(["node_modules", ".git", "dist", "dist-cli", "dist-ios", "dist-native", "build", ".build", "artifacts"]);
+const SKIP = new Set(["node_modules", ".git", "dist", "dist-cli", "dist-ios", "dist-android", "dist-native", "build", ".build", "artifacts"]);
 
 function sources(dir: string): string[] {
   const out: string[] = [];

@@ -11,6 +11,7 @@ dist/
 dist-cli/
 dist-native/
 dist-ios/
+dist-android/
 dist-npm/
 build/
 

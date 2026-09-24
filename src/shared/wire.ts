@@ -574,14 +574,39 @@ function replace(payload: unknown, path: readonly string[], value: string): unkn
  * also runs in a webview, which has no `Buffer` (ios.md §2). Bun and WebKit
  * both have these builtins: the harness's WebKit was probed for them, since it
  * is the engine lineage the app ships in.
+ *
+ * Android's WebView is a Chromium the device updates on its own schedule, and
+ * the builtins arrived in Chromium 140. An older one gets `btoa` and `atob`
+ * instead, chosen once here rather than tested on every frame.
  */
-export function toBase64(bytes: Uint8Array): string {
-  return bytes.toBase64();
+const nativeBase64 = typeof Uint8Array.prototype.toBase64 === "function";
+
+// The chunk bounds the argument list `String.fromCharCode` is spread into.
+const CHUNK = 0x8000;
+
+/** The older WebView's encoder. Exported for the test that holds it to the
+ * builtin. */
+export function toBase64Slow(bytes: Uint8Array): string {
+  let text = "";
+  for (let at = 0; at < bytes.length; at += CHUNK) {
+    text += String.fromCharCode(...bytes.subarray(at, at + CHUNK));
+  }
+  return btoa(text);
 }
 
-export function fromBase64(text: string): Uint8Array {
-  return Uint8Array.fromBase64(text);
+/** The older WebView's decoder. */
+export function fromBase64Slow(text: string): Uint8Array {
+  const raw = atob(text);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
 }
+
+export const toBase64: (bytes: Uint8Array) => string = nativeBase64 ? (bytes) => bytes.toBase64() : toBase64Slow;
+
+export const fromBase64: (text: string) => Uint8Array = nativeBase64
+  ? (text) => Uint8Array.fromBase64(text)
+  : fromBase64Slow;
 
 /**
  * Which of the peer's declared names this end also knows. The result is the

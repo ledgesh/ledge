@@ -658,6 +658,13 @@ export const iosClientMethods = (): string[] =>
     ),
   );
 
+/** The object Android's `addWebMessageListener` puts on `window` under the
+ * handler's name. It carries strings only, both ways. */
+interface AndroidPort {
+  postMessage(message: string): void;
+  addEventListener(type: "message", fn: (event: { data: string }) => void): void;
+}
+
 declare global {
   interface Window {
     /** Swift's way in. Assigned by attachShell; called from
@@ -668,20 +675,33 @@ declare global {
 }
 
 /** The name the page posts to, and the property Swift evaluates into. Both
- * halves are here so the Swift side has one place to be checked against. */
+ * halves are here so the Swift side has one place to be checked against.
+ * Android's shell registers its listener under the same name
+ * (android/.../WebHost.kt). */
 export const SHELL_HANDLER = "ledge";
 
 /**
- * Bind a shell to the real WKWebView bridge.
+ * Bind a shell to the real bridge: WKWebView's message handler on iOS, or the
+ * port Android's WebView injects.
  *
- * The only WebKit in this file. Throws where there is no bridge at all: the iOS
- * entry point has nothing to fall back to, and a page that carried on with no
- * server would look like a hung app.
+ * The only WebView API in this file. Throws where there is no bridge at all:
+ * the phone entry point has nothing to fall back to, and a page that carried
+ * on with no server would look like a hung app.
  */
 export function attachShell(): Shell {
   const handler = window.webkit?.messageHandlers?.[SHELL_HANDLER];
-  if (!handler) throw new Error(`this page is not inside the Ledge shell (no ${SHELL_HANDLER} message handler)`);
-  const shell = nativeShell((msg) => handler.postMessage(msg));
-  window.__ledge = { deliver: (msg) => shell.deliver(msg) };
-  return shell;
+  if (handler) {
+    const shell = nativeShell((msg) => handler.postMessage(msg));
+    window.__ledge = { deliver: (msg) => shell.deliver(msg) };
+    return shell;
+  }
+  // Strings rather than objects, which is what this port accepts. Replies
+  // arrive as message events on the same object, not by evaluated script.
+  const port = (window as unknown as Record<string, AndroidPort | undefined>)[SHELL_HANDLER];
+  if (port && typeof port.postMessage === "function") {
+    const shell = nativeShell((msg) => port.postMessage(JSON.stringify(msg)));
+    port.addEventListener("message", (event) => shell.deliver(JSON.parse(event.data) as ToPage));
+    return shell;
+  }
+  throw new Error(`this page is not inside the Ledge shell (no ${SHELL_HANDLER} message handler)`);
 }
