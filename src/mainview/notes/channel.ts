@@ -7,6 +7,8 @@ import type { BacklinkHit, ExternalOpenInfo, NoteMeta, TagHit, TrashMeta } from 
 import type { NoteParams } from "../../shared/frontmatter";
 import type { SearchHit } from "../../shared/search";
 import type { TagInfo } from "../../shared/tags";
+import { respellChords } from "../commands/format";
+import { docsFolder } from "../workspace/channel";
 
 // A read hands back the note's text and its disk version, which the store
 // echoes into the next write's baseMtimeMs (external-edit guard). `locked`
@@ -126,8 +128,19 @@ export function listNotes(folder: string): Promise<NoteMeta[]> {
   return bridge().list(folder);
 }
 
-export function readNote(path: string): Promise<NoteFile | null> {
-  return bridge().read(path);
+export async function readNote(path: string): Promise<NoteFile | null> {
+  const file = await bridge().read(path);
+  // A manual page reads in this platform's key spelling (commands/format.ts
+  // respellChords): the corpus is written in the Mac's glyphs, and a Ctrl
+  // desktop would otherwise read ⇧⌘P for Ctrl+Shift+P. Only the docs
+  // folder, whose pages are read-only, so nothing respelled is written
+  // back; the bytes on disk, and the server's search over them, keep the
+  // glyphs.
+  const docs = docsFolder();
+  if (file && docs && path.startsWith(docs.endsWith("/") ? docs : `${docs}/`)) {
+    return { ...file, text: respellChords(file.text) };
+  }
+  return file;
 }
 
 // Full-text hits for `query` within one workspace's notes, newest note first

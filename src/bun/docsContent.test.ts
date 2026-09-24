@@ -5,7 +5,9 @@
 // in a runnable language carries `norun` on its opener (interactions.md §4e).
 // This test fails a page that leaves one unmarked, a new page or a new
 // example on an old one.
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { respellChords } from "../mainview/commands/format";
+import { configureModKey } from "../mainview/commands/modKey";
 import { noRun, parseFenceInfo } from "../mainview/editor/fenceInfo";
 import { DEFAULT_SETTINGS } from "../shared/settings";
 import { DOC_PAGES } from "./docsContent";
@@ -53,5 +55,26 @@ describe("the manual's fences", () => {
     // The inner ```sh is body text of the ```` block, not an opener.
     const text = "````\n```sh\nnpm install\n```\n````\n\n```sh\npwd\n```\n";
     expect(topLevelOpeners(text).map((o) => o.line)).toEqual([1, 7]);
+  });
+});
+
+// A Ctrl desktop reads the manual through respellChords (writing.md §10), so
+// every glyph chord in it has to be one that function reads: a glyph it
+// leaves behind is a chord spelled some way the respelling does not know, or
+// a system chord written as glyphs where a menu path belongs.
+describe("the manual's chords", () => {
+  beforeEach(() => configureModKey("Ctrl"));
+  afterEach(() => configureModKey("Meta"));
+
+  test("every one respells for a Ctrl desktop", () => {
+    const left: string[] = [];
+    for (const page of DOC_PAGES) {
+      respellChords(page.text)
+        .split("\n")
+        .forEach((line, i) => {
+          if (/[⌃⌥⇧⌘]/.test(line)) left.push(`${page.name}:${i + 1}: ${line}`);
+        });
+    }
+    expect(left).toEqual([]);
   });
 });

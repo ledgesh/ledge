@@ -17,7 +17,7 @@ export const WELCOME_DOC = [
   "",
   "## Run a block",
   "",
-  "⌘↩ inside the block below, or the Run button on it (a tap, on a phone), runs it.",
+  "⌘↩ inside the block below (Ctrl+Enter on Linux), or the Run button on it (a tap, on a phone), runs it.",
   "",
   "```sh",
   "curl -s https://api.github.com/zen",

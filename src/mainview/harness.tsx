@@ -847,6 +847,9 @@ store.seedAt(
     "",
     "Welcome to Ledge. docs needle body.",
     "",
+    // A chord, for keyboard-ctrl.spec.ts: the page reads as Ctrl+Enter there.
+    "⌘↩ runs the block.",
+    "",
     "```sh",
     "echo hello from the docs",
     "```",

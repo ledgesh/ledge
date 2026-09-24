@@ -72,3 +72,13 @@ test("Quit Ledge is a palette command that asks the shell to quit", async ({ pag
   await page.keyboard.press("Enter");
   await expect.poll(() => page.evaluate(() => window.__harness.quitAsks())).toBe(1);
 });
+
+// The manual is written in the Mac's glyphs and read through respellChords
+// (commands/format.ts, notes/channel.ts readNote), so the page a Ctrl desktop
+// opens says Ctrl+Enter where the corpus says ⌘↩.
+test("the manual reads in the Ctrl spelling", async ({ page }) => {
+  await page.goto("/harness.html?docs=1&mod=ctrl");
+  await expect(page.locator(".cm-line").first()).toHaveText("# Getting Started");
+  await expect(page.locator(".cm-content")).toContainText("Ctrl+Enter runs the block.");
+  await expect(page.locator(".cm-content")).not.toContainText("⌘");
+});

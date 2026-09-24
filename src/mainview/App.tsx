@@ -957,7 +957,7 @@ function Shell() {
           const local = conn.destination === "";
           return (
             <AttachFolderDialog
-              place={local ? "this Mac" : conn.name}
+              place={local ? "this computer" : conn.name}
               pick={picksFolders() && local ? pickFolderPath : null}
               // A refusal stays in the dialog, under the field. Success
               // closes it, with the new workspace selected by the reducer.

@@ -23,7 +23,7 @@ Sync workspace folders, not `~/.ledge` itself. The app home holds machine-local 
 
 1. Create a folder inside iCloud Drive, Dropbox, or any synced location.
 2. Run "Attach Folder as Workspace…" and give its path, or press Choose Folder… to pick it.
-3. On a second Mac, attach the same folder there.
+3. On a second computer, attach the same folder there.
 
 Notes you write are files in the synced folder, and the service carries them.
 
@@ -78,17 +78,17 @@ A repository is also how a workspace reaches other people, with a clone each ([[
 Both setups start with a folder in the right place. Notes in a managed workspace live inside `~/.ledge`, which a sync service will not carry, so the workspace has to move out first.
 
 1. Close the workspace (⌫ on its row). Closing only detaches the folder; no note is touched.
-2. In Finder, move the folder out of `~/.ledge` (it is hidden: press ⇧⌘. in Finder to show it, or use ⇧⌘G and type `~/.ledge`) into the synced location.
+2. Move the folder out of `~/.ledge` into the synced location. The folder is hidden: Finder's Go to Folder… takes the path, and so does Ctrl+L in GNOME Files.
 3. Run "Attach Folder as Workspace…" and give its new path.
-4. Attach the same folder on your other Mac.
+4. Attach the same folder on your other computer.
 
 The whole folder travels: notes, images, and trash together, with references intact. The workspace continues at its new home as an ordinary attached folder.
 
 ## What syncing does not carry
 
-Syncing workspace folders syncs all of your notes. It does not touch Ledge's own state in `~/.ledge`: your settings, the list of which folders are workspaces, and your window layout. Those are machine-local, since a list of folder paths means little on another Mac.
+Syncing workspace folders syncs all of your notes. It does not touch Ledge's own state in `~/.ledge`: your settings, the list of which folders are workspaces, and your window layout. Those are machine-local, since a list of folder paths means little on another computer.
 
-So setting up a new Mac is a short manual step: install Ledge, attach your synced folders, and redo any settings you care about. If your `settings.jsonc` is heavily customized, keep a copy alongside your notes.
+So setting up a new computer is a short manual step: install Ledge, attach your synced folders, and redo any settings you care about. If your `settings.jsonc` is heavily customized, keep a copy alongside your notes.
 
 There is nothing else to migrate. Notes are files, so there is no export and no import. Locked notes carry what they need to be decrypted, so on the new machine the passphrase alone opens them, with no vault file to move ([[Note Locking]]).
 

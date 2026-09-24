@@ -2,7 +2,7 @@
 
 Put an encrypted copy of your notes, and everything Ledge keeps beside them, into an S3-compatible bucket, every hour, from the machine that holds them.
 
-This works the same on a Mac that runs the app and on a server set up as in [[Tutorial: Set Up a Ledge Server]]. Every command below runs on that machine, as the account Ledge runs as, and needs the `ledge` command on its PATH: a server has it from the install, and a Mac gets it from "Install Shell Command (ledge)" in the command palette ([[The ledge CLI]]).
+This works the same on a computer that runs the app and on a server set up as in [[Tutorial: Set Up a Ledge Server]]. Every command below runs on that machine, as the account Ledge runs as, and needs the `ledge` command on its PATH: a server has it from the install, and the app's computer gets it from "Install Shell Command (ledge)" in the command palette ([[The ledge CLI]]).
 
 The backup tool is restic, and `ledge backup` does everything around it: it fetches restic, keeps the credentials, creates the repository, computes what to back up, and keeps the schedule. restic encrypts on the machine before anything leaves it, and keeps versions, so one note from last Tuesday is something you can ask for.
 
@@ -44,7 +44,7 @@ The password is what encrypts the backup, and it is the only key. Nothing can be
 
 Backups run every hour while this machine's Ledge server is up, and once more before it exits.
 
-On a Mac, the server is up while the app is open and for a minute after it closes. On a VPS, it is up while a device is connected and for a minute after. Quitting the app or closing your laptop's connection is followed by a backup of whatever changed. A machine you open Ledge on after a week away backs up as soon as the server starts.
+On a computer that runs the app, the server is up while the app is open and for a minute after it closes. On a VPS, it is up while a device is connected and for a minute after. Quitting the app or closing your laptop's connection is followed by a backup of whatever changed. A machine you open Ledge on after a week away backs up as soon as the server starts.
 
 Nothing else needs installing: no timer, no unit file, no line in a crontab. One line is worth adding on a server where notes are written while no device is connected, by the `ledge` command or by an agent, since those do not start the server:
 
@@ -95,7 +95,7 @@ Do this once now, with a note you have, before you need it.
 
 ## 6. Restore everything onto a new machine
 
-On a fresh machine with Ledge installed, the app on a Mac or the server on a VPS, and the four values and the password at hand:
+On a fresh machine with Ledge installed, the app on a desktop or the server on a VPS, and the four values and the password at hand:
 
 ```sh norun
 ledge backup setup --existing

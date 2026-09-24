@@ -436,7 +436,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
       // stopped now rather than asked to retire, and the dial that follows
       // starts one from this bundle. Whatever it was running ends with it,
       // which is what "Restart to Install Update" already meant.
-      console.warn(`[connect] this Mac's daemon refused this build (${err.message}); replacing it`);
+      console.warn(`[connect] this machine's daemon refused this build (${err.message}); replacing it`);
       if (!(await stopDaemon())) throw err;
       wire = await open();
     } else if (err instanceof Refused || here) {

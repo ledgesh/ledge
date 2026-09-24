@@ -84,7 +84,7 @@ export function localServer(opts: LocalServerOpts): LocalServer {
       if (peer.instance === reviewed) return "kept";
       reviewed = peer.instance;
       if (peer.build === opts.build) return "kept";
-      console.warn(`[local] this Mac's daemon is build ${peer.build} and this app is ${opts.build}; it restarts when idle`);
+      console.warn(`[local] this machine's daemon is build ${peer.build} and this app is ${opts.build}; it restarts when idle`);
       daemon.retire();
       return "retired";
     },

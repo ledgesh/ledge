@@ -58,11 +58,11 @@ Paste the link only if it came from your own server. A code holds no password or
 
 A server in your list can hand its code to your phone without a terminal. Open Notes On…, and click the QR code icon on the server's row.
 
-Ledge shows the code, then the account, host, port and host key it names, then the same code as a link. Scan the QR code with Ledge on your phone ("Pair with a code" on [[Ledge on Your Phone]]), or use Copy Link and paste it into another Mac's Add Server form.
+Ledge shows the code, then the account, host, port and host key it names, then the same code as a link. Scan the QR code with Ledge on your phone ("Pair with a code" on [[Ledge on Your Phone]]), or use Copy Link and paste it into another computer's Add Server form.
 
-The code is made from what this Mac already has: the address it dials and the host key you pinned. Nothing is sent to the server to make it, and it holds no password or key. The phone still signs in with its own key, which has to be in the server's `authorized_keys`, or with a password.
+The code is made from what this computer already has: the address it dials and the host key you pinned. Nothing is sent to the server to make it, and it holds no password or key. The phone still signs in with its own key, which has to be in the server's `authorized_keys`, or with a password.
 
-The phone has to reach the host by the same address this Mac does. A server on your home network or tailnet works from a phone on that network or tailnet, and not from elsewhere. A destination that is an alias from your `~/.ssh/config` means nothing to a phone: give the server its real address here first.
+The phone has to reach the host by the same address this computer does. A server on your home network or tailnet works from a phone on that network or tailnet, and not from elsewhere. A destination that is an alias from your `~/.ssh/config` means nothing to a phone: give the server its real address here first.
 
 A server with no pinned key has no code, since the code names the key. Edit the server and use "Check Key Again" to pin one. A phone checks only Ed25519 and ECDSA host keys, so a server pinned to an RSA key has no code either.
 
@@ -78,7 +78,7 @@ Changing the address to a different machine does not. The button reads "Continue
 
 Use "Check Key Again" when a server you already have has legitimately rotated its host key. It is the same fingerprint step, on a connection you keep.
 
-This Mac cannot be removed or edited, and neither can the connection you are currently using: switch somewhere else first.
+The row for this computer cannot be removed or edited, and neither can the connection you are currently using: switch somewhere else first.
 
 ## Sign in with a password
 
@@ -86,9 +86,9 @@ Choose "A password" in the form and type the password for that account on that m
 
 Use it when the machine has no key on it yet. A fresh VPS with a password is a machine you can reach today, and setting up a key afterwards is a change you make once. Keys are the better long-term answer, and switching a connection over to one later is one edit.
 
-Ledge keeps the password in your Mac's keychain and never in `~/.ledge`. When ssh asks for it, ssh reads it from the keychain itself, so the password does not pass through Ledge on its way out.
+Ledge keeps the password in the system keychain and never in `~/.ledge`: the macOS keychain on a Mac, and on Linux the desktop's keyring (GNOME Keyring or KWallet) through `secret-tool`, which the `libsecret-tools` package provides. When ssh asks for it, ssh reads it from the keychain itself, so the password does not pass through Ledge on its way out.
 
-Anything running as you on this Mac can read that keychain item. That is the same reach a private key file in `~/.ssh` gives, so a password here is neither safer nor less safe than the key it stands in for.
+Anything running as you on this computer can read that keychain item. That is the same reach a private key file in `~/.ssh` gives, so a password here is neither safer nor less safe than the key it stands in for.
 
 Removing the connection removes the password with it. So does switching that connection back to a key.
 
@@ -104,17 +104,17 @@ The picker opens on the connection in use, so Enter means stay and moving somewh
 
 Switching closes every tab and opens that machine's instead. Nothing is lost: the tabs are on the other machine and come back when you switch back.
 
-A connection that will not open costs you nothing. Ledge reaches the new machine before it lets go of the old one, so a typo or a sleeping laptop leaves you exactly where you were with the reason on screen. If the failure happens at launch, Ledge opens on this Mac and the bar reads "not reachable".
+A connection that will not open costs you nothing. Ledge reaches the new machine before it lets go of the old one, so a typo or a sleeping laptop leaves you exactly where you were with the reason on screen. If the failure happens at launch, Ledge opens on this computer and the bar reads "not reachable".
 
 ## Two machines at once
 
 New Window in the File menu opens a second window, and each window is on its own machine. Switching moves one window; a second window is how you have a build box and a VPS open side by side.
 
-A new window opens on this Mac. Switch it wherever you like from inside it.
+A new window opens on this computer. Switch it wherever you like from inside it.
 
-Each window is titled after the machine it is on, so the title bar reads "This Mac" or the name you gave the connection. That is the name in the Window menu too, and on a window's tab when macOS merges your windows into tabs.
+Each window is titled after the machine it is on, so the title bar reads "This Mac" ("This Computer", on Linux) or the name you gave the connection. On a Mac that is the name in the Window menu too, and on a window's tab when macOS merges your windows into tabs.
 
-The manual's window is the exception, titled "Documentation". It reads the copy of the manual that ships with this app, so it stays on this Mac whichever machine the window you opened it from is on.
+The manual's window is the exception, titled "Documentation". It reads the copy of the manual that ships with this app, so it stays on this computer whichever machine the window you opened it from is on.
 
 Each window keeps its own tabs and panes, and the server remembers them: switch a window back to a machine you used before and its arrangement comes back. Ledge reopens every window you left open at the next launch, each on the machine it was pointed at.
 
@@ -140,7 +140,7 @@ curl -fsSL https://ledge.sh/server.sh | sudo -iu ledge sh
 
 Running the same command again updates the server. A server that is already running goes on serving until it exits on its own, a minute or more after the last device disconnects, and the next connection starts the new version. [[Tutorial: Set Up a Ledge Server]] walks through the install on a fresh VPS, with an account for Ledge and the sshd hardening this page describes further down.
 
-A Mac that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge` in `~/.ledge/.server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both. On a Mac, the machine also needs Remote Login turned on ("Expose ssh carefully").
+A computer that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge` in `~/.ledge/.server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both. The machine also needs an ssh server: Remote Login on a Mac ("Expose ssh carefully"), or the `openssh-server` package on a Linux desktop.
 
 macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
 
@@ -252,19 +252,19 @@ On a Mac, the server needs Remote Login turned on in System Settings, under Gene
 | Notes, images, and the trash | Window size and position |
 | Workspaces, and where each attached folder is | The clipboard |
 | Shells, running blocks, and scrollback | Which servers you have added and their pinned host keys |
-| The vault and locked notes | Any stored passwords, in this Mac's keychain |
-| Profiles and their secrets | The `ledge` command, which reads this Mac's notes whichever server the window is on ([[The ledge CLI]]) |
+| The vault and locked notes | Any stored passwords, in this computer's keychain |
+| Profiles and their secrets | The `ledge` command, which reads this computer's notes whichever server the window is on ([[The ledge CLI]]) |
 | The settings for the shell, interpreters, the trash, and daily notes | The settings for the theme, font sizes, live preview, and update checks |
 
 Settings (⌘,) has a tab for each column, Server and This app, and each tab is its own file. The This app half follows you between machines. The Server half describes the machine it is on, because a VPS's shell is not your laptop's.
 
-A Mac that runs the app is a server too. The app starts one of its own, so with no server added both columns are on this Mac, and the Server tab edits this Mac's file. Add a server and the left column moves there with your notes: the Server tab edits that machine's file, and so does "Edit Note Profile…".
+A computer that runs the app is a server too. The app starts one of its own, so with no server added both columns are on this computer, and the Server tab edits this computer's file. Add a server and the left column moves there with your notes: the Server tab edits that machine's file, and so does "Edit Note Profile…".
 
 Profile values never cross the connection. A note names a profile and the server reads the file at spawn, so the secrets exist only where the commands run ([[Profiles and Secrets]]).
 
 Unlocking a locked note sends the passphrase to the server, which is the only machine that can use it ([[Note Locking]]). The vault and its idle relock timer stay there.
 
-Each device unlocks for itself. Typing the passphrase on your Mac does not open the locked notes on your phone, and ⌘L on one leaves the other reading. Every window on the same Mac shares one unlock.
+Each device unlocks for itself. Typing the passphrase on your computer does not open the locked notes on your phone, and ⌘L on one leaves the other reading. Every window on the same computer shares one unlock.
 
 ## Back up the server
 
@@ -284,7 +284,7 @@ Run them as the account the server runs as, on the machine the server runs on.
 
 What a backup covers is decided at every run, because only the server knows it: the app home, every workspace folder you attached from elsewhere on the machine, and the profiles directory. Inside the app home it skips the daemon's socket and pidfile, the logs, the copy of this manual, and the installed server in `.server`. An attached folder that is not on disk at the time, on an unmounted volume say, is skipped, said on stderr, and shown by `status` until it is back.
 
-Backups run every hour while the server is up, and once more before it exits: after the app closes on a Mac, or after the last device disconnects from a VPS. The repository keeps 24 hourly, 30 daily, 12 weekly, and 24 monthly snapshots, and the rest are dropped.
+Backups run every hour while the server is up, and once more before it exits: after the app closes on a desktop, or after the last device disconnects from a VPS. The repository keeps 24 hourly, 30 daily, 12 weekly, and 24 monthly snapshots, and the rest are dropped.
 
 Three things to know before you rely on it:
 
@@ -317,15 +317,15 @@ A snapshot also lives in the account that pays for the server, so a lost login o
 
 ## Several devices on one server
 
-A server serves every device that connects to it. Your Mac and your phone can both be on the same server at once, reading the same notes and running commands ([[Ledge on Your Phone]]).
+A server serves every device that connects to it. Your computer and your phone can both be on the same server at once, reading the same notes and running commands ([[Ledge on Your Phone]]).
 
-Each device keeps its own tabs and panes. The server files them under the device that arranged them, so a phone does not open into a Mac's three-pane layout.
+Each device keeps its own tabs and panes. The server files them under the device that arranged them, so a phone does not open into a desktop's three-pane layout.
 
-A second Ledge window counts as another device here. Point two windows at one server and each is listed in the other's connection bar, and a note's terminal has one owner between them, exactly as a Mac and a phone would.
+A second Ledge window counts as another device here. Point two windows at one server and each is listed in the other's connection bar, and a note's terminal has one owner between them, exactly as a desktop and a phone would.
 
-The connection bar shows who else is connected: one other device by name, more than one as a count. Hover it for the full list. Names come from the devices themselves, so a Mac uses its computer name, and a device that gives no name reads as "another device".
+The connection bar shows who else is connected: one other device by name, more than one as a count. Hover it for the full list. Names come from the devices themselves, so a desktop uses its computer name, and a device that gives no name reads as "another device".
 
-Nothing appears there when you are the only one connected. A Mac that runs the app is a server of its own, so a phone signed in to it, or a second window on it, appears there the same way.
+Nothing appears there when you are the only one connected. A computer that runs the app is a server of its own, so a phone signed in to it, or a second window on it, appears there the same way.
 
 A note saved on one device appears on the other without a refresh. Everything else a server owns is shared the same way: the same workspaces, the same trash, the same tags and backlinks, the same vault.
 
@@ -393,7 +393,7 @@ You cannot start a run at all once the bar reads "disconnected". Every block's R
 
 A Ledge that has relaunched has no panel, and no way to show that run or stop it. So blocks left running on a server are stopped the next time Ledge connects to it, which includes switching to another connection and back. A terminal is not affected, because reattaching finds its shell where you left it.
 
-This reaches only the blocks that device started. A server can be carrying runs for more than one of your devices, and a phone connecting does not stop what your Mac left running.
+This reaches only the blocks that device started. A server can be carrying runs for more than one of your devices, and a phone connecting does not stop what your computer left running.
 
 A save that was in flight when the wire dropped is retried once the connection is back, and applied once, even if the first attempt had already landed.
 

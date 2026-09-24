@@ -2,7 +2,7 @@
 
 Ledge is the notebook for developers and DevOps. It runs code and commands straight from your Markdown.
 
-The manual is read-only and its code blocks do not run. The note called Welcome to Ledge is where the same examples do run. Ledge creates it the first time it starts on a machine, whether that is your Mac or a new server, and it stays in the Scratch workspace until you delete it.
+The manual is read-only and its code blocks do not run. The note called Welcome to Ledge is where the same examples do run. Ledge creates it the first time it starts on a machine, whether that is your own computer or a new server, and it stays in the Scratch workspace until you delete it.
 
 ## Your first note
 
@@ -75,16 +75,30 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 - **Remote hosts.** A `host:` line sends a note's blocks over ssh to another machine while the note stays here. See [[Run Code on Remote Hosts]].
 - **Remote servers.** Keep your notes on a server and use this app as the window onto it: the server holds the notes and runs the shells, over ssh. See [[Keep Notes on a Remote Server]].
 - **Your phone.** The same app on an iPhone or iPad, reading and running the notes on that server. See [[Ledge on Your Phone]].
-- **Appearance.** Ledge follows your Mac's light or dark setting. To pin one instead, set `appearance.theme` to `"light"` or `"dark"` under This app in Settings (⌘,) and relaunch.
+- **Appearance.** Ledge follows the system's light or dark setting. To pin one instead, set `appearance.theme` to `"light"` or `"dark"` under This app in Settings (⌘,) and relaunch.
 - **Fonts.** `editor.fontSize` sizes note text and `terminal.fontSize` sizes the terminal, both under This app in Settings (⌘,). Relaunch to apply.
+
+## Ledge on Linux
+
+The Linux app is the same app. The keys in this manual are the keys of the desktop you are reading it on: a Mac reads Command chords, and Linux reads the same chords with Ctrl and Alt.
+
+| On Linux | What differs |
+| --- | --- |
+| Tabs | Alt+1 to Alt+9 jumps to a tab, because Ctrl+1 to Ctrl+9 is the workspace jump. |
+| The terminal drawer | Every plain Ctrl chord goes to the shell, so Ctrl+C still interrupts a program. Ctrl+Shift+C copies, Ctrl+Shift+V pastes, and Ctrl+Shift+P still opens the palette from the terminal. |
+| Menus | There is no menu bar. Every menu item this manual names is in the command palette (Ctrl+Shift+P), and Quit Ledge is Ctrl+Q. |
+| Two chords GNOME keeps | Ubuntu's desktop takes Ctrl+Alt+T and Ctrl+Alt+L before any app sees them, so Toggle Tags and Toggle Backlinks run from the palette there. |
+| Passwords | Kept in the desktop's keyring through `secret-tool`, which the `libsecret-tools` package provides ([[Keep Notes on a Remote Server]]). |
+| Spelling | Enchant's dictionaries, the ones WebKitGTK underlines with, through the `enchant-2` command ([[Notes and Workspaces]]). |
+| Files | The app lives under `~/.local/share/sh.ledge.app`. Notes, settings, and the log stay under `~/.ledge`, as on a Mac. |
 
 ## Updating Ledge
 
 Ledge checks for a newer version when it starts and once a day after that, and downloads one in the background when it finds one.
 
-When the download finishes, a notice says so and the Ledge menu shows Restart to Install Update. Choosing it quits Ledge and reopens the new version. Notes are already saved. A block that is still running keeps running on the old server, and the new version waits for it to finish before it swaps the server for its own, so the output arrives in the new window.
+When the download finishes, a notice says so and Restart to Install Update appears in the Ledge menu (in the command palette, on Linux). Choosing it quits Ledge and reopens the new version. Notes are already saved. A block that is still running keeps running on the old server, and the new version waits for it to finish before it swaps the server for its own, so the output arrives in the new window.
 
-Ledge > Check for Updates… checks now and tells you the result.
+Ledge > Check for Updates… (Check for Updates… in the palette, on Linux) checks now and tells you the result.
 
 To check only when you ask, set `updates.automatic` to `false` under This app in Settings (⌘,) and relaunch. Ledge then makes no request at launch or during the day, and Check for Updates… still checks and downloads.
 
@@ -92,7 +106,7 @@ The check is a request to `ledge.sh` for the newest version's details. It carrie
 
 ## When something goes wrong
 
-Ledge writes a log of each session, and Help > Reveal Log in Finder opens the folder it is in.
+Ledge writes a log of each session, and Help > Reveal Log in Finder (Reveal Log in File Manager, on Linux) opens the folder it is in.
 
 Two files sit there.
 `ledge.log` is the session running now.

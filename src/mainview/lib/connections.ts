@@ -6,6 +6,7 @@
 // Nothing about the notes depends on it, so it is not store state.
 import type { AuthMode } from "../../shared/connections";
 import type { ConnectionInfo, PeerInfo } from "../../shared/rpc-schema";
+import { modKey } from "../commands/modKey";
 
 export interface ConnectionStatus {
   connections: ConnectionInfo[];
@@ -57,12 +58,14 @@ interface ConnectionHandlers {
 
 // The status before configureConnections runs: one connection, this machine,
 // no error. A boot that never reached Bun still draws a connection bar. It
-// still names This Mac, which is where the app is running either way.
+// still names this machine, which is where the app is running either way,
+// by the name Bun gives it (bun/connections.ts LOCAL_NAME): the platform is
+// the one fact the view can read for itself here.
 const ALONE: ConnectionStatus = {
   connections: [
     {
       id: "local",
-      name: "This Mac",
+      name: modKey() === "Meta" ? "This Mac" : "This Computer",
       destination: "",
       port: 0,
       keyPath: "",

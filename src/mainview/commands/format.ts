@@ -54,12 +54,40 @@ function spelling() {
 // Mod and Ctrl both print as Ctrl where Mod is Ctrl, and once: "Ctrl-Mod-x"
 // is not a binding anything spells.
 export function formatKey(binding: string): string {
-  const s = spelling();
   const parts = binding.split("-");
   const key = parts[parts.length - 1] === "" ? "-" : parts.pop()!;
-  const mods = s.order.filter((m) => parts.includes(m)).map((m) => s.mods[m]!);
-  const keyGlyph = s.keys[key] ?? (/^[a-z]$/.test(key) ? key.toUpperCase() : key);
-  return [...new Set(mods), keyGlyph].join(s.join);
+  return spell(parts, key);
+}
+
+// The spelling of modifiers and a key, or of modifiers alone (key null) for
+// a held-modifier phrase like "hold ⌃".
+function spell(mods: readonly string[], key: string | null): string {
+  const s = spelling();
+  const named = s.order.filter((m) => mods.includes(m)).map((m) => s.mods[m]!);
+  const keyGlyph = key === null ? [] : [s.keys[key] ?? (/^[a-z]$/.test(key) ? key.toUpperCase() : key)];
+  return [...new Set(named), ...keyGlyph].join(s.join);
+}
+
+// A chord as docs/user/ writes it: Mac glyphs, then the key as the manual
+// spells it (writing.md §10). "-click" is the modified click.
+const PROSE_CHORD = /([⌃⌥⇧⌘]+)(-click|↩|⌫|⎋|⇥|Escape|Enter|Backspace|Space|Tab|[A-Z0-9`,.[\]])?/g;
+const GLYPH_MOD: Record<string, string> = { "⌃": "Ctrl", "⌥": "Alt", "⇧": "Shift", "⌘": "Mod" };
+const GLYPH_KEY: Record<string, string> = { "↩": "Enter", "⌫": "Backspace", "⎋": "Escape", "⇥": "Tab" };
+
+// The manual's chords in this platform's spelling (notes/channel.ts readNote,
+// for the Documentation workspace's pages). docs/user/ writes every chord in
+// the Mac's glyphs, and a Ctrl desktop reads each as formatKey prints the
+// same binding: "⇧⌘P" as "Ctrl+Shift+P", "⌘-click" as modClick(), a Mac's ⌃
+// alone or with a digit as Alt (the tab jump, keys.ts tabSelectKey). On a Mac
+// the text comes back as it is.
+export function respellChords(text: string): string {
+  if (modKey() === "Meta") return text;
+  return text.replace(PROSE_CHORD, (whole, glyphs: string, key?: string) => {
+    if (key === "-click") return glyphs === "⌘" ? modClick() : whole;
+    const tabJump = glyphs === "⌃" && (key === undefined || /^[0-9]$/.test(key));
+    const mods = tabJump ? ["Alt"] : [...glyphs].map((g) => GLYPH_MOD[g]!);
+    return spell(mods, key === undefined ? null : (GLYPH_KEY[key] ?? key));
+  });
 }
 
 // The held-modifier badge's spelling of an indexed jump (workspace/Sidebar.tsx,

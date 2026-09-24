@@ -472,7 +472,7 @@ function PairingCodePanel({ conn, onDone }: { conn: ConnectionInfo; onDone: () =
   return (
     <div className="mt-3 flex flex-col gap-2">
       <p className="text-[12px] leading-snug">
-        Scan this with Ledge on your phone. It names {conn.name} and the host key this Mac pinned, and holds no
+        Scan this with Ledge on your phone. It names {conn.name} and the host key this computer pinned, and holds no
         password or key.
       </p>
       {/* Dark on light whatever the theme, quiet zone included. A scanner wants
@@ -504,7 +504,7 @@ function PairingCodePanel({ conn, onDone }: { conn: ConnectionInfo; onDone: () =
           check: a code names an address, and the reader dials it as it is
           (remote.md §4b). */}
       <p className="text-[11px] text-muted-foreground">
-        The phone has to reach {code.host} the way this Mac does: on the same network, or the same tailnet.
+        The phone has to reach {code.host} the way this computer does: on the same network, or the same tailnet.
       </p>
       <code
         data-pairing-link

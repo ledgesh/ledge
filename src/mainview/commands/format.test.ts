@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chipOf, formatKey, jumpBadge, keyChip, middleEllipsis, modClick, tooltip } from "./format";
+import { chipOf, formatKey, jumpBadge, keyChip, middleEllipsis, modClick, respellChords, tooltip } from "./format";
 import { configureModKey } from "./modKey";
 
 describe("formatKey", () => {
@@ -129,5 +129,42 @@ describe("the jump badges on a Mac", () => {
     expect(jumpBadge("Mod-1")).toBe("⌘1");
     expect(jumpBadge("Ctrl-1")).toBe("^1");
     expect(modClick()).toBe("⌘-click");
+  });
+});
+
+describe("respellChords", () => {
+  const PAGE = [
+    "⌘↩ runs the block, ⇧⌘↩ sends it to the drawer, and ⌃` opens the drawer.",
+    "Settings (⌘,) and frontmatter (⌥⌘,). ⌘P opens a note by title; ⌥⌘P searches.",
+    "⌃Tab and ⌃⇧Tab step tabs, ⇧⌘] and ⇧⌘[ do the same, ⌃1 to ⌃9 jump. Hold ⌃ and each tab shows its number.",
+    "⌘-click follows a link. ⌘⌫ trashes the note, ⌘Escape leaves a program, and ⌘N.",
+  ].join("\n");
+
+  test("is the identity on a Mac", () => {
+    expect(respellChords(PAGE)).toBe(PAGE);
+  });
+
+  describe("where Mod is Ctrl", () => {
+    beforeEach(() => configureModKey("Ctrl"));
+    afterEach(() => configureModKey("Meta"));
+
+    test("spells each chord as formatKey spells the same binding", () => {
+      expect(respellChords(PAGE).split("\n")).toEqual([
+        "Ctrl+Enter runs the block, Ctrl+Shift+Enter sends it to the drawer, and Ctrl+` opens the drawer.",
+        "Settings (Ctrl+,) and frontmatter (Ctrl+Alt+,). Ctrl+P opens a note by title; Ctrl+Alt+P searches.",
+        "Ctrl+Tab and Ctrl+Shift+Tab step tabs, Ctrl+Shift+] and Ctrl+Shift+[ do the same, Alt+1 to Alt+9 jump. Hold Alt and each tab shows its number.",
+        "Ctrl-click follows a link. Ctrl+Backspace trashes the note, Ctrl+Esc leaves a program, and Ctrl+N.",
+      ]);
+    });
+
+    test("agrees with formatKey and modClick", () => {
+      expect(respellChords("⇧⌘P")).toBe(formatKey("Mod-Shift-p"));
+      expect(respellChords("⌃1")).toBe(formatKey("Alt-1"));
+      expect(respellChords("⌘-click")).toBe(modClick());
+    });
+
+    test("leaves prose with no chord alone", () => {
+      expect(respellChords("Press Escape twice, or Tab to the field.")).toBe("Press Escape twice, or Tab to the field.");
+    });
   });
 });

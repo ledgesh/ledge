@@ -20,9 +20,9 @@ If your notes need `sudo`, that is a decision for later, made with `visudo` and 
 
 `adduser` gives the account bash as its login shell, which is one of the two shells Ledge runs blocks in.
 
-## 2. Make a key on your Mac
+## 2. Make a key on your computer
 
-In a terminal on your Mac:
+In a terminal on your computer:
 
 ```sh norun
 ssh-keygen -t ed25519 -f ~/.ssh/ledge -C ledge@laptop
@@ -56,7 +56,7 @@ Nothing else needs installing and no service needs starting. Ledge starts the se
 
 ## 4. Check that ssh can find it
 
-From your Mac, as the new account, with the new key:
+From your computer, as the new account, with the new key:
 
 ```sh norun
 ssh -i ~/.ssh/ledge ledge@vps 'PATH=$HOME/.ledge/.server/bin:$PATH command -v ledge'
@@ -122,7 +122,7 @@ PermitRootLogin prohibit-password
 
 The `10-` matters. sshd keeps the first value it reads for a setting, and it reads this directory in name order. Cloud images ship a `50-cloud-init.conf` that turns passwords on, and a file named after it would lose.
 
-Your own account has to sign in with a key from now on. The provider usually installed one when it created the VPS, and this line from your Mac says whether it did:
+Your own account has to sign in with a key from now on. The provider usually installed one when it created the VPS, and this line from your computer says whether it did:
 
 ```sh norun
 ssh -o PasswordAuthentication=no you@vps true

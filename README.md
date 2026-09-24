@@ -7,7 +7,7 @@
 
 <h1 align="center">Ledge</h1>
 
-<p align="center">The notebook that runs code.<br>Markdown notes for developers and DevOps, on macOS and iPhone.</p>
+<p align="center">The notebook that runs code.<br>Markdown notes for developers and DevOps, on macOS, Linux, and iPhone.</p>
 
 <p align="center">
   <a href="https://ledge.sh">Website</a> ·
@@ -24,16 +24,16 @@
   <img src="assets/readme/hero.gif" width="840" alt="A Ledge note whose shell, Python, and prompt blocks run in place, output streaming in beneath them">
 </p>
 
-Ledge is a Markdown notebook that runs the code in your notes. Press ⌘↩ on a
-fenced block and its output streams in beneath it: shell commands, Python,
-Node, Ruby, PHP, and TypeScript out of the box, SQL and Redis against the
-database the note points at, and `prompt` blocks that send their text to an
-AI agent.
+Ledge is a Markdown notebook that runs the code in your notes. Press ⌘↩
+(Ctrl+Enter on Linux) on a fenced block and its output streams in beneath it:
+shell commands, Python, Node, Ruby, PHP, and TypeScript out of the box, SQL
+and Redis against the database the note points at, and `prompt` blocks that
+send their text to an AI agent.
 
-Notes are plain `.md` files in folders you choose. They can live on your Mac,
-or on a Linux or Mac server you reach over ssh, and the same notes open on
-your iPhone or iPad. There is no account, no service, and no database on the
-side.
+Notes are plain `.md` files in folders you choose. They can live on your own
+computer, or on a Linux or Mac server you reach over ssh, and the same notes
+open on your iPhone or iPad. There is no account, no service, and no database
+on the side.
 
 ## Install
 
@@ -41,10 +41,21 @@ side.
 and drag Ledge to Applications. Ledge runs on macOS 13 or newer on Apple Silicon, and
 updates itself.
 
+**Linux.** Download the installer for your architecture,
+[x64](https://github.com/ledgesh/ledge/releases/latest/download/linux-x64-Ledge-Setup.tar.gz)
+or [arm64](https://github.com/ledgesh/ledge/releases/latest/download/linux-arm64-Ledge-Setup.tar.gz),
+extract it, and run `./installer`. It puts the app under
+`~/.local/share/sh.ledge.app` with a desktop entry, needs no root, and updates
+itself. Ledge needs a desktop with GTK 3 and WebKitGTK 4.1, which is Ubuntu
+22.04, Debian 12, Fedora 38 or newer; on Ubuntu, `apt install libgtk-3-0
+libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2` covers the
+libraries, and `libsecret-tools` and `enchant-2` add server passwords in the
+keyring and spelling suggestions.
+
 **iPhone and iPad.** Get
 [Ledge for iPhone](https://apps.apple.com/app/ledge-notebook/id6813315782) on the App
 Store. It holds no notes of its own: it connects over ssh to a Linux server or
-to your Mac, and reads, edits, and runs the same notes from anywhere.
+to your own computer, and reads, edits, and runs the same notes from anywhere.
 
 **Server.** Host your notes on a Linux server or a Mac, run their blocks
 there, and reach them from every device over ssh. Signed in as the account
@@ -55,17 +66,17 @@ curl -fsSL https://ledge.sh/server.sh | sh
 ```
 
 Then `ledge pair` prints a pairing code to scan from the phone or paste into
-the Mac app, and `ledge backup` keeps an encrypted copy of the notes in any
+the desktop app, and `ledge backup` keeps an encrypted copy of the notes in any
 S3-compatible bucket. See
 [Keep Notes on a Remote Server](https://ledge.sh/docs/keep-notes-on-a-remote-server)
 and the [server tutorial](https://ledge.sh/docs/tutorial-set-up-a-ledge-server).
 
 **CLI and agents.** Run "Install Shell Command (ledge)" from the command
-palette (⇧⌘P). The `ledge` command then lists, reads, searches, creates, and
-appends to notes from any terminal, and the app follows along live
-([The ledge CLI](https://ledge.sh/docs/the-ledge-cli)). The same
-command serves Ledge's MCP server, so one line connects Claude Code or any
-other MCP agent:
+palette (⇧⌘P, or Ctrl+Shift+P on Linux). The `ledge` command then lists,
+reads, searches, creates, and appends to notes from any terminal, and the app
+follows along live ([The ledge CLI](https://ledge.sh/docs/the-ledge-cli)). The
+same command serves Ledge's MCP server, so one line connects Claude Code or
+any other MCP agent:
 
 ```sh
 claude mcp add ledge -- ledge mcp

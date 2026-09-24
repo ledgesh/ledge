@@ -164,6 +164,19 @@ contains and states what happens when it runs, in the indicative. A tutorial
   manual's own examples, live, and follows these mechanics as if it were a
   page.
 - Link with `[[Page Title]]` on first substantive mention, not every mention.
+- Chords are written in the Mac's glyphs (⌘↩, ⇧⌘P), and only for Ledge's own
+  keys. A Ctrl desktop reads the manual through `respellChords`
+  (`src/mainview/commands/format.ts`, applied in `notes/channel.ts` readNote),
+  which turns each glyph chord into the spelling that desktop's chips use, so
+  one corpus serves both; a glyph the respelling does not read fails
+  `src/bun/docsContent.test.ts`. The respelling cannot tell a Mac's chord from
+  a Linux one, so a system chord, Finder's or GNOME's, is written as a menu
+  path ("Go to Folder…") or a literal name ("Ctrl+L in GNOME Files"), never
+  as glyphs, and no sentence contrasts the two spellings with glyphs. Prose
+  that means the machine running the app says "this computer" (or "the
+  desktop", against a phone); "Mac" is kept for what is macOS's alone: Remote
+  Login, the keychain, `~/.zshenv`, Finder. "This Mac" is only the
+  connection's name, which is "This Computer" on Linux.
 
 ## 11. Mechanics for code comments
 

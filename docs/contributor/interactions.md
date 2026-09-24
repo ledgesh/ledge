@@ -538,6 +538,10 @@ out, one of which is typing in the note.
     does on a Mac (`modHeld`), which is also CodeMirror's Mod-click there.
   - **Ctrl+Q quits**, as a command (`app.quit`, §10), since no menu bar
     carries a role item.
+  - **The manual follows.** A docs page is read through `respellChords`
+    (`commands/format.ts`, in `notes/channel.ts` readNote), so the ⇧⌘P the
+    corpus writes reads Ctrl+Shift+P here (writing.md §10 has the authoring
+    rule).
   - Ubuntu's GNOME takes Ctrl+Alt+T (a terminal) and Ctrl+Alt+L (lock the
     screen) before any app sees them, so Toggle Tags and Toggle Backlinks
     reach the app from the palette there. The chords stay allocated: the

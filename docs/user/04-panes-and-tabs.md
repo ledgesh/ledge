@@ -126,7 +126,4 @@ New Window in the File menu opens another one. A window is on one server at a ti
 
 The help button in the top right opens this manual in a window of its own, so reading it costs you nothing you had open. Pressing it again brings that window forward rather than opening a second one. It is the one window Ledge does not reopen at the next launch, since it is a button away.
 
-Two more keys for the window itself:
-
-- ⌥⌘B hides the sidebar.
-- ⌃⌘F enters full screen, also in the View menu.
+One more key for the window itself: ⌥⌘B hides the sidebar. Full screen is Enter Full Screen in the View menu on a Mac, and the window manager's on Linux.

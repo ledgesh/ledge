@@ -1,10 +1,10 @@
 # Ledge on Your Phone
 
-Ledge runs on an iPhone or iPad as a window onto a server. The phone holds no notes: it reaches a server over ssh, the way a Mac does in [[Keep Notes on a Remote Server]], and shows you what is there.
+Ledge runs on an iPhone or iPad as a window onto a server. The phone holds no notes: it reaches a server over ssh, the way the desktop app does in [[Keep Notes on a Remote Server]], and shows you what is there.
 
 Get Ledge for iPhone from the App Store. It runs on iOS and iPadOS 17 or newer, and it needs a server to connect to before it shows anything.
 
-A server that already serves your Mac needs nothing more. A machine without one needs the server installed first, as "Install the server" on that page describes, and the phone shows the same commands ("Set up a server" below).
+A server that already serves your desktop needs nothing more. A machine without one needs the server installed first, as "Install the server" on that page describes, and the phone shows the same commands ("Set up a server" below).
 
 ## The first screen
 
@@ -12,7 +12,7 @@ The first launch opens on "Connect to your Ledge server", which offers three way
 
 | Control | Use it when |
 | --- | --- |
-| Scan a pairing code | The server can show a code with `ledge pair`, or a Mac that already has the server can show one ("Pair with a code") |
+| Scan a pairing code | The server can show a code with `ledge pair`, or a desktop that already has the server can show one ("Pair with a code") |
 | I don't have a server yet | You have a Mac or Linux machine with ssh, and Ledge is not installed on it ("Set up a server") |
 | Add an existing server | Ledge is already installed on the server, and you would rather type its account and address ("Pair by address") |
 
@@ -26,9 +26,9 @@ ledge pair
 
 On a terminal, it first lists every address the machine has, with a note on which devices reach each one: its tailnet name and address, the address your ssh session reached, its public address when it runs in a cloud, its other network addresses, and its name. Type a number to pick one, or an address of your own as `host` or `host:port`, or press Return for the first. It then prints the code as a QR code, then the account, host, port, and host keys it holds, then the same code as a link. Without a terminal, it takes the first address and lists the rest under the code, and `--host` names one on the next run. `ledge pair --help` lists the other flags.
 
-A Mac that already has the server in its list can show the same code without a terminal: the QR code icon on the server's row in Notes On… ("Show a pairing code for a server" on [[Keep Notes on a Remote Server]]). The same link pastes into the Mac app's Add Server form ("Add a server from a pairing code" on that page).
+A desktop that already has the server in its list can show the same code without a terminal: the QR code icon on the server's row in Notes On… ("Show a pairing code for a server" on [[Keep Notes on a Remote Server]]). The same link pastes into the desktop app's Add Server form ("Add a server from a pairing code" on that page).
 
-The code names one address, and the reader connects to exactly that, so pick the one your other devices reach from where they will be. A tailnet name works from anywhere a device is on the tailnet. A home network address works from a device on that network. A cloud machine's public address works from anywhere, when its sshd is reachable from outside. A machine behind a router's port forward has an outside address no source knows: type it at the menu with its port, or give them with `--host` and `--port`. A Mac's code names the address the Mac dials, with the same reach.
+The code names one address, and the reader connects to exactly that, so pick the one your other devices reach from where they will be. A tailnet name works from anywhere a device is on the tailnet. A home network address works from a device on that network. A cloud machine's public address works from anywhere, when its sshd is reachable from outside. A machine behind a router's port forward has an outside address no source knows: type it at the menu with its port, or give them with `--host` and `--port`. A desktop's code names the address that desktop dials, with the same reach.
 
 On the phone, tap Scan a pairing code on the first screen, or in Add Server… inside the app ("More than one server" below), and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as in "Pair by address": with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
 
@@ -51,7 +51,7 @@ Run them in a terminal on that machine, signed in as the account the phone shoul
 
 Copy commands puts them on the phone's pasteboard. Share commands hands them to AirDrop, Messages, or any app that can carry them to a computer with a terminal open on that machine.
 
-On a Mac, turn on Remote Login first, in System Settings under General, then Sharing. A Mac that runs the Ledge app needs only "Install Shell Command (ledge)" from the app's command palette in place of the first command: it puts `ledge` where the phone's ssh looks, pointing at the app's own copy, so the phone sees the same notes the app shows. The second command then prints the code.
+On a Mac, turn on Remote Login first, in System Settings under General, then Sharing; on a Linux desktop, install the `openssh-server` package. A computer that runs the Ledge app needs only "Install Shell Command (ledge)" from the app's command palette in place of the first command: it puts `ledge` where the phone's ssh looks, pointing at the app's own copy, so the phone sees the same notes the app shows. The second command then prints the code.
 
 The machine needs sshd running and an address the phone can reach. [[Keep Notes on a Remote Server]] has the details of the install, including installing with Bun instead, and [[Tutorial: Set Up a Ledge Server]] walks through a fresh VPS.
 
@@ -75,11 +75,11 @@ The command adds that line to the file, creating `~/.ssh` first if the account h
 mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\n%s\n' 'restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3f2a91c0' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
 ```
 
-Run it on the server, signed in as the account Ledge uses: over ssh from a Mac, or in the provider's web console for a new VPS. Copy command puts it on the phone's pasteboard. Share command hands it to AirDrop, Messages, or any app that can carry it to that terminal, which is where the pasteboard on a phone falls short. The comment at the end of the line names the phone, so the line is easy to find again when you want to revoke it.
+Run it on the server, signed in as the account Ledge uses: over ssh from your computer, or in the provider's web console for a new VPS. Copy command puts it on the phone's pasteboard. Share command hands it to AirDrop, Messages, or any app that can carry it to that terminal, which is where the pasteboard on a phone falls short. The comment at the end of the line names the phone, so the line is easy to find again when you want to revoke it.
 
 The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It looks for `ledge` in `~/.ledge/.server/bin` first and then on the PATH an incoming ssh gets, so a server installed in either place starts ("Check that ssh can find the server" on the same page).
 
-The third is Connect. The phone dials the server, shows its host key fingerprint, and asks "Is this the server?" alongside the command that prints the same fingerprint on the server. Trust pins the key, and a server that later presents a different one is refused, the same as on a Mac.
+The third is Connect. The phone dials the server, shows its host key fingerprint, and asks "Is this the server?" alongside the command that prints the same fingerprint on the server. Trust pins the key, and a server that later presents a different one is refused, the same as on the desktop.
 
 Ledge adds the server only once `ledge serve` answers there. On a machine where ssh cannot find it, Connect says "Ledge's server is not installed" and adds nothing. Install it, then tap Connect again.
 
@@ -101,11 +101,11 @@ Removing the last server returns the phone to the first screen. Deleting the app
 
 ## More than one server
 
-Inside the app the connection bar works as on a Mac: tap it to add, edit, remove, or switch servers, with the same fingerprint step ([[Keep Notes on a Remote Server]]). The form shows the command that installs the phone's key where a Mac's shows a key path, with Share Command beside Copy Command.
+Inside the app the connection bar works as on the desktop: tap it to add, edit, remove, or switch servers, with the same fingerprint step ([[Keep Notes on a Remote Server]]). The form shows the command that installs the phone's key where the desktop's shows a key path, with Share Command beside Copy Command.
 
-Add Server… starts with Scan a pairing code, where a Mac's form has a field for the pasted link. It opens the camera, then the same "Pair with a server" screen as the first launch, and the app reopens on the new server once you tap Connect there. Cancel returns you to the form, where you can type the address instead. Editing a server has no scan: a code never replaces a host key the phone already has.
+Add Server… starts with Scan a pairing code, where the desktop's form has a field for the pasted link. It opens the camera, then the same "Pair with a server" screen as the first launch, and the app reopens on the new server once you tap Connect there. Cancel returns you to the form, where you can type the address instead. Editing a server has no scan: a code never replaces a host key the phone already has.
 
-A phone and a Mac can be on one server at once. Each keeps its own tabs, and a note's terminal has one owner between them.
+A phone and a desktop can be on one server at once. Each keeps its own tabs, and a note's terminal has one owner between them.
 
 ## What a phone does
 
@@ -124,9 +124,9 @@ A phone and a Mac can be on one server at once. Each keeps its own tabs, and a n
 
 The pages for those features say how each works on a touch screen: Run on every block, the Code Block button, and the control keys above the keyboard in [[Running Code]], adding a picture in [[Images]], the mode chips under the search field in [[Finding Things]], and splits in [[Panes and Tabs]].
 
-Tapping through the tree reuses one tab rather than filling the strip, since a note you tap opens as an italic preview ([[Panes and Tabs]]). A long press on the tab holds Keep Tab Open, which is what makes it stay, and so does typing in the note. It matters more here than on a Mac: there is no ⌘W, so a strip that filled up would take a long press and a menu item per tab to empty.
+Tapping through the tree reuses one tab rather than filling the strip, since a note you tap opens as an italic preview ([[Panes and Tabs]]). A long press on the tab holds Keep Tab Open, which is what makes it stay, and so does typing in the note. It matters more here than on a desktop: there is no ⌘W, so a strip that filled up would take a long press and a menu item per tab to empty.
 
-A block keeps running on the server while the app is in the background, and what it printed is waiting when you come back. A program that needs a whole terminal belongs in a Mac's drawer on the same server.
+A block keeps running on the server while the app is in the background, and what it printed is waiting when you come back. A program that needs a whole terminal belongs in a desktop's drawer on the same server.
 
 Unlocking a locked note asks for the passphrase every time. The phone stores none of it, and Face ID does not stand in for it. The relock timer is the server's, so a phone put away for an hour finds its locked notes closed again ([[Note Locking]]).
 

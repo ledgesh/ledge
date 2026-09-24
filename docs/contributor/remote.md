@@ -335,8 +335,8 @@ time, and moving a connection to a different port on the same machine
 invalidates its pin exactly as moving it to another machine does. Two sshd
 instances on one box really can offer different keys.
 
-**Secrets at rest go in the platform keychain**, macOS's on the Mac and iOS's
-on the phone. A password has to survive the reconnect ladder, which re-dials
+**Secrets at rest go in the platform keychain**, macOS's on the Mac, the
+desktop's keyring on Linux, and iOS's on the phone. A password has to survive the reconnect ladder, which re-dials
 from scratch on every rung (§7) and which a closed laptop lid is enough to
 start, so "ask the user each time" is not an option that exists. This is a
 smaller change than it sounds: `keyPath` already names a private key on disk,
@@ -363,12 +363,27 @@ release build making the same spawn, which is the one thing to re-confirm on
 the first signed build; that build already spawns `ssh`, `ssh-keyscan` and
 `ssh-keygen` from fixed paths.
 
+**On Linux the keyring is reached through `secret-tool`, libsecret's
+command-line client, for the same reason.** A desktop keyring (GNOME Keyring,
+KWallet) speaks D-Bus, and this process has no binding for it; the client
+does, and every read and write goes through it. An item is found by its two
+attributes, `service` and `account`, which carry the same two strings the Mac
+call takes. `secret-tool` has no attribute-only query, so an existence check
+is a lookup with its stdout dropped. The value goes in on stdin, which is how
+`secret-tool store` reads it by design. Distributions package the client apart
+from the library (`libsecret-tools` on Debian and Ubuntu, `libsecret` on
+Fedora), so a desktop can have a keyring and no way for a script to reach it,
+and `storePassword` names the package in its refusal. The reach is the Mac's:
+any process running as the user reads the item with one command.
+
 **The askpass helper reads the keychain itself.** `SSH_ASKPASS` names a script
 written into the client home at 0700, the connection id arrives in its
 environment, and the script answers with what `security find-generic-password
 -w` prints. The secret's path is keychain to helper stdout to ssh: it is never
 in Bun's memory and never on an argv. A helper handed the password instead
-would need it in both.
+would need it in both. The Linux helper execs `secret-tool lookup` instead,
+which prints the stored bytes with no newline after them and exits 1 with
+nothing printed when there is no item.
 
 **The stored value is the hex of the password's UTF-8 bytes**, which is one
 decoding rule instead of a guess. `security find-generic-password -w` prints
@@ -377,7 +392,8 @@ not, with nothing in the output saying which happened: `pässwörd` comes back a
 `70c3a4737377c3b67264`, and so does a password that IS that string. Storing hex
 makes the stored value printable always, so the read is always hex and the
 helper always decodes. Getting this wrong would not error, it would send the
-wrong password.
+wrong password. Linux stores the password itself: `secret-tool lookup` prints
+the bytes it was given, so there is nothing to disambiguate.
 
 **The write goes in on stdin, not on an argv.** `security`'s own usage text
 calls `-w <password>` insecure and it is right, for the reason §10 gives about

@@ -85,7 +85,7 @@ export function ConnectionBar() {
             // The command's own tooltip, prefixed with where the notes are: the
             // name on the card is the user's word for the machine, and the
             // destination is its address.
-            title={`${trouble || (local ? "Notes on this Mac" : `Notes on ${conn.destination}`)} — ${tooltip(verb)}`}
+            title={`${trouble || (local ? "Notes on this computer" : `Notes on ${conn.destination}`)} — ${tooltip(verb)}`}
             onClick={() => exec(verb)}
             // The same height as a workspace row, and the touch minimum of one
             // (interactions.md §1a).
