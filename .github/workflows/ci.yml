@@ -6,7 +6,9 @@
 #
 # Twice: once on macOS and once on Linux, since the app ships on both. The
 # two jobs are the same four steps; what differs is the PTY library each
-# compiles, the bundle each assembles, and the WebKit each drives.
+# compiles, the bundle each assembles, and the WebKit each drives. Chromium,
+# the engine Android's WebView is, runs on the Linux job only: it is the same
+# engine on both runners, and macOS minutes bill at ten times the rate.
 name: CI
 
 on:
@@ -32,7 +34,13 @@ jobs:
       # should hide behind the other's cancellation.
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-24.04]
+        include:
+          - os: macos-latest
+            browsers: webkit
+            projects: --project=webkit --project=phone
+          - os: ubuntu-24.04
+            browsers: webkit chromium
+            projects: ""
     runs-on: ${{ matrix.os }}
     # A hung run bills until something kills it, and macOS minutes bill at ten
     # times the rate of Linux ones. The whole suite is about five minutes.
@@ -85,13 +93,13 @@ jobs:
             ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
-      # --with-deps installs WebKitGTK's shared libraries on the Linux
-      # runner; a Mac has WebKit already and the flag does nothing there.
-      - name: Install WebKit
-        run: bunx playwright install --with-deps webkit
+      # --with-deps installs the engines' shared libraries on the Linux
+      # runner; a Mac has them already and the flag does nothing there.
+      - name: Install the browsers
+        run: bunx playwright install --with-deps ${{ matrix.browsers }}
 
-      - name: UI tests (headless WebKit)
-        run: bun run test:e2e
+      - name: UI tests (headless ${{ matrix.browsers }})
+        run: bun run test:e2e ${{ matrix.projects }}
 
       # A failure on a machine you cannot open is only debuggable through what
       # it leaves behind: the report carries the retry's trace (see

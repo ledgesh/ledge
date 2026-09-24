@@ -135,11 +135,11 @@ The seams built for testability (architecture.md §5) are where tests inject:
 
 ## 5. The harness: UI behavior in headless WebKit
 
-Unit tests cannot see focus or WebKit quirks — the click-focus bug lived
+Unit tests cannot see focus or engine quirks — the click-focus bug lived
 entirely in the gap between green unit tests and the real webview. That gap
 belongs to the **harness**: the real app booted in Playwright's headless
-WebKit (`bun run test:e2e`), which is the same engine lineage as the shipping
-WKWebView, so its focus/tabindex behavior is representative in a way no
+WebKit and Chromium (`bun run test:e2e`), the engine lineages of every webview
+the app ships in, so its focus/tabindex behavior is representative in a way no
 simulated DOM is.
 
 The trick is that no fake browser *or* fake app is involved — only a fake
@@ -166,19 +166,23 @@ Rules:
   (`wrap.spec.ts`). A column width is measured from a whole hidden span:
   WebKit inflates the client rects of a range that starts or ends part-way
   through a text node by about a pixel, which is not a width the layout used.
-- WebKit only, deliberately. A Chromium pass would green-light what the
-  shipping engine then does differently.
+- **Both shipping engines.** WebKit is the Mac's WKWebView, iOS and WebKitGTK;
+  Chromium is Android's WebView. Every spec runs in both, so a spec may not
+  pass by leaning on one engine's behavior. CI runs Chromium on the Linux job
+  only, since it is the same engine on either runner.
 - **The Mac keyboard grammar on every host.** `harness.html` sets
   `navigator.platform` to a Mac's before any module loads, so a spec presses
   Meta on the Linux runner too, and CodeMirror and `commands/modKey.ts` read
   the same answer. The Ctrl grammar a Linux desktop gets is
   `keyboard-ctrl.spec.ts`, which opts in with `?mod=ctrl`.
-- **Two projects.** `webkit` is the desktop one and runs everything except
-  `phone.spec.ts`; `phone` is the same view at 390x844 with touch, a coarse
-  pointer and no chords, and runs `phone.spec.ts` alone (ios.md §13). The
-  split is deliberate in both directions: the desktop specs assert hovers and
-  hotkeys a phone does not have, and the phone specs assert affordances that
-  say nothing about a desktop. The viewport is overridden past the iPhone
+- **Four projects, two shapes in two engines.** `webkit` and `chromium` are the
+  desktop shape and run everything except `phone.spec.ts`; `phone` (iPhone 14,
+  WebKit) and `android` (Pixel 7, Chromium) are the same view at 390x844 with
+  touch, a coarse pointer and no chords, and run `phone.spec.ts` alone (ios.md
+  §13). Both phone projects take the same geometry so that they differ only in
+  the engine. The split is deliberate in both directions: the desktop specs
+  assert hovers and hotkeys a phone does not have, and the phone specs assert
+  affordances that say nothing about a desktop. The viewport is overridden past the iPhone
   descriptor's own, which is what mobile Safari leaves after its chrome — the
   iOS client is a full-screen WKWebView with none. A long press is dispatched
   rather than driven: Playwright's touchscreen taps and does nothing else, so
@@ -497,53 +501,11 @@ docker exec ledge-ios-probe sh -c 'kill -CONT $(cat /home/ledge/.ledge/.server.p
 
 Everything between the two ends stays healthy and answering, so the bar reaching
 "reconnecting" in about twenty seconds is the protocol's heartbeat and can be
-nothing else (`remote.md` §7). `--serve` has the same pair as `stall` and
-`resume` for the device variant below. The pid file is under the `ledge`
+nothing else (`remote.md` §7). The pid file is under the `ledge`
 account rather than under the image's `/data`, because an ssh session does not
 inherit a Dockerfile's `ENV`.
 
-**The device variant** — for the four things a Simulator cannot be (`ios.md`
-§13): the phone's own enclave, a suspension that really suspends, a finger, and
-a screen the layout was not built on. Two commands, and `ios.md` §12 has the
-one-time Apple account work behind the second.
-
-```
-bun run probe:ssh -- --serve                  # the fixture on the LAN, not on loopback
-bun run ios -- --phone                        # build, sign, install, stream the console
-```
-
-**The fixture has to leave loopback.** A Simulator shares this Mac's network
-stack, so `127.0.0.1` is the server; a phone is a different machine and there
-is nothing there. `--serve` publishes the same container on port 2222 of every
-interface, prints the `user@host` and the port to type and the fingerprint to
-check the pairing screen against, and appends the `authorized_keys` line pasted
-into it. Ctrl-C removes the container and the scratch home. The port and the
-host key stay the same from run to run (Debian's `openssh-server` package makes
-the host key when the image is built), so a phone that paired before dials its
-saved record again. Only its `authorized_keys` line has to be pasted anew.
-
-**Pair by hand here, not with launch arguments.** `-LedgeHostKey` exists so a
-Simulator probe can consider itself paired without a human; on a phone it skips
-one of the things worth watching. The phone also mints its own key regardless,
-so the Simulator's line in `authorized_keys` will never authenticate it: copy
-the line off the pairing screen, which has a button for it, and paste it into
-the terminal `--serve` is running in. A phone with no servers opens on the
-welcome screen, where Add an existing server leads to that form.
-
-**The first install always fails, and it cannot be prevented.** It fails on
-Developer Mode, under Settings > Privacy & Security on the phone, and that
-entry does not appear until an install has been attempted. Turn it on, restart
-the phone, run the same command again.
-
-**Whether the key is really the enclave's is a printed line, not an
-inspection.** `[pair] key in the Secure Enclave` comes out of
-`devicectl --console` at first launch, and `key in software` is the thing that
-must never appear there. The software case is compiled out of a device build
-(`#if targetEnvironment(simulator)` in `DeviceKey.swift`), so a phone with no
-usable enclave throws instead of quietly minting a weaker key: the line
-confirms the build, and the structure is what makes it true.
-
-The probe reports with the bridge's `@log`, which is why this variant needs no
+The probe reports with the bridge's `@log`, which is why it needs no
 clipboard detour: the line comes straight out of `--console-pty` while the app
 is running. `xcrun simctl io <device> screenshot` is the other half, and it
 needs no permission from anybody. **Do not `pkill` the launcher to move on** —

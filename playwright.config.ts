@@ -1,12 +1,11 @@
 // Headless UI tests against the harness build (testing.md §5): the real view in
-// a real WebKit, with the Bun process faked at the seams
-// (src/mainview/harness.tsx). It is the same engine lineage as the WKWebView
-// the app ships in, which is what makes focus and tabindex behavior
-// representative.
+// a real browser engine, with the Bun process faked at the seams
+// (src/mainview/harness.tsx). The engines are the two the app ships in: WebKit
+// (the Mac's WKWebView, iOS, WebKitGTK on Linux) and Chromium (Android's
+// WebView). Each suite runs in both, so a spec green in one engine only is a
+// finding about the other.
 //
-// Run with `bun run test:e2e`. WebKit only: this suite exists to catch WebKit
-// behavior, and a Chromium pass would only green-light what the shipping engine
-// then does differently.
+// Run with `bun run test:e2e`; `--project=webkit` and the like narrow it.
 import { defineConfig, devices } from "@playwright/test";
 
 const ci = !!process.env["CI"];
@@ -31,6 +30,17 @@ export default defineConfig({
     {
       name: "phone",
       use: { ...devices["iPhone 14"], viewport: { width: 390, height: 844 } },
+      testMatch: "phone.spec.ts",
+    },
+    // The desktop suite in Chromium, which is where CodeMirror's editing specs
+    // meet the engine Android's WebView is (testing.md §5).
+    { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: "phone.spec.ts" },
+    // The phone in Chromium: Pixel 7's touch, coarse pointer and Android user
+    // agent, at the `phone` project's 390x844 so the two run the same specs
+    // against the same geometry and differ only in the engine.
+    {
+      name: "android",
+      use: { ...devices["Pixel 7"], viewport: { width: 390, height: 844 } },
       testMatch: "phone.spec.ts",
     },
   ],
