@@ -39,6 +39,7 @@ import {
   RotateCcw,
   Star,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { notesUnder } from "../../shared/folders";
@@ -112,11 +113,11 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
   // feedback the drag gives, so without it the drop is a guess.
   const [dropOn, setDropOn] = useState<string | null | undefined>(undefined);
   // A failed delete or restore, shown under the list rather than logged only
-  // to the console.
+  // to the console. It stays until its ✕, the next action's attempt, or a
+  // notice replaces it (interactions.md §4).
   const [error, setError] = useState<string | null>(null);
   // The same strip in a neutral tone, for outcomes that are answers rather
-  // than failures (where the CLI shim landed). This one expires; an error
-  // stays up.
+  // than failures (where the CLI shim landed). This one expires.
   const [notice, setNotice] = useState<string | null>(null);
   // What was just deleted, offered back: `label` is the strip's whole sentence
   // ("Deleted “Plan”", "Deleted 5 notes in “projects”", "Removed “App” from
@@ -345,8 +346,15 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
         setError(null);
         setUndo(offer);
       },
-      showError: (message) => setError(message),
-      showNotice: (message) => setNotice(message),
+      // The strip shows the latest outcome, so each replaces the other.
+      showError: (message) => {
+        setNotice(null);
+        setError(message);
+      },
+      showNotice: (message) => {
+        setError(null);
+        setNotice(message);
+      },
     });
   }, []);
 
@@ -500,7 +508,17 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
       <TrashSection onRestore={restore} onError={setError} />
 
       {error && (
-        <p className="border-t px-3 py-1.5 text-[11px] leading-snug text-destructive">{error}</p>
+        <div className="flex items-start gap-2 border-t px-3 py-1.5 text-[11px] leading-snug">
+          <p className="min-w-0 flex-1 text-destructive">{error}</p>
+          <button
+            className="-my-0.5 shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground touch:grid touch:size-[44px] touch:place-items-center"
+            onClick={() => setError(null)}
+            title="Dismiss"
+            aria-label="Dismiss"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
       )}
 
       {notice && (

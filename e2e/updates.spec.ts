@@ -36,6 +36,32 @@ test("a check that fails is an error somebody can read", async ({ page }) => {
   await expect(page.getByText("Could not update Ledge: HTTP 500")).toBeVisible();
 });
 
+// Nothing retries a failed check, so the error strip needs its own way out
+// (interactions.md §4).
+test("a failed check's error can be dismissed", async ({ page }) => {
+  await page.evaluate(() => window.__harness.setUpdateCheckResult({ phase: "failed", version: "", detail: "HTTP 500" }));
+  await openPalette(page, "Check for Updates");
+  await page.keyboard.press("Enter");
+  const error = page.getByText("Could not update Ledge: HTTP 500");
+  await expect(error).toBeVisible();
+  await page.getByRole("button", { name: "Dismiss" }).click();
+  await expect(error).toHaveCount(0);
+});
+
+test("a later check's answer replaces the error rather than sitting beside it", async ({ page }) => {
+  await page.evaluate(() => window.__harness.setUpdateCheckResult({ phase: "failed", version: "", detail: "HTTP 500" }));
+  await openPalette(page, "Check for Updates");
+  await page.keyboard.press("Enter");
+  const error = page.getByText("Could not update Ledge: HTTP 500");
+  await expect(error).toBeVisible();
+
+  await page.evaluate(() => window.__harness.setUpdateCheckResult({ phase: "current", version: "0.1.0", detail: "" }));
+  await openPalette(page, "Check for Updates");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Ledge 0.1.0 is the latest version.")).toBeVisible();
+  await expect(error).toHaveCount(0);
+});
+
 // A background download finishing is the one change nobody asked about that
 // still gets a notice. The palette then swaps faces.
 test("a finished download is announced, and the palette offers Restart to Install Update instead", async ({ page }) => {

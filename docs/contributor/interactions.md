@@ -679,6 +679,14 @@ Row verbs, by row kind. Each fires only while a row of that kind has focus
   closing a tab already kills the same shells unconfirmed, and a confirm on
   the command whose whole point is "apply my frontmatter now" would be
   friction teaching click-through.
+- **The note browser's strip shows the latest outcome.** Below the list it
+  holds three things: the Undo offer, a notice (neutral tone), and an error.
+  Undo and notices expire after the Undo timeout. An error stays until its ✕,
+  the next attempt of an action that reports there, or a notice, which
+  replaces it; an error replaces a notice the same way. The ✕ is a button and
+  not a command, for Take This Shell's reason (§4-2). Failures that no user
+  action retries, such as a failed Check for Updates…, reach the same strip,
+  so without the ✕ they would stay until the window closed.
 - Destructive menu items are styled destructive and never sit directly
   adjacent to their non-destructive sibling without a separator or ordering
   gap.
@@ -1501,7 +1509,7 @@ app rather than growing its own dialect.
   writes the shim into `~/.ledge/.server/bin`
   (bun/cliShim.ts, the client's seam per remote.md §10). Its outcome always
   surfaces: success in the browser's notice strip, failure in the error
-  strip (§4's surface, neutral tone). There is no `install` verb: each
+  strip (§4's surface and its latest-outcome rule). There is no `install` verb: each
   installer already put `ledge` where it belongs.
 
 ## 10. The menu bar
