@@ -1,9 +1,9 @@
 # Ledge remote servers
 
-**Implemented: §14 phases 1 to 5 are code. Phase 6, the iOS client, is
-designed in `docs/contributor/ios.md`, whose own phases 1 to 4 have landed —
-there is a Swift app, and it reaches a server over ssh, under §4's forced
-command, with a key that never leaves a Secure Enclave.** The
+**Implemented: §14 phases 1 to 6 are code. Phase 6, the iOS client, is
+`docs/contributor/ios.md`, whose own phases are all done: a Swift app on real
+iPhones reaches a server over ssh, under §4's forced command, with a key that
+never leaves a Secure Enclave.** The
 connection grammar §8 called for now lives in `interactions.md` §4-1, the
 state ownership §5 describes is the code's, and the resilience §7
 promises is real: the server is a process behind a unix socket, a dropped wire
@@ -2661,9 +2661,7 @@ Per `testing.md`'s categories:
   mechanism below the protocol reports a healthy connection, correctly, and only
   the heartbeat can see it. It reads the VERDICT rather than the recovery,
   because a held request never surfaces a reason: one plain connection, whose
-  request fails in the heartbeat's own words. `--serve` carries the same
-  instrument as a command, which is how a phone's twenty seconds became testable
-  from a Simulator (`ios.md` §13).
+  request fails in the heartbeat's own words.
 
 - **A daemon stopped the way a person stops one**, in the same probe's `[stop]`
   step. SIGTERM to the daemon, which is what `pkill` and `systemctl restart`

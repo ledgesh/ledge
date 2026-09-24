@@ -40,18 +40,16 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
   one-round-trip budget, Linux and the Docker image. Read before touching the
   wire, connections, the daemon, or anything that assumes the server is in
   this process.
-- **[ios.md](docs/contributor/ios.md)** — the iOS client (its §14 phases 1 to 6
-  are code: `ios/` is a Swift app that reaches a server over ssh with a Secure
-  Enclave key, and all of §8's v1 works on a phone; phase 7, a real device
-  rather than a Simulator, is in flight): the shell around the same React view,
+- **[ios.md](docs/contributor/ios.md)** — the iOS client (its §14 phases are
+  all done: `ios/` is a Swift app that reaches a server over ssh with a Secure
+  Enclave key, and all of §8's v1 works on a real iPhone): the shell around the same React view,
   why the protocol stays in JavaScript and which half of the transport is
   therefore portable, the twenty-string bridge, NIOSSH and what it does not do
   for you, the enclave and the pairing line, the server list a phone keeps for
   itself, what iOS suspension does to a connection, and how a device build
   differs from a Simulator one (§12).
   Its touch column is implemented and now lives in interactions.md §1a. Read
-  before touching `src/shared/transport.ts`, `src/mainview/boot.tsx`, `ios/`,
-  or continuing phase 7.
+  before touching `src/shared/transport.ts`, `src/mainview/boot.tsx` or `ios/`.
 - **[writing.md](docs/contributor/writing.md)** — prose style, for the docs and
   for the comments in the source: headings name the feature keyword-first, lead
   with the answer, one idea per sentence, mechanism before rationale, no
@@ -82,7 +80,7 @@ bun run dev          # launch (bunx electrobun dev; bare `electrobun` is not on 
 bun run release      # the signed, notarized DMG (releasing.md)
 bun run cli <verb>   # the `ledge` CLI from the checkout (src/bun/cli.ts; interactions.md §9)
 bun run ios          # the iOS client in the Simulator (`-- --phone` for a device, `-- --store` for an App Store .ipa; ios.md §12)
-bun run probe:ssh    # the ssh hop against a real sshd in Docker (`-- --serve` for a phone)
+bun run probe:ssh    # the ssh hop against a real sshd in Docker
 bun run build:npm    # assemble the publishable `ledge-server` package (Mac + Docker; remote.md §11)
 bun run probe:npm    # install that package on a toolchain-free container and drive it
 bun run build:server # a server release: the packed npm tarball, and server.sh that installs it with a pinned Bun (remote.md §11)

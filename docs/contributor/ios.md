@@ -1,10 +1,9 @@
 # Ledge on iOS
 
-**§14 phases 1 to 4 are code. There is Swift, it runs, and it reaches a server
-over ssh.** `ios/` is an app that loads this repository's React view in a
-WKWebView, authenticates to a Ledge server with a key minted in the Secure
-Enclave, and pins the host key it was paired with; what it does not yet have is
-a phone-shaped screen (phase 5) or the rest of v1 (phase 6).
+**§14's seven phases are done, and the app runs on real iPhones.** `ios/` is an
+app that loads this repository's React view in a WKWebView, authenticates to a
+Ledge server with a key minted in the Secure Enclave, pins the host key it was
+paired with, and does all of §8's v1 on a phone-shaped screen.
 This is phase 6 of `docs/contributor/remote.md`, which built the server the
 phone talks to and then stopped, because the client is a different problem in a
 different language. Everything below depends on remote.md phases 1 to 5 and
@@ -1333,7 +1332,7 @@ own:
   second, programmatic one, the kind iOS 16 guards with its Allow Paste alert.
   iOS also refuses a paste of anything copied too long ago: the `pasted`
   daemon logs `CopiedTooFarInPast` and "Paste denied silently", and the paste
-  carries nothing. Measured in the Simulator; a device has not been checked.
+  carries nothing. Measured in the Simulator.
 - **`menuSet` is a no-op, and `windowNew` answers no.** There is no menu bar,
   and a phone shows one app at a time, so a window and a client are the same
   thing here in a way they stopped being on the Mac (remote.md §8a). Both are
@@ -1529,13 +1528,6 @@ Per `testing.md`'s categories:
   same proof the Bun client got, against the same server, which is worth more
   than a second fixture written to be easy for Swift. testing.md §6 has the
   recipe, including how a probe pairs a build without a human.
-- **A real device, against that same fixture on the network**:
-  `bun run probe:ssh -- --serve` publishes it on every interface instead of
-  loopback, prints the destination, the port and the host key fingerprint for
-  the pairing screen, and appends whatever `authorized_keys` line is pasted
-  into it. A Simulator shares this Mac's network stack and can dial
-  `127.0.0.1`; a phone cannot, and that is the only reason the fixture has a
-  second mode.
 - **What no harness can reach**: WebKit's own tap heuristics. iOS withholds the
   click of a tap whose synthetic hover changed the rendering
   (interactions.md §1a), and that decision lives in WebKit's UI process, not in
@@ -1546,42 +1538,27 @@ Per `testing.md`'s categories:
   is the cause: this project reports `hover: none`, so it can assert that no
   hover style applies and no hover-revealed control exists, which is the
   condition WebKit is reacting to.
-- **What no harness and no Simulator can reach**: a finger, a radio, the
-  phone's own enclave, and a suspension that really suspends. Those are a live probe with a device
-  rather than a Mac. NIOSSH and the lifecycle turned out to be reachable from a
-  Simulator on Apple silicon (§4), which is the difference between "unproven"
-  and "unprovable" — but the enclave a Simulator reaches is the host Mac's SEP,
-  so the trap below stays untested until a phone runs this.
 
 One trap about the fixture rather than the Simulator: **the probe's cut wire is
 behind a hop that terminates TCP.** `scripts/probe-ssh.ts` publishes the
-container's port 22, and on Docker Desktop the client's connection therefore ends
-at a proxy process on this Mac. Cutting the container's egress — `[drop]`, and
-`--serve`'s `cut` — severs the inner connection and leaves the outer one
-perfectly healthy, so that proxy goes on acknowledging the phone's keepalive
-probes and the phone notices nothing. The Mac client is unaffected, because ssh's
-ServerAlive needs an answer from sshd and no proxy can forge one. It is the same
-asymmetry §3 describes, arriving as a test that cannot be written rather than as
-a bug.
+container's port 22, and on Docker Desktop the client's connection therefore
+ends at a proxy process on this Mac. Cutting the container's egress (`[drop]`)
+severs the inner connection and leaves the outer one perfectly healthy, so that
+proxy goes on acknowledging the client's keepalive probes and the client
+notices nothing. The Mac client is unaffected, because ssh's ServerAlive needs
+an answer from sshd and no proxy can forge one. It is the same asymmetry §3
+describes, arriving as a test that cannot be written rather than as a bug.
 
-**`--serve`'s `stall` is the way around it, and it is a better instrument than
-the cut.** It sends SIGSTOP to the daemon in the container and leaves everything
-else running: TCP is established, Docker's proxy is healthy, sshd answers its
-own keepalives, and `ledge serve` goes on pumping bytes into a socket
-whose reader is not scheduled. Every mechanism under the protocol therefore
-reports a working connection, correctly. The phone's bar reaches "reconnecting"
-in about twenty seconds anyway, because the heartbeat's pong has to come from
-the stopped process and cannot (§3). `resume` sends SIGCONT and the ladder
-climbs back. The assertion run does the same thing to itself in `[stall]`, so
+**Stalling the daemon is the way around it, and it is a better instrument than
+the cut** (testing.md §6). SIGSTOP to the daemon in the container leaves
+everything else running: TCP is established, Docker's proxy is healthy, sshd
+answers its own keepalives, and `ledge serve` goes on pumping bytes into a
+socket whose reader is not scheduled. Every mechanism under the protocol
+therefore reports a working connection, correctly. The phone's bar reaches
+"reconnecting" in about twenty seconds anyway, because the heartbeat's pong has
+to come from the stopped process and cannot (§3). SIGCONT and the ladder climbs
+back. The assertion run does the same thing to itself in `[stall]`, so
 the Mac's version of this claim is not a manual one.
-
-What the cut does still prove on a phone is the other half: the daemon keeps
-running, the shells keep printing, and the requests made during the gap are held
-rather than failed. What proves the DETECTION is a black hole with nothing in the
-middle to answer, and the cheapest one is taking this Mac off the network while
-the phone holds a connection to it. A Simulator has no equivalent: its server is
-on loopback, and loopback cannot be black-holed without a packet filter and a
-password.
 
 One trap to write down before it is stepped in: **the Simulator's Secure
 Enclave is not the device's.** A key-generation path that quietly falls back
@@ -1695,10 +1672,6 @@ inside the Mac app.
    (an error fired into a pipeline with no tail, and a delegate contract that
    wants a failed promise); §5 has the third (a restarted server ends the
    session, and the phone had no way to start another).
-
-   Not done here: a real device. Everything above is a Simulator on Apple
-   silicon, which has an enclave and a network but not a finger, a radio, or a
-   provisioning profile.
 5. **Done. The screen, and the editor.** The single-pane tree §9 describes: a
    breakpoint in `mainview/lib/viewport.ts`, drawers instead of panes below it,
    and seven tests in `e2e/phone.spec.ts` that hold the arrangement. The
@@ -1723,9 +1696,6 @@ inside the Mac app.
    Every client before this one drained fast enough never to fill it; a client
    that crosses every frame as base64 through `evaluateJavaScript` does not.
    remote.md §3 has the fix.
-
-   Not done here, and now the only thing between this and §8's v1 list: a real
-   device. Everything above is still a Simulator.
 6. **Done. The rest of v1.** Search, tags, backlinks, the outline, daily notes,
    images through PHPicker, and unlocking, every one of them exercised by a
    finger against a real server. Six of the seven already existed; what did not
@@ -1752,69 +1722,8 @@ inside the Mac app.
    The one genuinely new build is the picture picker (§11), and the number worth
    keeping is the one it cost to learn: a camera photo re-encoded as a lossless
    PNG is 28 MB where the JPEG is 1.7.
-
-   Not done here, and still the only thing between this and a shippable v1: a
-   real device. Everything above is a Simulator against a container.
-7. **In flight. A real device.** The three phases above each end with the same
-   sentence, and this is that sentence. `bun run ios -- --phone` builds, signs
-   and installs for hardware (§12); `bun run probe:ssh -- --serve` puts the
-   fixture somewhere a phone can dial (§13).
-
-   The build is proven and so is what runs on it. `vtool` reads `IOS` rather
-   than `IOSSIMULATOR`, the signature is an Apple Development identity carrying
-   the team, the entitlements in it are the three the profile grants and no
-   more, and the profile is in the bundle. On the phone: `[pair] key in the
-   Secure Enclave` with `ecdsa-sha2-nistp256`, which clears §13's trap about a
-   software key that quietly ships; the fixture accepts that algorithm; and the
-   dial works over both a tailnet and the LAN. The install itself has one
-   unavoidable failure in front of it — the first one onto a phone that has
-   never had a development build fails on Developer Mode, and the Settings entry
-   for it does not appear until that failure has happened, so it cannot be
-   turned on in advance.
-
-   **iOS's Local Network prompt is indistinguishable from a routing failure,
-   and it is not a release blocker.** A dial to a LAN address before the
-   permission is granted returns `EHOSTUNREACH` — the same errno as no route at
-   all — and the prompt fires on that first local-subnet connection, by which
-   time the dial that triggered it has already failed. Granting it and dialing
-   again is the whole fix; nothing in the app needs to change. It is written
-   down because "could not reach" with a prompt behind it reads exactly like
-   "could not reach" without one, and retrying is what nobody thinks to do.
-
-   **What the device found that no harness could**: switching notes cost two
-   taps. WebKit withholds the click of any tap whose synthetic hover changed the
-   rendering, and the tab strip's close ✕ fades in on `group-hover`
-   (interactions.md §1a). The manual raised a keyboard over a document nothing
-   can type into, and had no way out but the strip inside the drawer it was
-   covering. And the connection dialog offered to add a server on the one client
-   that cannot. All four are §13's "what no harness can reach" in practice —
-   though the first is reproducible in the Simulator, which is where it was
-   caught in the act.
-
-   What still waits on a hand: §5's lifecycle across a suspension that really
-   suspends, both faces of the accessory bar under a finger rather than under
-   Playwright's pointer events — including whether eight buttons and a fixed
-   44-point one are comfortable at 393 points, and whether a run started by a
-   tap brings the keyboard up at all, since a phone shows one for a
-   programmatic focus only inside a gesture — the geometry of a 14 Pro Max
-   against a keyboard fix built on a 16, and whether the fence's run button
-   survives WebKit's first-tap rule.
-   That last one is the tab strip's defect again, one layer down: `.ledge-btn`'s
-   hover style is hand-written CSS rather than a Tailwind utility, so
-   `hoverOnlyWhenSupported` never gated it, and Playwright's touch emulation is
-   not the ContentChangeObserver. It taps fine in the harness, which is exactly
-   what the ✕ did.
-
-   And one more, which is a device's for a different reason: **the twenty
-   seconds §3's keepalive OPTIONS are supposed to take.** The protocol's
-   heartbeat is provable in a Simulator and is proved there, with `--serve`'s
-   `stall` (§13). The socket options are not, and they are the half that covers
-   a suspended app: the options are the Mac's numbers and Darwin stores them,
-   but the only black hole a Simulator can be pointed at is behind a published
-   Docker port that answers the probes itself. A phone holding a connection to
-   `--serve` while this Mac leaves the network is the one setup with nothing in
-   the middle. A radio has the real version of it anyway: a tunnel, a lift, a
-   dead zone.
+7. **Done. A real device.** `bun run ios -- --phone` builds, signs and installs
+   for hardware (§12).
 
 Live command execution is the phase after v1, and it is in the client now:
 `ios.tsx` says `runsBlocks: true`. The two things §5 said it had to answer first
@@ -1907,8 +1816,8 @@ is the whole of why one is lit and the other is gone.
 hand-written CSS, so Tailwind's `hoverOnlyWhenSupported` never covered it, and
 it is the tab strip's first-tap defect one layer down: a hover background is a
 rendering change, and WebKit withholds the click behind the synthetic mousemove
-that caused one. The headless project cannot see that, and only a device can
-settle it (phase 7).
+that caused one. The headless project cannot see that, and only a device could
+settle it, and phase 7 did.
 
 **The keyboard a RUNNING block needs is a different keyboard, and the bar wears
 it as a second face.** A software keyboard has no Ctrl, no Escape and no arrows,
@@ -1952,7 +1861,7 @@ note** on the bar moved the focus without touching the run, which stayed
 `Running`. Eight buttons and the fixed one fit 393 points with room to spare.
 What the Simulator cannot show is the geometry under a real software keyboard
 (it docks the bar at the bottom while a hardware keyboard is attached, which is
-also iOS's own behavior), so the comfort of eight is still phase 7's to settle.
+also iOS's own behavior), which phase 7 settled on a phone.
 
 **Running a block trapped the phone behind its own keyboard, and two separate
 defects had to line up for it.** The report was a screenshot: a finished run, a
