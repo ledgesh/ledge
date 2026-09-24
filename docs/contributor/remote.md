@@ -683,13 +683,16 @@ clears the fragment once it has read it.
   literal plus is a plus. The writer escapes it as `%2B` anyway, because
   `URLSearchParams` reads a literal one as a space.
 
-**Two languages read a code, and one file of vectors decides both.** The phone
-reads it in Swift because the screen that scans it is native and has no page
-(ios.md §4). `shared/pairing.vectors.json` lists links and what a reader returns
-for each, down to the problem text. `shared/pairing.test.ts` runs the TypeScript
-reader over it. `shared/pairing.swift.test.ts` compiles `PairingCode.swift` with
-`swiftc` for the Mac running the suite and runs it over the same file, so a rule
-changed in one language and not the other fails `bun test`.
+**Three languages read a code, and one file of vectors decides all of them.**
+A phone reads it natively because the screen that scans it has no page (ios.md
+§4): Swift on an iPhone, Kotlin on Android. `shared/pairing.vectors.json` lists
+links and what a reader returns for each, down to the problem text, and the
+phone's pin rule below with its cases. `shared/pairing.test.ts` runs the
+TypeScript reader over it. `shared/pairing.swift.test.ts` compiles
+`PairingCode.swift` with `swiftc` for the Mac running the suite and runs it over
+the same file, so a rule changed in one language and not the other fails
+`bun test`. Android's `PairingCodeTest` reads the file on the JVM, under
+`bun run android -- --test`.
 
 **A code carries no credential and writes nothing on the server.** That is the
 difference from the enrollment QR §4a dropped, which carried a one-shot
@@ -761,8 +764,8 @@ to reach the host as this Mac does (the table above).
 
 **The phone applies the first rule per host and port, not per record.** A host
 key belongs to sshd at an address, so a pin on any account there can refuse a
-code. `PairingCode.match` decides, and `shared/pairing.swift.test.ts` holds it
-to its cases:
+code. `PairingCode.match` decides, and the vector file's `matches` hold both
+phone readers to its cases:
 
 | Stored at the code's host and port | What the code does |
 | --- | --- |

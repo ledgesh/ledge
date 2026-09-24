@@ -1,22 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- For reading a pairing code, and asked for then (CodeScanner.kt). A
+         phone with no camera still pairs by typing. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- No backups: the server list's passwords are sealed with a Keystore
+         key that a backup cannot carry (ServerPassword.kt), and the device key
+         is this phone's alone. -->
     <application
         android:label="Ledge"
+        android:allowBackup="false"
         android:theme="@style/Ledge">
         <!-- The keyboard resizes nothing by itself: WebHost insets the web
              view by the IME's height. The configuration changes are the
              page's to lay out, so a rotation does not rebuild the activity and
-             drop the socket with it. -->
+             drop the socket with it. A dark mode switch does rebuild it: the
+             web view takes its colour scheme from the theme. One instance, so
+             a tapped pairing link reaches the app that is running. -->
         <activity
             android:name=".WebHost"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="ledge" android:host="pair" />
+            </intent-filter>
         </activity>
+        <!-- Not exported: only WebHost opens these, and a link reaches them
+             through it. -->
+        <activity
+            android:name=".ServerScreens"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

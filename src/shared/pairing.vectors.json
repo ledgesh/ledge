@@ -1,5 +1,5 @@
 {
-  "about": "Pairing links and what a reader must make of each (remote.md §4b). pairing.test.ts runs them through shared/pairing.ts and pairing.swift.test.ts through ios/Sources/PairingCode.swift. A vector marked canonical is also exactly what pairingLink prints for its code.",
+  "about": "Pairing links and what a reader must make of each (remote.md §4b). pairing.test.ts runs them through shared/pairing.ts, pairing.swift.test.ts through ios/Sources/PairingCode.swift, and the Android unit test PairingCodeTest through PairingCode.kt. A vector marked canonical is also exactly what pairingLink prints for its code. The matches are the phone's pin rule, PairingCode.match: one code against each set of stored servers, which only the two phone readers answer.",
   "vectors": [
     {
       "name": "a code for sshd's default port has no port field",
@@ -278,5 +278,21 @@
       "link": "https://ledge.sh/pair#v=1&u=dan&h=atlas.example.net&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w&k=SHA256:h3cjTPQJhsRsL4MfPTS9Insd64VNhAGhzUzD7mOynpY&k=SHA256:ds6FHOhxaMF2QI6mhu8ESV7KMpLRkUuTM7uy8qMuIII&k=SHA256:MMvWWWLYJroMnaZpPH1IPQJHuFtTUhgWZhAwiQChjbY&k=SHA256:Sk3/CKiRSuik41/ZQkJnKQVOw7uSKXcYiVPXvXCo5IE",
       "problem": "The pairing code names more than 4 host keys."
     }
-  ]
+  ],
+  "matches": {
+    "link": "ledge://pair#v=1&u=dan&h=atlas.example.net&p=2222&k=SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w&k=SHA256:f8HfqE098xVWKAXCt2/FkQ+4T7+uyK/D/A8HQFE9oNg",
+    "cases": [
+      {"name":"no servers stored","known":[],"expected":{"new":true}},
+      {"name":"the same host on another port","known":[{"id":"a","destination":"dan@atlas.example.net","port":0,"fingerprint":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}],"expected":{"new":true}},
+      {"name":"another host","known":[{"id":"a","destination":"dan@zephyr.example.net","port":2222,"fingerprint":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}],"expected":{"new":true}},
+      {"name":"this account, pinned to a key the code names","known":[{"id":"a","destination":"dan@atlas.example.net","port":2222,"fingerprint":"SHA256:f8HfqE098xVWKAXCt2/FkQ+4T7+uyK/D/A8HQFE9oNg"}],"expected":{"pinned":"a"}},
+      {"name":"this account, with its pin dropped","known":[{"id":"a","destination":"dan@atlas.example.net","port":2222,"fingerprint":""}],"expected":{"unpinned":"a"}},
+      {"name":"this account, pinned to a key the code does not name","known":[{"id":"a","destination":"dan@atlas.example.net","port":2222,"fingerprint":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}],"expected":{"conflict":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}},
+      {"name":"another account there, pinned to a key the code does not name","known":[{"id":"a","destination":"root@atlas.example.net","port":2222,"fingerprint":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}],"expected":{"conflict":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}},
+      {"name":"another account there, pinned to a key the code names","known":[{"id":"a","destination":"root@atlas.example.net","port":2222,"fingerprint":"SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w"}],"expected":{"new":true}},
+      {"name":"a conflict on another account outranks this account's dropped pin","known":[{"id":"a","destination":"dan@atlas.example.net","port":2222,"fingerprint":""},{"id":"b","destination":"root@atlas.example.net","port":2222,"fingerprint":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}],"expected":{"conflict":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}},
+      {"name":"a host typed in capitals is the same host","known":[{"id":"a","destination":"dan@Atlas.Example.NET","port":2222,"fingerprint":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}],"expected":{"conflict":"SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8"}},
+      {"name":"an account typed in capitals is another account","known":[{"id":"a","destination":"Dan@atlas.example.net","port":2222,"fingerprint":""}],"expected":{"new":true}}
+    ]
+  }
 }

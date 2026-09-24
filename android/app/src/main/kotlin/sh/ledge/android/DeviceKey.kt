@@ -70,6 +70,20 @@ object DeviceKey {
      * shape (ios/Sources/DeviceKey.swift). */
     fun authorizedKeysLine(held: Held, client: String): String =
         "restrict,command=\"${SshTransport.SERVE_COMMAND}\" ${held.openSSHPublicKey} ledge-android-${client.take(8).lowercase()}"
+
+    /** shared/connections.ts `authorizeCommand`, checked by
+     * shared/authorizeCommand.test.ts: the line appended to authorized_keys,
+     * with `~/.ssh` and the file made at the modes sshd insists on. */
+    const val AUTHORIZE_PREFIX = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\\n%s\\n' "
+    const val AUTHORIZE_SUFFIX = " >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+
+    fun authorizeCommand(line: String): String = AUTHORIZE_PREFIX + "'" + line.replace("'", "'\\''") + "'" + AUTHORIZE_SUFFIX
+
+    /** Where the key is kept and its line, on the log, so a probe reads the
+     * line at first launch without a screen (testing.md §6). */
+    fun log(held: Held, client: String) {
+        Log.i("ledge", "[pair] ${authorizedKeysLine(held, client)}")
+    }
 }
 
 /**

@@ -1,6 +1,7 @@
 // The phone's pairing code reader (ios/Sources/PairingCode.swift) against the
 // vectors shared/pairing.ts answers to (remote.md §4b), and the reader's pin rule
-// against the stored servers. The iOS package has no test target, so this
+// against the stored servers. Android's reader answers the same file in a Gradle
+// unit test (android/app/src/test/.../PairingCodeTest.kt). The iOS package has no test target, so this
 // compiles the one file with a small driver for the Mac running the suite and
 // compares what it prints. That takes about two seconds.
 import { describe, expect, test } from "bun:test";
@@ -44,29 +45,10 @@ let matches: [[String: Any]] = (input["matches"] as! [[String: Any]]).map { item
 FileHandle.standardOutput.write(try! JSONSerialization.data(withJSONObject: ["reads": reads, "matches": matches]))
 `;
 
-const ED = "SHA256:TC7eh5uTmsVcxQYnqmYU91fK88ypYrcXOZYJ2Je8i7w";
-const EC = "SHA256:f8HfqE098xVWKAXCt2/FkQ+4T7+uyK/D/A8HQFE9oNg";
-const OTHER = "SHA256:kBWN9w606aEkHeTSP5088vtsDyT5SyHSwfthuYAF2m8";
-const LINK = `ledge://pair#v=1&u=dan&h=atlas.example.net&p=2222&k=${ED}&k=${EC}`;
-const at = (id: string, destination: string, fingerprint: string, port = 2222): Known => ({ id, destination, port, fingerprint });
-
-const matchCases: { name: string; known: Known[]; expected: Match }[] = [
-  { name: "no servers stored", known: [], expected: { new: true } },
-  { name: "the same host on another port", known: [at("a", "dan@atlas.example.net", OTHER, 0)], expected: { new: true } },
-  { name: "another host", known: [at("a", "dan@zephyr.example.net", OTHER)], expected: { new: true } },
-  { name: "this account, pinned to a key the code names", known: [at("a", "dan@atlas.example.net", EC)], expected: { pinned: "a" } },
-  { name: "this account, with its pin dropped", known: [at("a", "dan@atlas.example.net", "")], expected: { unpinned: "a" } },
-  { name: "this account, pinned to a key the code does not name", known: [at("a", "dan@atlas.example.net", OTHER)], expected: { conflict: OTHER } },
-  { name: "another account there, pinned to a key the code does not name", known: [at("a", "root@atlas.example.net", OTHER)], expected: { conflict: OTHER } },
-  { name: "another account there, pinned to a key the code names", known: [at("a", "root@atlas.example.net", ED)], expected: { new: true } },
-  {
-    name: "a conflict on another account outranks this account's dropped pin",
-    known: [at("a", "dan@atlas.example.net", ""), at("b", "root@atlas.example.net", OTHER)],
-    expected: { conflict: OTHER },
-  },
-  { name: "a host typed in capitals is the same host", known: [at("a", "dan@Atlas.Example.NET", OTHER)], expected: { conflict: OTHER } },
-  { name: "an account typed in capitals is another account", known: [at("a", "Dan@atlas.example.net", "")], expected: { new: true } },
-];
+// The pin rule's cases, in the vector file so PairingCode.kt answers the same
+// ones (PairingCodeTest).
+const LINK: string = vectorFile.matches.link;
+const matchCases = vectorFile.matches.cases as { name: string; known: Known[]; expected: Match }[];
 
 function runSwift(): { reads: unknown[]; matches: unknown[] } {
   const dir = mkdtempSync(join(tmpdir(), "ledge-pairing-swift-"));

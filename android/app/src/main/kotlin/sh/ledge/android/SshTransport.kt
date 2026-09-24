@@ -1,32 +1,33 @@
 package sh.ledge.android
 
-import android.util.Base64
 import com.hierynomus.sshj.key.KeyAlgorithms
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
-import net.schmizz.sshj.common.Buffer
 import net.schmizz.sshj.common.DisconnectReason
 import net.schmizz.sshj.common.KeyType
 import net.schmizz.sshj.common.SecurityUtils
 import net.schmizz.sshj.connection.ConnectionException
 import net.schmizz.sshj.connection.channel.direct.Session
 import net.schmizz.sshj.transport.TransportException
-import net.schmizz.sshj.transport.verification.HostKeyVerifier
 import net.schmizz.sshj.userauth.UserAuthException
 import net.schmizz.sshj.userauth.keyprovider.KeyProvider
+import net.schmizz.sshj.userauth.method.AuthKeyboardInteractive
+import net.schmizz.sshj.userauth.method.AuthPassword
 import net.schmizz.sshj.userauth.method.AuthPublickey
+import net.schmizz.sshj.userauth.method.PasswordResponseProvider
+import net.schmizz.sshj.userauth.password.PasswordFinder
+import net.schmizz.sshj.userauth.password.Resource
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
-import java.security.MessageDigest
-import java.security.PublicKey
 import java.security.Security
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 /**
@@ -39,11 +40,21 @@ import kotlin.concurrent.thread
  */
 class SshTransport(
     /** Which `@open` this answers, for the page to drop a superseded socket's
-     * bytes (nativeBridge.ts). */
+     * bytes (nativeBridge.ts). Pairing's dials are 0. */
     val generation: Int,
     private val server: ServerRecord,
     private val key: DeviceKey.Held,
+    /** How the offered host key is judged: the pin on every page dial, and
+     * the code or a person at pairing (HostKeys.kt). */
+    private val hostKey: HostKeyJudge,
+    /** The door: a string offers it, null offers the device key. Passed in
+     * rather than read here, because pairing dials a record that has no id yet
+     * to look one up by (ServerPassword.kt). */
+    private val password: String? = null,
     private val log: (String) -> Unit,
+    /** The bound on the whole dial. Pairing's typed form lengthens it, since
+     * its handshake waits on a person reading a fingerprint. */
+    private val dialTimeoutMs: Long = DIAL_TIMEOUT_MS,
 ) {
     // Dialling, then writes, in order, off the main thread: a write blocks
     // while the channel's window is full.
@@ -51,6 +62,9 @@ class SshTransport(
     private var ssh: SSHClient? = null
     private var command: Session.Command? = null
     @Volatile private var closed = false
+    /** The exit status and last stderr line of a command that ended before
+     * writing a byte of stdout. Null for one that answered. */
+    @Volatile private var unanswered: Pair<Int, String>? = null
 
     fun open(ready: (Result<Unit>) -> Unit, bytes: (ByteArray) -> Unit, end: () -> Unit) {
         io.execute {
@@ -66,18 +80,30 @@ class SshTransport(
                     timedOut.set(true)
                     runCatching { client.disconnect() }
                 }
-            }, DIAL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }, dialTimeoutMs, TimeUnit.MILLISECONDS)
             try {
                 val (user, host) = server.userAndHost()
-                client.addHostKeyVerifier(PinnedHostKey(server.hostKey))
+                client.addHostKeyVerifier(hostKey)
                 client.connectTimeout = DIAL_TIMEOUT_MS.toInt()
-                client.transport.timeoutMs = DIAL_TIMEOUT_MS.toInt()
+                client.transport.timeoutMs = dialTimeoutMs.toInt()
                 client.connect(host, server.portOrDefault)
-                client.auth(user, AuthPublickey(object : KeyProvider {
-                    override fun getPrivate() = key.private
-                    override fun getPublic() = key.public
-                    override fun getType() = KeyType.fromKey(key.public)
-                }))
+                if (password != null) {
+                    // Offered once, never retried: a refused password is
+                    // refused, and offering it again spends the server's
+                    // MaxAuthTries proving it. Keyboard-interactive as well,
+                    // which is how many servers ask for a password.
+                    val once = object : PasswordFinder {
+                        override fun reqPassword(resource: Resource<*>?) = password.toCharArray()
+                        override fun shouldRetry(resource: Resource<*>?) = false
+                    }
+                    client.auth(user, AuthPassword(once), AuthKeyboardInteractive(PasswordResponseProvider(once)))
+                } else {
+                    client.auth(user, AuthPublickey(object : KeyProvider {
+                        override fun getPrivate() = key.private
+                        override fun getPublic() = key.public
+                        override fun getType() = KeyType.fromKey(key.public)
+                    }))
+                }
                 val session = client.startSession()
                 val running = session.exec(SERVE_COMMAND)
                 command = running
@@ -90,7 +116,7 @@ class SshTransport(
                 settled.set(true)
                 watchdog.cancel(false)
                 runCatching { client.close() }
-                val why = if (timedOut.get()) "${server.hostOnly()} did not answer within ${DIAL_TIMEOUT_MS / 1000} seconds." else describe(error)
+                val why = if (timedOut.get()) "${server.hostOnly()} did not answer within ${dialTimeoutMs / 1000} seconds." else describe(error)
                 log("[ssh] dial failed: $why (${error.javaClass.simpleName}: ${error.message})")
                 ready(Result.failure(SshFailure(why, needsPairing(error))))
             }
@@ -98,16 +124,40 @@ class SshTransport(
     }
 
     private fun pump(running: Session.Command, bytes: (ByteArray) -> Unit, end: () -> Unit) {
+        val said = AtomicReference("")
+        val errors = thread(name = "ledge-ssh-err-$generation", isDaemon = true) {
+            runCatching {
+                running.errorStream.bufferedReader().forEachLine {
+                    log("[server] $it")
+                    if (it.isNotBlank()) said.set(it.trim())
+                }
+            }
+        }
         thread(name = "ledge-ssh-out-$generation", isDaemon = true) {
             val buf = ByteArray(64 * 1024)
+            var answered = false
             try {
                 while (true) {
                     val n = running.inputStream.read(buf)
                     if (n < 0) break
-                    if (n > 0) bytes(buf.copyOf(n))
+                    if (n > 0) {
+                        answered = true
+                        bytes(buf.copyOf(n))
+                    }
                 }
             } catch (_: IOException) {
                 // The connection went; `end` says so either way.
+            }
+            // A command that ended without a byte of stdout is a shell with no
+            // server behind it, and its status and last word are the diagnosis
+            // (`whyUnanswered`). sshd can send the EOF before the status.
+            if (!answered) {
+                runCatching { running.join(2, TimeUnit.SECONDS) }
+                errors.join(500)
+                running.exitStatus?.let { status ->
+                    log("[ssh] the server command exited $status")
+                    unanswered = status to said.get()
+                }
             }
             if (!closed) {
                 log("[ssh] the channel closed")
@@ -115,10 +165,18 @@ class SshTransport(
             }
             close()
         }
-        thread(name = "ledge-ssh-err-$generation", isDaemon = true) {
-            runCatching {
-                running.errorStream.bufferedReader().forEachLine { log("[server] $it") }
-            }
+    }
+
+    /** Why the command ended without the server answering, once the
+     * connection has ended. 127 is a shell that found no `ledge` on the PATH
+     * SERVE_COMMAND gives it. Null for a server that answered. */
+    fun whyUnanswered(): String? {
+        val (status, said) = unanswered ?: return null
+        val where = server.destination
+        return when {
+            status == 127 -> "Ledge's server is not installed on $where. Install it there, then try again."
+            said.isEmpty() -> "$where closed the connection before Ledge's server answered."
+            else -> "$where closed the connection before Ledge's server answered: $said"
         }
     }
 
@@ -151,9 +209,13 @@ class SshTransport(
         val host = server.hostOnly()
         return when {
             error is SshFailure -> error.message ?: ""
-            error is UserAuthException -> "$host refused this device's key. Install its line in that account's authorized_keys."
+            error is UserAuthException && password != null ->
+                // Both halves, because from here they are indistinguishable.
+                "${server.destination} refused that password. Check it, and that the server allows signing in with a password at all."
+            error is UserAuthException ->
+                "${server.destination} refused this device's key. Run the pairing screen's command there, signed in as the account Ledge uses."
             error is TransportException && error.disconnectReason == DisconnectReason.HOST_KEY_NOT_VERIFIABLE ->
-                "$host offered a different host key from the one this device pinned."
+                hostKey.refusal ?: "$host offered a host key Ledge did not accept."
             error is ConnectionException -> "The server refused to run the Ledge command."
             error is UnknownHostException -> "There is no host called $host."
             error is ConnectException || error is NoRouteToHostException || error is SocketTimeoutException ->
@@ -171,7 +233,7 @@ class SshTransport(
         /** `SERVE_COMMAND` in shared/connections.ts, character for character. */
         const val SERVE_COMMAND = "PATH=\$HOME/.ledge/.server/bin:\$PATH ledge serve"
         const val DEFAULT_PORT = 22
-        private const val DIAL_TIMEOUT_MS = 15_000L
+        const val DIAL_TIMEOUT_MS = 15_000L
 
         private val TIMER = Executors.newSingleThreadScheduledExecutor()
 
@@ -201,64 +263,26 @@ class SshTransport(
          */
         fun probe(destination: String, port: Int): HostKeyOffer {
             val host = destination.substringAfterLast('@')
-            var offered: String? = null
+            val capture = CapturingHostKey()
             val client = SSHClient(CONFIG)
-            client.addHostKeyVerifier(object : HostKeyVerifier {
-                override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
-                    offered = openSSHLine(key)
-                    return false
-                }
-
-                override fun findExistingAlgorithms(hostname: String, port: Int): List<String> = emptyList()
-            })
+            client.addHostKeyVerifier(capture)
             client.connectTimeout = DIAL_TIMEOUT_MS.toInt()
             client.transport.timeoutMs = DIAL_TIMEOUT_MS.toInt()
             val failure = runCatching { client.connect(host, if (port > 0) port else DEFAULT_PORT) }.exceptionOrNull()
             runCatching { client.close() }
             // The refusal is the success: a captured offer means the handshake
             // got far enough to ask.
-            offered?.let { return HostKeyOffer(it, fingerprint(it), it.substringBefore(' '), "") }
-            val why = when (failure) {
-                is UnknownHostException -> "There is no host called $host."
-                null -> "$host did not offer a host key."
-                else -> "Could not reach $host on port ${if (port > 0) port else DEFAULT_PORT}."
-            }
-            return HostKeyOffer("", "", "", why)
-        }
-
-        fun openSSHLine(key: PublicKey): String {
-            val blob = Buffer.PlainBuffer().putPublicKey(key).compactData
-            return "${KeyType.fromKey(key)} ${Base64.encodeToString(blob, Base64.NO_WRAP)}"
-        }
-
-        /** OpenSSH's `SHA256:` form, as `ssh-keygen -l` prints it. */
-        fun fingerprint(line: String): String {
-            val blob = Base64.decode(line.trim().split(Regex("\\s+"))[1], Base64.DEFAULT)
-            val digest = MessageDigest.getInstance("SHA-256").digest(blob)
-            return "SHA256:" + Base64.encodeToString(digest, Base64.NO_WRAP or Base64.NO_PADDING)
+            capture.offered?.let { return it }
+            throw SshFailure(
+                when (failure) {
+                    is UnknownHostException -> "There is no host called $host."
+                    null -> "$host did not offer a host key."
+                    else -> "Could not reach $host on port ${if (port > 0) port else DEFAULT_PORT}."
+                },
+                needsPairing = false,
+            )
         }
     }
 }
 
 class SshFailure(message: String, val needsPairing: Boolean) : Exception(message)
-
-class HostKeyOffer(val hostKey: String, val fingerprint: String, val keyType: String, val error: String)
-
-/**
- * The pinned case, always: the running app never trusts a new key, since that
- * question belongs to pairing, where a person is looking at the screen. The
- * pin is the key's two fields, compared as bytes.
- */
-private class PinnedHostKey(line: String) : HostKeyVerifier {
-    private val fields = line.trim().split(Regex("\\s+"))
-    private val type = fields.getOrNull(0).orEmpty()
-    private val blob = fields.getOrNull(1)?.let { runCatching { Base64.decode(it, Base64.DEFAULT) }.getOrNull() }
-
-    override fun verify(hostname: String, port: Int, key: PublicKey): Boolean =
-        blob != null && Buffer.PlainBuffer().putPublicKey(key).compactData.contentEquals(blob)
-
-    // Steers key exchange to the algorithm of the pinned key, so a host with
-    // several offers the one this device can check.
-    override fun findExistingAlgorithms(hostname: String, port: Int): List<String> =
-        if (type.isEmpty()) emptyList() else listOf(type)
-}

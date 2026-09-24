@@ -1,7 +1,7 @@
 // The command a phone's pairing screen copies, run the way the user runs it:
 // pasted into a shell on the server as the account Ledge signs in to. Each
-// shell below runs it against a scratch HOME, and the Swift copy the native
-// screen builds it from is checked against it last (ios.md §4).
+// shell below runs it against a scratch HOME, and the Swift and Kotlin copies
+// the native screens build it from are checked against it last (ios.md §4).
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,5 +63,20 @@ describe("the command that installs a phone's key", () => {
     expect(literal("authorizePrefix")).toBe(AUTHORIZE_PREFIX);
     expect(literal("authorizeSuffix")).toBe(AUTHORIZE_SUFFIX);
     expect(swift).toContain(`line.replacingOccurrences(of: "'", with: "'\\\\''")`);
+  });
+
+  test("the Kotlin copy builds the same command", () => {
+    const kotlin = readFileSync(
+      join(import.meta.dir, "..", "..", "android", "app", "src", "main", "kotlin", "sh", "ledge", "android", "DeviceKey.kt"),
+      "utf8",
+    );
+    const literal = (name: string) => {
+      const m = kotlin.match(new RegExp(`const val ${name} = "((?:[^"\\\\]|\\\\.)*)"`));
+      expect(m).not.toBeNull();
+      return JSON.parse(`"${m![1]}"`) as string;
+    };
+    expect(literal("AUTHORIZE_PREFIX")).toBe(AUTHORIZE_PREFIX);
+    expect(literal("AUTHORIZE_SUFFIX")).toBe(AUTHORIZE_SUFFIX);
+    expect(kotlin).toContain(`line.replace("'", "'\\\\''")`);
   });
 });

@@ -1,11 +1,13 @@
 package sh.ledge.android
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -18,8 +20,10 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
@@ -53,12 +57,27 @@ class WebHost : ComponentActivity() {
      * system may freeze a moment later. */
     private var away = false
     private var leftAt = 0L
+    /** Set once this window has handed itself to the server screens, so a
+     * ladder still dialling cannot ask for them twice. */
+    private var leaving = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = ServerStore(this)
         adoptLaunchServer(intent)
+        // Nothing to dial: a first launch, a pin dropped by `repair`, or the
+        // last server removed. The screens before any of this are the answer
+        // (ios.md §4), with a tapped link's code on top when there is one.
+        if (store.selected() == null) {
+            val link = pairingLink(intent)
+            startActivity(ServerScreens.root(this).apply {
+                if (link != null) putExtra(ServerScreens.EXTRA_CODE, link).putExtra(ServerScreens.EXTRA_TAPPED, true)
+            })
+            leaving = true
+            finish()
+            return
+        }
 
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         // Chrome's inspector against a debug build. A release is not
@@ -114,17 +133,21 @@ class WebHost : ComponentActivity() {
         }
 
         // Edge to edge is the default from Android 15, so the system bars and
-        // the keyboard are this view's to stay clear of. Padding the web view
-        // by all three keeps the page's own layout what it is on iOS: a full
-        // screen that shrinks while the keyboard is up (ios.md §7).
-        ViewCompat.setOnApplyWindowInsetsListener(web) { view, insets ->
+        // the keyboard are this window's to stay clear of. Padding by all
+        // three keeps the page's own layout what it is on iOS: a full screen
+        // that shrinks while the keyboard is up (ios.md §7). The padding is a
+        // container's, because a WebView draws its page under its own.
+        val frame = FrameLayout(this)
+        frame.addView(web, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        ViewCompat.setOnApplyWindowInsetsListener(frame) { view, insets ->
             val clear = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime(),
             )
             view.setPadding(clear.left, clear.top, clear.right, clear.bottom)
             WindowInsetsCompat.CONSUMED
         }
-        setContentView(web)
+        setContentView(frame)
+        barIcons(resources.configuration)
 
         val server = store.selected()
         Log.i(TAG, "[shell] ledge -> ${server?.destination ?: "no server"}, client ${store.client}, as \"${ServerStore.label(this)}\"")
@@ -134,6 +157,20 @@ class WebHost : ComponentActivity() {
             .onSuccess { Log.i(TAG, "[pair] ${DeviceKey.authorizedKeysLine(it, store.client)}") }
             .onFailure { Log.e(TAG, "[shell] no device key: ${it.message}") }
         web.loadUrl(ENTRY)
+        openCode(intent)
+    }
+
+    /** The bars are drawn over the theme's background, which follows the
+     * system's dark setting as the page does, so their icons follow it too.
+     * A switch rebuilds the activity (uiMode is not among the manifest's
+     * configChanges), since the web view reads its colour scheme from the
+     * theme it was created under. */
+    private fun barIcons(config: Configuration) {
+        val dark = config.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -142,6 +179,58 @@ class WebHost : ComponentActivity() {
             dropSocket()
             web.loadUrl(ENTRY)
         }
+        openCode(intent)
+    }
+
+    /** A `ledge://pair#…` link, or null. https://ledge.sh/pair links arrive
+     * the same way once the site publishes its asset links (ios.md §12). */
+    private fun pairingLink(intent: Intent?): String? =
+        intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString
+
+    /**
+     * A tapped pairing link, over the app: the page keeps its connection until
+     * Connect succeeds and the app is rebuilt around the new selection. A link
+     * that is not a code says why rather than opening an empty form.
+     */
+    private fun openCode(intent: Intent?) {
+        val link = pairingLink(intent) ?: return
+        when (val read = PairingCode.read(link)) {
+            is PairingCode.Read.Code -> startActivity(
+                Intent(this, ServerScreens::class.java)
+                    .putExtra(ServerScreens.EXTRA_CODE, link)
+                    .putExtra(ServerScreens.EXTRA_TAPPED, true),
+            )
+            is PairingCode.Read.Problem -> AlertDialog.Builder(this)
+                .setTitle("Ledge cannot open this link")
+                .setMessage(read.problem)
+                .setPositiveButton("OK", null)
+                .show()
+        }
+    }
+
+    /**
+     * Hand the window to the server screens, with the reason to show on them.
+     * The web view goes with it: the next page boots around whatever gets
+     * selected there, rather than being pointed somewhere else.
+     */
+    private fun showServers(because: String?, repair: String? = null) {
+        if (leaving) return
+        leaving = true
+        dropSocket()
+        startActivity(ServerScreens.root(this, because?.ifEmpty { null }, repair))
+        finish()
+    }
+
+    /**
+     * A failure retrying cannot fix: a refused key or password, or a host key
+     * that changed. The pin is dropped and the address kept, since the address
+     * is still the one the user meant and the key is the thing to look at
+     * again, so this lands on the form rather than the list.
+     */
+    private fun repair(refused: ServerRecord, why: String) {
+        if (leaving) return
+        store.forgetPin(refused.id)
+        showServers(why, repair = refused.id)
     }
 
     /**
@@ -178,7 +267,7 @@ class WebHost : ComponentActivity() {
 
     override fun onDestroy() {
         dropSocket()
-        web.destroy()
+        if (::web.isInitialized) web.destroy()
         super.onDestroy()
     }
 
@@ -252,9 +341,15 @@ class WebHost : ComponentActivity() {
             "clipboard.image", "image.encode", "image.pick" -> reply(id, "")
             "link.open" -> reply(id, JSONObject().put("ok", openLink(params.optString("url"))))
             "share.text" -> {
-                val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, params.optString("text"))
-                startActivity(Intent.createChooser(send, null))
+                share(this, params.optString("text"))
                 reply(id, JSONObject().put("ok", true))
+            }
+            // The camera over the app, for the connection dialog's Add Server
+            // form. Answered once it is up: a code pairs on the native screen,
+            // which rebuilds the app, and a cancel returns to the form.
+            "pairing.scan" -> {
+                reply(id, JSONObject().put("ok", true))
+                startActivity(Intent(this, ServerScreens::class.java).putExtra(ServerScreens.EXTRA_OVER, true))
             }
             // There is no menu bar on a phone. The page answers this itself; the
             // case is here so a page that asks gets an answer, not a hang.
@@ -266,21 +361,45 @@ class WebHost : ComponentActivity() {
                     .put("servers", JSONArray().apply { stored.servers.forEach { put(it.toJson()) } })
                     .put("selected", stored.selected))
             }
+            // The page owns every rule about the list; this stores the bytes.
+            // A save that leaves nothing to dial, such as the last server
+            // removed, hands the window to the server screens after the reply,
+            // since that tears down the page that asked.
             "servers.save" -> {
                 val rows = params.optJSONArray("servers") ?: JSONArray()
                 val servers = (0 until rows.length()).mapNotNull { rows.optJSONObject(it)?.let(ServerRecord::fromJson) }
                 store.save(servers, params.optString("selected"))
                 reply(id, JSONObject().put("ok", true))
+                if (store.selected() == null) showServers(null)
+            }
+            // Its own call, so a password crosses the bridge when it changes
+            // and never on a rename. A string stores, null forgets, and nothing
+            // reads one back.
+            "servers.password" -> {
+                val password = if (params.isNull("password")) null else params.optString("password")
+                reply(id, JSONObject().put("ok", store.keepPassword(params.optString("id"), password)))
+            }
+            // The way out of a boot that failed (mainview/ios.tsx): the page
+            // asking for the screens it cannot draw. Replied to first, because
+            // the swap tears down the web view that asked.
+            "servers.choose" -> {
+                reply(id, JSONObject().put("ok", true))
+                showServers(params.optString("because"))
             }
             "servers.probe" -> {
                 val destination = params.optString("destination").trim()
                 val port = params.optInt("port", 0)
+                val answer = { key: String, print: String, type: String, error: String ->
+                    reply(id, JSONObject().put("hostKey", key).put("fingerprint", print).put("keyType", type).put("error", error))
+                }
+                ServerRecord.problem(destination)?.let { return answer("", "", "", it) }
                 thread(name = "ledge-probe", isDaemon = true) {
-                    val offer = SshTransport.probe(destination, port)
+                    val offer = runCatching { SshTransport.probe(destination, port) }
                     main {
-                        reply(id, JSONObject()
-                            .put("hostKey", offer.hostKey).put("fingerprint", offer.fingerprint)
-                            .put("keyType", offer.keyType).put("error", offer.error))
+                        offer.fold(
+                            onSuccess = { answer(it.line, it.fingerprint, it.keyType, "") },
+                            onFailure = { answer("", "", "", it.message.orEmpty()) },
+                        )
                     }
                 }
             }
@@ -295,14 +414,28 @@ class WebHost : ComponentActivity() {
         val key = runCatching { DeviceKey.load() }.getOrElse { return fail(id, "This phone's key is unavailable: ${it.message}") }
         generation += 1
         val gen = generation
-        val next = SshTransport(gen, server, key) { Log.i(TAG, it) }
+        val next = SshTransport(
+            gen, server, key,
+            // The pinned case, always: nothing in the running app can be asked
+            // to trust a new key.
+            hostKey = PinnedHostKey(server.hostKey),
+            // Read here and not held between connections. A password record
+            // with none stored offers the empty string, which the server
+            // refuses by name, and that refusal leads to pairing.
+            password = if (server.usesPassword) store.password(server.id).orEmpty() else null,
+            log = { Log.i(TAG, it) },
+        )
         socket = next
         next.open(
             ready = { result ->
                 main {
                     result.fold(
                         onSuccess = { reply(id, JSONObject().put("gen", gen)) },
-                        onFailure = { fail(id, it.message ?: "the dial failed") },
+                        onFailure = {
+                            val why = it.message ?: "the dial failed"
+                            fail(id, why)
+                            if ((it as? SshFailure)?.needsPairing == true) repair(server, why)
+                        },
                     )
                 }
             },

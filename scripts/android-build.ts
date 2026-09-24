@@ -2,15 +2,19 @@
 //
 //   bun run android                          build, install, launch, stream its log
 //   bun run android -- --build               build only
+//   bun run android -- --test                the Kotlin unit tests, on this Mac's JVM
 //   bun run android -- --server ledge@10.0.2.2 --port 2222
 //   bun run android -- --avd ledge-pixel     which emulator to boot if none is running
 //   bun run android -- --headless            boot it with no window
 //
-// `--server` is how a debug build is pointed at a server until the phone has a
-// pairing screen. The pin is scanned here, from this Mac, unless `--hostkey`
+// `--server` points a debug build at a server without a person tapping Trust on
+// the pairing screen. The pin is scanned here, from this Mac, unless `--hostkey`
 // names one: 10.0.2.2 is the emulator's name for this Mac's loopback, so the
 // scan asks 127.0.0.1 instead. A release build ignores all of it
 // (android/.../WebHost.kt `adoptLaunchServer`).
+//
+// The unit tests hold PairingCode.kt to shared/pairing.vectors.json, beside
+// the TypeScript and Swift readers (remote.md §4b).
 //
 // Needs a JDK 21 and the Android SDK, and no Android Studio: JAVA_HOME and
 // ANDROID_HOME default to where Homebrew's openjdk@21 and the command-line
@@ -30,6 +34,7 @@ const flag = (name: string): string | null => {
   return at >= 0 ? (argv[at + 1] ?? "") : null;
 };
 const buildOnly = argv.includes("--build");
+const testOnly = argv.includes("--test");
 const headless = argv.includes("--headless");
 const avd = flag("avd") ?? "ledge-pixel";
 const server = flag("server");
@@ -63,6 +68,13 @@ async function run(cmd: string[], opts: { cwd?: string; quiet?: boolean } = {}):
 
 if (!existsSync(env["JAVA_HOME"]!)) throw new Error(`no JDK at ${env["JAVA_HOME"]}; brew install openjdk@21, or set JAVA_HOME`);
 if (!existsSync(adb)) throw new Error(`no Android SDK at ${env["ANDROID_HOME"]}; install the command-line tools, or set ANDROID_HOME`);
+
+if (testOnly) {
+  console.log("[test] gradle testDebugUnitTest");
+  await run(["./gradlew", "-q", "testDebugUnitTest"], { cwd: ANDROID });
+  console.log("  passed");
+  process.exit(0);
+}
 
 console.log("[view] vite build --config vite.android.config.ts");
 await run(["bunx", "vite", "build", "--config", "vite.android.config.ts", "--logLevel", "warn"]);
