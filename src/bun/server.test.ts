@@ -25,7 +25,7 @@ describe("holding a run's output for a client that is not there", () => {
     holdRunEvent(held, { type: "began", blockId: "r1" }, 1024);
     holdRunEvent(held, out("r1", "one "), 1024);
     holdRunEvent(held, out("r1", "two"), 1024);
-    holdRunEvent(held, { type: "ended", blockId: "r1", exitCode: 0 }, 1024);
+    holdRunEvent(held, { type: "ended", blockId: "r1", exitCode: 0, durationMs: 0 }, 1024);
 
     expect(held.events.map((e) => e.type)).toEqual(["began", "output", "output", "ended"]);
     expect(said(held)).toBe("one two");
@@ -66,10 +66,10 @@ describe("holding a run's output for a client that is not there", () => {
     const held = empty();
     holdRunEvent(held, { type: "began", blockId: "r1" }, 8);
     for (let i = 0; i < 50; i++) holdRunEvent(held, out("r1", "0123456789"), 8);
-    holdRunEvent(held, { type: "ended", blockId: "r1", exitCode: 3 }, 8);
+    holdRunEvent(held, { type: "ended", blockId: "r1", exitCode: 3, durationMs: 0 }, 8);
 
     expect(held.events[0]).toEqual({ type: "began", blockId: "r1" });
-    expect(held.events[held.events.length - 1]).toEqual({ type: "ended", blockId: "r1", exitCode: 3 });
+    expect(held.events[held.events.length - 1]).toEqual({ type: "ended", blockId: "r1", exitCode: 3, durationMs: 0 });
     // Trimming normally stops as soon as the total is back within the cap.
     // Here it stops at the last output event: a 10-byte chunk cannot be split
     // to fit an 8-byte cap. One chunk survives even though it is over the cap.
@@ -84,7 +84,7 @@ describe("holding a run's output for a client that is not there", () => {
   test("a buffer with no output in it is left alone", () => {
     const held = empty();
     holdRunEvent(held, { type: "began", blockId: "r1" }, 0);
-    holdRunEvent(held, { type: "ended", blockId: "r1", exitCode: 0 }, 0);
+    holdRunEvent(held, { type: "ended", blockId: "r1", exitCode: 0, durationMs: 0 }, 0);
 
     expect(held.events).toHaveLength(2);
     expect(held.bytes).toBe(0);

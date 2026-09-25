@@ -18,7 +18,12 @@ export type RunEvent =
   // report. The event still has to arrive: it is what takes the panel off
   // "Running" and re-enables the block's run button, which stays disabled for
   // as long as the run is going.
-  | { id: string; kind: "ended"; exitCode: number | null };
+  // `durationMs` is the run's length as the server measured it. The client
+  // can hear of an ending long after it happened (a held push, remote.md §7),
+  // so its own clock would count the outage too. Absent from a server older
+  // than the field, and null where no length is known (bridge.ts
+  // reconcileRuns).
+  | { id: string; kind: "ended"; exitCode: number | null; durationMs?: number | null };
 
 /**
  * What happened to a note's terminal shell while a client was unreachable

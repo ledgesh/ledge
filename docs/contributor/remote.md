@@ -1077,6 +1077,13 @@ deliver in `missed`, a per-client queue in `bun/server.ts`.
   reconciliation in the same handler. A run that finished during the outage now
   comes back with its real exit code and its last output, where before the
   claim's empty answer closed it out blank.
+- **So does its length.** The pool stamps `durationMs` on the ending when it
+  reads it (`bun/inlinePool.ts`), and the panel shows that number. Timed on the
+  client, a 15 s run heard of after a 45 s outage read "Done 60 s". A run the
+  claim closes out has no known ending, so it shows no duration
+  (`mainview/editor/blocks.ts` `endedDuration`). The field is optional: an old
+  client ignores it and a new client against an old server times the run itself,
+  so `PROTOCOL_VERSION` stays where it is (§11).
 - **So `reconcileRuns` asks the editors again after the answer.** The answer
   arrives behind the release, so a run the release already ended is gone from
   the panels by then, and ending it a second time would replace that exit code

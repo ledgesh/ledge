@@ -117,8 +117,8 @@ describe("restartSession", () => {
     const events: InlineEvent[] = [];
     pool.restartSession("note", (ev) => events.push(ev));
     expect(events).toEqual([
-      { type: "ended", blockId: "a", exitCode: null },
-      { type: "ended", blockId: "b", exitCode: null },
+      { type: "ended", blockId: "a", exitCode: null, durationMs: 0 },
+      { type: "ended", blockId: "b", exitCode: null, durationMs: 0 },
     ]);
     expect(shells.every((s) => s.closed)).toBe(true);
   });
@@ -231,8 +231,34 @@ describe("event routing", () => {
     shells[0].emit(began("a"));
     shells[1].emit(began("b") + ended("b"));
     const events = drained();
-    expect(events).toContainEqual({ type: "ended", blockId: "b", exitCode: 0 });
+    expect(events).toContainEqual({ type: "ended", blockId: "b", exitCode: 0, durationMs: 0 });
     expect(events.filter((e) => e.type === "ended" && e.blockId === "a").length).toBe(0);
+  });
+
+  // The ending may sit in the server's hold for a client that is away
+  // (server.ts `missed`), so its duration is fixed when the pool reads it.
+  // The client times nothing itself when one is given (blocks.ts endedDuration).
+  test("an ending carries the run's length, measured when the shell reported it", () => {
+    const { pool, shells, drained, clock } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    clock.t += 250;
+    shells[0].emit(began("a"));
+    drained();
+    clock.t += 15_000;
+    shells[0].emit(ended("a"));
+    const [end] = drained();
+    clock.t += 45_000; // the outage before the client hears of it
+    expect(end).toEqual({ type: "ended", blockId: "a", exitCode: 0, durationMs: 15_250 });
+  });
+
+  test("a run the pool closes out itself carries its length too", () => {
+    const { pool, shells, drained, clock } = makePool();
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit(began("a"));
+    drained();
+    clock.t += 3_000;
+    shells[0].exited = true;
+    expect(drained()).toContainEqual({ type: "ended", blockId: "a", exitCode: null, durationMs: 3_000 });
   });
 });
 
@@ -297,7 +323,7 @@ describe("lifecycle", () => {
     drained();
     shells[0].exited = true;
     const events = drained();
-    expect(events).toContainEqual({ type: "ended", blockId: "a", exitCode: null });
+    expect(events).toContainEqual({ type: "ended", blockId: "a", exitCode: null, durationMs: 0 });
     expect(shells[0].closed).toBe(true);
     pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(shells.length).toBe(2);
@@ -308,7 +334,7 @@ describe("lifecycle", () => {
     pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
     shells[0].exited = true;
     const events = drained();
-    expect(events).toContainEqual({ type: "ended", blockId: "a", exitCode: null });
+    expect(events).toContainEqual({ type: "ended", blockId: "a", exitCode: null, durationMs: 0 });
   });
 
   test("an overflow shell dying mid-block ends only its own run", () => {
@@ -319,7 +345,7 @@ describe("lifecycle", () => {
     drained();
     shells[1].exited = true;
     const events = drained();
-    expect(events).toContainEqual({ type: "ended", blockId: "b", exitCode: null });
+    expect(events).toContainEqual({ type: "ended", blockId: "b", exitCode: null, durationMs: 0 });
     expect(events.filter((e) => e.type === "ended" && e.blockId === "a").length).toBe(0);
     expect(shells[0].closed).toBe(false);
   });
@@ -520,7 +546,7 @@ describe("a shell that never starts the block", () => {
     const events = drained();
     expect(textOf(events)).toContain("Permission denied");
     // The run still closes out. Otherwise the panel sits on Running forever.
-    expect(events.at(-1)).toEqual({ type: "ended", blockId: "a", exitCode: null });
+    expect(events.at(-1)).toEqual({ type: "ended", blockId: "a", exitCode: null, durationMs: 0 });
   });
 
   test("the held output is per run, not carried into the next one", () => {
@@ -574,7 +600,7 @@ describe("stopping a run that never began", () => {
     drained();
     pool.cancel("note", "a");
     const events = drained();
-    expect(events).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
+    expect(events).toEqual([{ type: "ended", blockId: "a", exitCode: null, durationMs: 0 }]);
     expect(shells[0].closed).toBe(true);
     // The next run gets a clean shell rather than that one.
     pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
@@ -592,7 +618,7 @@ describe("stopping a run that never began", () => {
     expect(shells[0].closed).toBe(false);
     // The shell reports the interrupt itself, as 130.
     shells[0].emit(ended("a", 130));
-    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130, durationMs: 0 }]);
   });
 });
 
@@ -623,7 +649,7 @@ describe("claiming what a client can still show", () => {
     // client that comes back (daemon.ts).
     expect(shells[0].closed).toBe(false);
     shells[0].emit(ended("a", 130));
-    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130, durationMs: 0 }]);
   });
 
   test("an unclaimed run that never began is closed out, shell and all", () => {
@@ -634,7 +660,7 @@ describe("claiming what a client can still show", () => {
     drained();
 
     expect(pool.claim(MAC, []).orphaned).toEqual(["a"]);
-    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: null, durationMs: 0 }]);
     expect(shells[0].closed).toBe(true);
   });
 
@@ -871,7 +897,7 @@ describe("installing the hook that ends a block", () => {
     expect(shells[0].interrupts).toBe(1);
     // The pool closes the run out, since nothing else can. The shell goes with
     // it rather than serving the next block from an unknown state.
-    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: null }]);
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: null, durationMs: 0 }]);
     expect(shells[0].closed).toBe(true);
   });
 
@@ -887,7 +913,7 @@ describe("installing the hook that ends a block", () => {
     expect(drained()).toEqual([]);
     expect(shells[0].closed).toBe(false);
     shells[0].emit(ended("a", 130));
-    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130 }]);
+    expect(drained()).toEqual([{ type: "ended", blockId: "a", exitCode: 130, durationMs: 0 }]);
   });
 });
 

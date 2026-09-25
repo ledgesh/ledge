@@ -41,7 +41,7 @@ import { seedDoc } from "./seeds";
 function applyRunEvent(view: EditorView, ev: RunEvent): void {
   if (ev.kind === "began") handleRunEvent(view, ev.id, "started", null);
   else if (ev.kind === "output") handleRunEvent(view, ev.id, "output", ev.dataB64);
-  else handleRunEvent(view, ev.id, "finished", ev.exitCode);
+  else handleRunEvent(view, ev.id, "finished", ev.exitCode, ev.durationMs);
 }
 
 // One editor's end of the run channel (bridge.ts RunSink): run events go in,

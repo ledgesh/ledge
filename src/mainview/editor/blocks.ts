@@ -77,7 +77,14 @@ interface Block {
 // --- Run state -------------------------------------------------------------
 
 const addRun = StateEffect.define<RunInfo>();
-const setRunState = StateEffect.define<{ id: string; state: RunInfo["state"]; exitCode: number | null }>();
+// `durationMs` is the server's measure of an ending run, as the ended event
+// carries it (endedDuration).
+const setRunState = StateEffect.define<{
+  id: string;
+  state: RunInfo["state"];
+  exitCode: number | null;
+  durationMs?: number | null;
+}>();
 const removeRun = StateEffect.define<string>();
 // A full document replace from native (loading a note) drops all inline output.
 // Not dispatched yet (note persistence is unwired); when it is, it must interrupt
@@ -98,6 +105,19 @@ const pingOverlayEffect = StateEffect.define<null>();
 // A new body-parented layer needs the same clause; nothing here enforces that.
 export function pingOverlay(view: EditorView): void {
   view.dispatch({ effects: pingOverlayEffect.of(null) });
+}
+
+/**
+ * How long an ending run took, given the length the server reported with the
+ * ending. The server's number wins: the client can hear of an ending long
+ * after it happened (a push held while it was away, remote.md §7), and its own
+ * clock would count that wait. `null` is an ending with no known length, which
+ * shows no duration rather than a wrong one. `undefined` is a server older
+ * than the field, and the client's clock is all there is.
+ */
+export function endedDuration(startedAt: number, reported: number | null | undefined, now: number): number | null {
+  if (reported !== undefined) return reported;
+  return startedAt ? now - startedAt : null;
 }
 
 // Whether a run is over. "unknown" is not over: if that run ended, it ended
@@ -141,9 +161,7 @@ const runsField = StateField.define<RunInfo[]>({
                 // and neither is a length of time. Stamping those produced
                 // headers reading "Running 0 ms".
                 durationMs: ended(e.value.state)
-                  ? r.startedAt
-                    ? Date.now() - r.startedAt
-                    : null
+                  ? endedDuration(r.startedAt, e.value.durationMs, Date.now())
                   : r.durationMs,
               }
             : r,
@@ -1178,7 +1196,13 @@ const decorationsField = StateField.define<DecorationSet>({
 
 // --- Native -> web ---------------------------------------------------------
 
-export function handleRunEvent(view: EditorView, id: string, kind: string, payload: unknown): void {
+export function handleRunEvent(
+  view: EditorView,
+  id: string,
+  kind: string,
+  payload: unknown,
+  durationMs?: number | null,
+): void {
   // Drop events for runs this view did not start. Every open note's editor
   // registers a sink (workspace/editorPool.ts), including the ones detached
   // off-screen for a background tab, and only the view that dispatched addRun
@@ -1206,7 +1230,7 @@ export function handleRunEvent(view: EditorView, id: string, kind: string, paylo
       // the panel says "Session ended" rather than inventing an exit code.
       const code = typeof payload === "number" ? payload : null;
       view.dispatch({
-        effects: setRunState.of({ id, state: code === 0 ? "done" : "error", exitCode: code }),
+        effects: setRunState.of({ id, state: code === 0 ? "done" : "error", exitCode: code, durationMs }),
       });
       // Push the final state to the terminal header and shrink it to the used rows.
       const run = view.state.field(runsField).find((r) => r.id === id);

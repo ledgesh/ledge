@@ -826,7 +826,7 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
     } else if (ev.type === "output") {
       to.runEvent({ id: ev.blockId, kind: "output", dataB64: toB64(ev.data) });
     } else {
-      to.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode });
+      to.runEvent({ id: ev.blockId, kind: "ended", exitCode: ev.exitCode, durationMs: ev.durationMs });
     }
   }
 

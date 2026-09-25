@@ -934,7 +934,7 @@ describe("runs the client that started them can no longer show", () => {
     // 130 is the exit code for an interrupt. The job stopped, and the note's
     // shell is still there to report it.
     expect(await until(() => next.runs().some((ev) => ev.kind === "ended"))).toBe(true);
-    expect(next.runs().find((ev) => ev.kind === "ended")).toEqual({ id: "run-1", kind: "ended", exitCode: 130 });
+    expect(next.runs().find((ev) => ev.kind === "ended")).toMatchObject({ id: "run-1", kind: "ended", exitCode: 130 });
   });
 
   test("a run the client still shows is confirmed and left running", async () => {
@@ -995,6 +995,7 @@ describe("runs the client that started them can no longer show", () => {
     const first = await watching(socketPath, "mac-1");
     // A subshell, so the status is the block's. A bare `exit` would end the
     // note's own shell, and the pool closes that run out with no status.
+    const sent = Date.now();
     await first.conn.requests.runBlock({ sessionId: "note-1", id: "run-1", code: "sleep 0.4; (exit 7)", language: "sh" });
     expect(await until(() => first.runs().some((ev) => ev.kind === "began"))).toBe(true);
     first.conn.close();
@@ -1004,7 +1005,14 @@ describe("runs the client that started them can no longer show", () => {
     expect(await next.conn.requests.inlineClaim({ ids: ["run-1"] })).toEqual({ running: [], orphaned: 0 });
 
     expect(await until(() => next.runs().some((ev) => ev.kind === "ended"))).toBe(true);
-    expect(next.runs().find((ev) => ev.kind === "ended")).toEqual({ id: "run-1", kind: "ended", exitCode: 7 });
+    const heard = Date.now();
+    const end = next.runs().find((ev) => ev.kind === "ended");
+    expect(end).toMatchObject({ id: "run-1", kind: "ended", exitCode: 7 });
+    // The length is the run's, measured when it ended, not the time until
+    // this client heard: the ending sat in the hold for most of the 900 ms.
+    const durationMs = end?.kind === "ended" ? end.durationMs : undefined;
+    expect(durationMs).toBeGreaterThanOrEqual(400);
+    expect(durationMs).toBeLessThan(heard - sent - 400);
   });
 
   // Held for the client it was addressed to and no other, the same as the live
