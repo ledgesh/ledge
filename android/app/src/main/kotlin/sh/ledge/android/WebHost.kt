@@ -64,6 +64,8 @@ class WebHost : ComponentActivity() {
     private var leaving = false
 
     private lateinit var bar: AccessoryBar
+    /** Insert Image's sources, registered before the activity starts. */
+    private val pictures = ImagePicker(this)
     /** Whether the keyboard is up, from the insets: the bar shows only then. */
     private var typing = false
     /** Whether the page has a layer open for Back to close (`@back`). */
@@ -382,9 +384,14 @@ class WebHost : ComponentActivity() {
                     .put("text", item?.coerceToText(this)?.toString().orEmpty())
                     .put("html", item?.htmlText.orEmpty()))
             }
-            // Pictures are not carried yet: "" is the answer for no image, and
-            // the page pastes nothing.
-            "clipboard.image", "image.encode", "image.pick" -> reply(id, "")
+            // Pictures answer base64 or "" for none (ImagePicker.kt). The two
+            // reads decode off the main thread; the pick waits on a person.
+            "clipboard.image" -> picture(id) { ImagePicker.clipboard(this) }
+            "image.encode" -> {
+                val pasted = params.optString("dataB64")
+                picture(id) { ImagePicker.pasted(pasted) }
+            }
+            "image.pick" -> pictures.pick { reply(id, it) }
             "link.open" -> reply(id, JSONObject().put("ok", openLink(params.optString("url"))))
             "share.text" -> {
                 share(this, params.optString("text"))
@@ -495,7 +502,18 @@ class WebHost : ComponentActivity() {
 
     private fun clipboard() = getSystemService(ClipboardManager::class.java)
 
-    private fun clip(): ClipData.Item? = clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+    /** The clipboard's first item when it is text. A copied picture is a
+     * content URI, which `coerceToText` would spell out and a paste would then
+     * insert as a line of text rather than as the image. */
+    private fun clip(): ClipData.Item? =
+        clipboard().primaryClip?.takeIf { it.itemCount > 0 && !it.description.hasMimeType("image/*") }?.getItemAt(0)
+
+    private fun picture(id: Int, read: () -> String) {
+        thread(name = "ledge-picture", isDaemon = true) {
+            val base64 = runCatching(read).getOrDefault("")
+            main { reply(id, base64) }
+        }
+    }
 
     /** http, https and mailto, the iOS rule (ios/Sources/Natives.swift), so a
      * `javascript:` link is refused here and not only in the view. */

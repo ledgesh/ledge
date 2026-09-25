@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The one folder the camera app may write into: Take Photo's file, which
+     ImagePicker.kt reads and deletes (FileProvider in the manifest). -->
+<paths>
+    <cache-path name="camera" path="camera/" />
+</paths>

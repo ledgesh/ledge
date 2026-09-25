@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PRESS_SLOP, pressMoved, pressOpensMenu } from "./useRowMenu";
+import { PRESS_SLOP, pressIsSelection, pressMoved, pressOpensMenu } from "./useRowMenu";
 
 describe("which pointers open a menu by being held", () => {
   test("a finger does, because it has no second button", () => {
@@ -38,5 +38,26 @@ describe("when a press has become a scroll", () => {
 
   test("past the slop horizontally it was a swipe", () => {
     expect(pressMoved(from, { x: 100 - PRESS_SLOP - 1, y: 200 })).toBe(true);
+  });
+});
+
+describe("which long presses the system keeps", () => {
+  const inside = (selector: string) => ({ closest: (s: string) => (s.includes(selector) ? {} : null) });
+  const nowhere = { closest: () => null };
+
+  test("a finger held on a note's text, for the system's selection", () => {
+    expect(pressIsSelection({ pointerType: "touch", target: inside(".cm-editor") })).toBe(true);
+  });
+
+  test("a finger held in a field, such as the search box", () => {
+    expect(pressIsSelection({ pointerType: "touch", target: inside("input") })).toBe(true);
+  });
+
+  test("not a finger held anywhere else, where the page's menus answer", () => {
+    expect(pressIsSelection({ pointerType: "touch", target: nowhere })).toBe(false);
+  });
+
+  test("not a right-click on text, which opens the editor's own menu", () => {
+    expect(pressIsSelection({ pointerType: "mouse", target: inside(".cm-editor") })).toBe(false);
   });
 });

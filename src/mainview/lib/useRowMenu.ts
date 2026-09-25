@@ -29,6 +29,17 @@ export function pressOpensMenu(pointerType: string): boolean {
   return pointerType === "touch" || pointerType === "pen";
 }
 
+// Whether a contextmenu is a finger's long press on text, which Chromium on
+// Android raises and WebKit on iOS does not. There the system's selection and
+// its Cut, Copy and Paste toolbar are the answer, as iOS's callout is, so the
+// page neither opens its own menu nor cancels the system's (interactions.md
+// §1a).
+export function pressIsSelection(e: { pointerType?: string; target: unknown }): boolean {
+  if (!pressOpensMenu(e.pointerType ?? "")) return false;
+  const el = e.target as { closest?: (selector: string) => unknown } | null;
+  return el?.closest?.(".cm-editor, input, textarea") != null;
+}
+
 // Whether the pointer has drifted too far for this to still be a press.
 // Compares each axis against the slop rather than computing a distance. The
 // gesture a press loses to is a vertical scroll, and the per-axis test is

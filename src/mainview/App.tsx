@@ -6,6 +6,7 @@ import { useSinglePane } from "@/lib/viewport";
 import { hasTerminal } from "@/lib/shell";
 import { docsWindow, onDocsShow } from "@/lib/windows";
 import { onUpdateNotice } from "@/lib/updates";
+import { pressIsSelection } from "@/lib/useRowMenu";
 import { pushLayer } from "@/commands/layers";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TerminalDrawer } from "@/terminal/TerminalDrawer";
@@ -696,9 +697,12 @@ function Shell() {
   // it carries only debug items (Reload, Inspect Element), which a notes app
   // has no use for. Ledge's own right-click menus (the workspace strip, for
   // one) call preventDefault in their handlers and render their own menu, so
-  // this listener does not interfere with them.
+  // this listener does not interfere with them. A finger's long press on text
+  // is left to the system, for its selection (lib/useRowMenu.ts).
   useEffect(() => {
-    const onCtx = (e: MouseEvent) => e.preventDefault();
+    const onCtx = (e: MouseEvent) => {
+      if (!pressIsSelection(e as PointerEvent)) e.preventDefault();
+    };
     window.addEventListener("contextmenu", onCtx);
     return () => window.removeEventListener("contextmenu", onCtx);
   }, []);

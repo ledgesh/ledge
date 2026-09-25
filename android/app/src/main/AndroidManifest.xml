@@ -5,6 +5,13 @@
          phone with no camera still pairs by typing. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- So Insert Image can see whether there is a camera app to take a
+         photo with (ImagePicker.kt). -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
     <!-- No backups: the server list's passwords are sealed with a Keystore
          key that a backup cannot carry (ServerPassword.kt), and the device key
          is this phone's alone. -->
@@ -41,5 +48,16 @@
             android:name=".ServerScreens"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+        <!-- Take Photo's file, handed to the camera app for the one shot and
+             deleted once read (ImagePicker.kt). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.pictures"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/pictures" />
+        </provider>
     </application>
 </manifest>

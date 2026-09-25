@@ -3,7 +3,7 @@ import { Columns2, FilePlus, Plus, Rows2, SquareX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { softKeyboard } from "@/lib/shell";
 import { useModHeld, useTabModHeld } from "@/lib/useModHeld";
-import { useRowMenu } from "@/lib/useRowMenu";
+import { pressOpensMenu, useRowMenu } from "@/lib/useRowMenu";
 import { ContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { useCommands } from "@/commands/CommandProvider";
@@ -126,6 +126,8 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   // menu's verbs act on the focused pane's note.
   useEffect(() => {
     const onCtx = (e: MouseEvent) => {
+      // A long press is the system's selection and not this menu (§1a).
+      if (pressOpensMenu((e as PointerEvent).pointerType ?? "")) return;
       const at = editorMenuAt(e, hostRef.current, docId, workspaceKind(folder) === "docs");
       if (!at) return;
       // App.tsx suppresses the WebView's own menu window-wide. This handler is

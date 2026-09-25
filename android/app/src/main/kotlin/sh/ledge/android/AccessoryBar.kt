@@ -91,8 +91,8 @@ class AccessoryBar(context: Context, private val verb: (String) -> Unit, private
         /** The touch target Android's guidelines use. */
         const val HEIGHT_DP = 48
 
-        /** The note's face in iOS's order. Insert Image joins it when this
-         * client carries pictures. */
+        /** The note's face in iOS's order. Insert Image is last because it is
+         * the one that leaves: a menu and then a system screen over the app. */
         private val VERBS = listOf(
             Item("format.outdent", R.drawable.bar_format_indent_decrease, null, "Outdent"),
             Item("format.indent", R.drawable.bar_format_indent_increase, null, "Indent"),
@@ -101,6 +101,7 @@ class AccessoryBar(context: Context, private val verb: (String) -> Unit, private
             Item("format.link", R.drawable.bar_link, null, "Insert Link"),
             Item("format.wikiLink", R.drawable.bar_data_array, null, "Link to Note"),
             Item("format.codeBlock", R.drawable.bar_code, null, "Code Block"),
+            Item("image.insert", R.drawable.bar_add_photo_alternate, null, "Insert Image"),
         )
 
         /** The run's face. The names are the page's `RUN_KEYS`. */
