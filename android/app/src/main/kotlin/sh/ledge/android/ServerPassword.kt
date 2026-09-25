@@ -18,8 +18,9 @@ import javax.crypto.spec.GCMParameterSpec
  * Android has no keychain for an app's secrets, so each password is sealed
  * with AES-GCM under a key in the Android Keystore, and only the sealed bytes
  * are in the app's preferences. The key cannot leave the Keystore, and the
- * preferences are the app's alone. Neither is backed up (the manifest's
- * allowBackup), for iOS's `ThisDeviceOnly` reasons.
+ * preferences are the app's alone. Neither is backed up or moved to a new
+ * phone (the manifest's allowBackup and extraction rules), for iOS's
+ * `ThisDeviceOnly` reasons.
  *
  * Read at dial time and held for the handshake, so a stored password is not
  * sitting in this process between connections.

@@ -97,6 +97,20 @@ class WebHost : ComponentActivity() {
             return
         }
 
+        // The bridge is a WebMessageListener, which a WebView older than 83
+        // lacks. The WebView updates through the Play Store, apart from the
+        // system, so the fix is the user's to make.
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            leaving = true
+            AlertDialog.Builder(this)
+                .setTitle("Update Android System WebView")
+                .setMessage("Ledge needs a newer Android System WebView. Update it from the Play Store, then open Ledge again.")
+                .setPositiveButton("Close") { _, _ -> finish() }
+                .setOnCancelListener { finish() }
+                .show()
+            return
+        }
+
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         // Chrome's inspector against a debug build. A release is not
         // inspectable: that would be a console on the user's notes.
@@ -147,9 +161,6 @@ class WebHost : ComponentActivity() {
             }
         }
 
-        check(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-            "this WebView has no WebMessageListener; update Android System WebView"
-        }
         // Only the app's own origin gets the port. A page on any other origin
         // cannot load here (above), and would find no `ledge` if it did.
         WebViewCompat.addWebMessageListener(web, "ledge", setOf(ORIGIN)) { _, message, _, isMainFrame, reply ->

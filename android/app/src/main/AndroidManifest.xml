@@ -14,10 +14,13 @@
     </queries>
     <!-- No backups: the server list's passwords are sealed with a Keystore
          key that a backup cannot carry (ServerPassword.kt), and the device key
-         is this phone's alone. -->
+         is this phone's alone. allowBackup does not cover a transfer to a new
+         phone on Android 12 and later; the extraction rules do. -->
     <application
         android:label="Ledge"
+        android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/transfer"
         android:theme="@style/Ledge">
         <!-- The keyboard resizes nothing by itself: WebHost insets the web
              view by the IME's height. The configuration changes are the

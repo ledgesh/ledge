@@ -18,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.ByteBuffer
 import kotlin.concurrent.thread
 
 /**
@@ -103,7 +104,7 @@ class ImagePicker(private val host: ComponentActivity) {
         if (uri == null) return finish("")
         encodeOff {
             val bytes = runCatching { host.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            if (bytes == null) "" else if (file) file(bytes) else photo(ImageDecoder.createSource(bytes))
+            if (bytes == null) "" else if (file) file(bytes) else photo(source(bytes))
         }
     }
 
@@ -140,8 +141,8 @@ class ImagePicker(private val host: ComponentActivity) {
          * likely to be a diagram with a transparent background as a
          * photograph, and JPEG has no transparency. */
         fun file(bytes: ByteArray): String {
-            if (!bytes.startsWith(PNG)) return photo(ImageDecoder.createSource(bytes))
-            val bitmap = runCatching { decode(ImageDecoder.createSource(bytes)) }.getOrNull() ?: return ""
+            if (!bytes.startsWith(PNG)) return photo(source(bytes))
+            val bitmap = runCatching { decode(source(bytes)) }.getOrNull() ?: return ""
             return encode(bitmap, Bitmap.CompressFormat.PNG)
         }
 
@@ -150,7 +151,7 @@ class ImagePicker(private val host: ComponentActivity) {
          * rather than `clipboard` below reading again. */
         fun pasted(base64: String): String {
             val bytes = runCatching { Base64.decode(base64, Base64.DEFAULT) }.getOrNull() ?: return ""
-            return photo(ImageDecoder.createSource(bytes))
+            return photo(source(bytes))
         }
 
         /** The clipboard's picture as base64 JPEG, or "" when it holds none.
@@ -160,8 +161,12 @@ class ImagePicker(private val host: ComponentActivity) {
             if (clip.itemCount == 0 || !clip.description.hasMimeType("image/*")) return ""
             val uri = clip.getItemAt(0).uri ?: return ""
             val bytes = runCatching { host.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() ?: return ""
-            return photo(ImageDecoder.createSource(bytes))
+            return photo(source(bytes))
         }
+
+        /** Through a buffer: the ByteArray overload is Android 12's, and this
+         * app runs on 10. */
+        private fun source(bytes: ByteArray): ImageDecoder.Source = ImageDecoder.createSource(ByteBuffer.wrap(bytes))
 
         /** Software pixels: a hardware bitmap cannot be read back to compress. */
         private fun decode(source: ImageDecoder.Source): Bitmap =

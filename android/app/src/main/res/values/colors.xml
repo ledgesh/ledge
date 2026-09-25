@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- assets/Ledge.icon's fill. -->
+    <color name="launcher_fill">#1A1A1A</color>
+</resources>

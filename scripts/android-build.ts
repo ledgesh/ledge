@@ -2,6 +2,7 @@
 //
 //   bun run android                          build, install, launch, stream its log
 //   bun run android -- --build               build only
+//   bun run android -- --store               a Play Store bundle, signed with the upload key
 //   bun run android -- --test                the Kotlin unit tests, on this Mac's JVM
 //   bun run android -- --server ledge@10.0.2.2 --port 2222
 //   bun run android -- --avd ledge-pixel     which emulator to boot if none is running
@@ -13,13 +14,17 @@
 // scan asks 127.0.0.1 instead. A release build ignores all of it
 // (android/.../WebHost.kt `adoptLaunchServer`).
 //
+// `--store` is the release build as an .aab, signed with the upload key
+// (android.md §8), written to build/android/Ledge-<version>-<build>.aab for
+// the Play Console. It installs nothing.
+//
 // The unit tests hold PairingCode.kt to shared/pairing.vectors.json, beside
 // the TypeScript and Swift readers (remote.md §4b).
 //
 // Needs a JDK 21 and the Android SDK, and no Android Studio: JAVA_HOME and
 // ANDROID_HOME default to where Homebrew's openjdk@21 and the command-line
 // tools put them.
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -34,6 +39,7 @@ const flag = (name: string): string | null => {
   return at >= 0 ? (argv[at + 1] ?? "") : null;
 };
 const buildOnly = argv.includes("--build");
+const store = argv.includes("--store");
 const testOnly = argv.includes("--test");
 const headless = argv.includes("--headless");
 const avd = flag("avd") ?? "ledge-pixel";
@@ -82,8 +88,44 @@ if (!existsSync(join(REPO, "dist-android", "android.html"))) {
   throw new Error("dist-android/android.html is missing; the view build produced nothing to bundle");
 }
 
+const version = (await Bun.file(join(REPO, "package.json")).json()).version as string;
+// Play refuses a second upload with the same versionCode, and the commit count
+// only goes up. The iOS build number is the same count.
+const buildNumber = (await run(["git", "rev-list", "--count", "HEAD"], { quiet: true })).trim();
+const versions = [`-PledgeVersion=${version}`, `-PledgeBuild=${buildNumber}`];
+
+if (store) {
+  const keystore = process.env["LEDGE_ANDROID_KEYSTORE"] ?? join(homedir(), ".config", "ledge", "android-upload.jks");
+  if (!existsSync(keystore)) {
+    throw new Error(`no upload keystore at ${keystore}; android.md §8 has the keytool line, or set LEDGE_ANDROID_KEYSTORE`);
+  }
+  // The password from the login keychain, so release.env stays free of
+  // secrets (releasing.md §3). Gradle reads both from the environment.
+  const password =
+    process.env["LEDGE_ANDROID_KEYSTORE_PASSWORD"] ??
+    (await run(["security", "find-generic-password", "-s", "ledge-android-upload", "-w"], { quiet: true }).catch(() => {
+      throw new Error("no ledge-android-upload item in the keychain; android.md §8 has the security line that adds it");
+    })).trim();
+  env["LEDGE_ANDROID_KEYSTORE"] = keystore;
+  env["LEDGE_ANDROID_KEYSTORE_PASSWORD"] = password;
+
+  console.log(`[aab] gradle bundleRelease, version ${version} (${buildNumber})`);
+  await run(["./gradlew", "-q", "bundleRelease", ...versions], { cwd: ANDROID });
+  const aab = join(ANDROID, "app", "build", "outputs", "bundle", "release", "app-release.aab");
+  // A bundle the upload key did not sign is refused by the Play Console, and
+  // says so only after the upload.
+  const verified = await run([join(env["JAVA_HOME"]!, "bin", "jarsigner"), "-verify", aab], { quiet: true }).catch(() => "");
+  if (!verified.includes("jar verified")) throw new Error(`${aab} is not signed; check the upload keystore's alias is "upload"`);
+  const out = join(REPO, "build", "android");
+  mkdirSync(out, { recursive: true });
+  const named = join(out, `Ledge-${version}-${buildNumber}.aab`);
+  copyFileSync(aab, named);
+  console.log(`  ${named}`);
+  process.exit(0);
+}
+
 console.log("[apk] gradle assembleDebug");
-await run(["./gradlew", "-q", "assembleDebug"], { cwd: ANDROID });
+await run(["./gradlew", "-q", "assembleDebug", ...versions], { cwd: ANDROID });
 console.log(`  ${APK}`);
 if (buildOnly) process.exit(0);
 
@@ -107,7 +149,9 @@ if ((await devices()).length === 0) {
   }).unref();
   await run([adb, "wait-for-device"], { quiet: true });
   for (let i = 0; ; i++) {
-    const booted = (await run([adb, "shell", "getprop", "sys.boot_completed"], { quiet: true })).trim();
+    // A first boot reports the device offline for a while after
+    // wait-for-device returns, which is the same answer as not booted yet.
+    const booted = (await run([adb, "shell", "getprop", "sys.boot_completed"], { quiet: true }).catch(() => "")).trim();
     if (booted === "1") break;
     if (i > 120) throw new Error(`${avd} did not finish booting in two minutes`);
     await Bun.sleep(1000);

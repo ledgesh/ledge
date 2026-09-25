@@ -10,9 +10,42 @@ android {
     defaultConfig {
         applicationId = "sh.ledge.android"
         minSdk = 29
-        targetSdk = 35
-        versionCode = 1
-        versionName = "0.0.0"
+        // Play refuses a new app or an update that targets less than a year's
+        // Android: 36 since 2026-08-31.
+        targetSdk = 36
+        // package.json's version and the commit count, passed by
+        // scripts/android-build.ts. Play refuses a second upload with the
+        // same versionCode.
+        versionCode = (findProperty("ledgeBuild") as String?)?.toInt() ?: 1
+        versionName = findProperty("ledgeVersion") as String? ?: "0.0.0"
+    }
+
+    // The upload key, not the key phones check: Play App Signing re-signs
+    // with a key Google holds. The keystore lives outside the checkout and its
+    // password comes from the Keychain, by way of the environment
+    // (android.md §8). Without them the release build is unsigned, which is
+    // what CI builds.
+    val keystore = System.getenv("LEDGE_ANDROID_KEYSTORE")
+    val password = System.getenv("LEDGE_ANDROID_KEYSTORE_PASSWORD")
+    val upload = if (keystore != null && password != null) {
+        signingConfigs.create("upload") {
+            storeFile = file(keystore)
+            storePassword = password
+            keyAlias = "upload"
+            keyPassword = password
+        }
+    } else {
+        null
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = upload
+            // No R8: sshj and Bouncy Castle find their algorithms by
+            // reflection, and a missed keep rule is a handshake that fails on
+            // a phone and nowhere else.
+            isMinifyEnabled = false
+        }
     }
 
     // The view, built by `vite build --config vite.android.config.ts` and

@@ -50,6 +50,13 @@ the app as its built-in docs, via `src/bun/docsContent.ts`) lives in
   differs from a Simulator one (§12).
   Its touch column is implemented and now lives in interactions.md §1a. Read
   before touching `src/shared/transport.ts`, `src/mainview/boot.tsx` or `ios/`.
+- **[android.md](docs/contributor/android.md)** — the Android client: a Kotlin
+  shell in `android/` around the same page as the iPhone, over sshj with a
+  Keystore key. Where Android differs from ios.md (the bridge port, Bouncy
+  Castle, the background network cut, Back, long presses, pictures), the
+  `--store` bundle and its upload key, the Play Console's closed test, and the
+  emulator probe traps. Read before touching `android/` or the page's Android
+  paths in `nativeBridge.ts`.
 - **[writing.md](docs/contributor/writing.md)** — prose style, for the docs and
   for the comments in the source: headings name the feature keyword-first, lead
   with the answer, one idea per sentence, mechanism before rationale, no
@@ -80,7 +87,7 @@ bun run dev          # launch (bunx electrobun dev; bare `electrobun` is not on 
 bun run release      # the signed, notarized DMG (releasing.md)
 bun run cli <verb>   # the `ledge` CLI from the checkout (src/bun/cli.ts; interactions.md §9)
 bun run ios          # the iOS client in the Simulator (`-- --phone` for a device, `-- --store` for an App Store .ipa; ios.md §12)
-bun run android      # the Android client in the emulator (`-- --server ledge@10.0.2.2 --port 2222` points a debug build at a server, `-- --test` runs its unit tests)
+bun run android      # the Android client in the emulator (`-- --server ledge@10.0.2.2 --port 2222` points a debug build at a server, `-- --test` runs its unit tests, `-- --store` the signed Play bundle; android.md §8)
 bun run probe:ssh    # the ssh hop against a real sshd in Docker
 bun run build:npm    # assemble the publishable `ledge-server` package (Mac + Docker; remote.md §11)
 bun run probe:npm    # install that package on a toolchain-free container and drive it
