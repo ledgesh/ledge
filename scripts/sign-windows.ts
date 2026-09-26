@@ -100,16 +100,17 @@ export function signApp(): void {
   signAll(files, "app");
 }
 
-/** The postPackage hook: the installer inside each setup zip, and a second
- * look at the app, in case packaging rewrote a file after it was signed. */
+/**
+ * The postPackage hook: the installer inside each setup zip. The build folder
+ * is not checked again here: Electrobun embeds the icon in its `launcher.exe`
+ * a second time after compressing the update tarball, so that copy loses its
+ * signature while the one that ships keeps it.
+ */
 export function signSetup(): void {
   if (!signsWindows(process.env)) {
     console.log("[sign] not a signed Windows build; nothing to sign");
     return;
   }
-  const still = unsigned(signableUnder(required("ELECTROBUN_BUILD_DIR")));
-  if (still.length > 0) throw new Error(`packaging left the app unsigned:\n  ${still.join("\n  ")}`);
-
   const artifacts = required("ELECTROBUN_ARTIFACT_DIR");
   const zips = readdirSync(artifacts).filter(isSetupZip);
   if (zips.length === 0) throw new Error(`no setup zip in ${artifacts}`);

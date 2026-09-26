@@ -529,7 +529,7 @@ PowerShell `src/bun/windowsSigning.ts` builds):
 | Hook | What it signs |
 | --- | --- |
 | `postBuild`, `sign-windows-app.ts` | Every `.exe` and `.dll` in the built app that has no valid signature: `launcher.exe`, `bun.exe`, `bspatch.exe`, `zig-zstd.exe` and Electrobun's three DLLs. This runs before Electrobun packs the app, so the update tarball and the installer both carry the signed files. Electrobun rewrites `bun.exe`'s resources and drops Oven's signature but not the header entry that points at it, which signtool refuses as a bad exe (0x800700C1), so the hook clears that entry first. |
-| `postPackage`, `sign-windows-setup.ts` | The installer `.exe` inside the setup zip, replaced in the zip in place. It first checks that packaging left the app's files signed. |
+| `postPackage`, `sign-windows-setup.ts` | The installer `.exe` inside the setup zip, replaced in the zip in place. The build folder is not what ships by then: Electrobun embeds the icon in its `launcher.exe` again after compressing the update tarball, which strips that copy's signature and not the tarball's. |
 
 Each signature is SHA-256 and timestamped by Microsoft, so it stays valid
 after the three-day certificate behind it expires. `LEDGE_UNSIGNED=1` skips
