@@ -97,8 +97,10 @@ export interface ClientNative {
   };
 }
 
-// The desktop's own verb for a URL: `open` on a Mac, `xdg-open` on Linux.
-const OPENER = process.platform === "darwin" ? "open" : "xdg-open";
+// The desktop's own verb for a URL: `open` on a Mac, `explorer.exe` on
+// Windows, `xdg-open` on Linux. explorer.exe takes the URL as one argument,
+// with no cmd.exe to read an `&` in it.
+const OPENER = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
 
 const NO_UPDATES: UpdateState = { phase: "off", version: "", detail: "This app does not update itself." };
 const NO_CLI = { ok: false, message: "This app has no shell command to install." };

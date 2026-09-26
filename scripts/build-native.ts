@@ -48,6 +48,13 @@ const arches = !MAC
     ? ARCH_FLAGS[target]
     : ["-arch", "arm64", "-arch", "x86_64"];
 
+// A Windows app runs no shells itself: its server is in WSL, a Linux machine
+// that builds its own .so (remote.md §1).
+if (process.platform === "win32") {
+  console.log("[native] nothing to build on Windows: its server runs in WSL");
+  process.exit(0);
+}
+
 mkdirSync(OUT_DIR, { recursive: true });
 writeFileSync(SRC, NATIVE_C);
 

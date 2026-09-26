@@ -8,14 +8,9 @@
 // fresh one. It imports no Electrobun, so localServer.test.ts drives it with
 // the seams below faked.
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { SERVE_ENTRY } from "./cliShim";
 import { connectToDaemon, retireDaemon, spawnDaemon, stopDaemon } from "./daemon";
 import type { Duplex } from "../shared/transport";
-
-/** The server's entry, beside this file: `bun/serve.js` in the bundle
- * (electrobun.config.ts `copy`), built by `bun run build:serve`. The shims
- * Install Shell Command writes exec the same file (bun/cliShim.ts). */
-export const SERVE_ENTRY = join(import.meta.dir, "serve.js");
 
 export interface LocalServerOpts {
   /** This app's build, compared with the daemon's hello. */

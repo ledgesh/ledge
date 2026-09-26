@@ -20,6 +20,11 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { appendFile, chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 
+/** The server's entry, beside this file: `bun/serve.js` in the bundle
+ * (electrobun.config.ts `copy`), built by `bun run build:serve`. The daemon
+ * runs it (bun/localServer.ts), and the shims written here exec it. */
+export const SERVE_ENTRY = join(import.meta.dir, "serve.js");
+
 /** First line of a shim's comment; how a later install recognizes its own. */
 export const SHIM_MARKER = "# Ledge shim";
 

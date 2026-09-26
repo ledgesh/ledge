@@ -35,12 +35,12 @@ import { clientIdFor, clientLabel, ephemeralClientId } from "./clientHome";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { createConnectionStore } from "./connectionStore";
 import { explainDial, KNOWN_HOSTS_PATH, LOCAL_ID, sshDial, userKnownHosts, type Connection } from "./connections";
-import { stopDaemon } from "./daemon";
 import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
 import { reconnectingClient, Refused, SESSION_HOLD_MS, type Duplex } from "../shared/transport";
 import { spawnDuplex } from "./transport";
-import { localServer, SERVE_ENTRY } from "./localServer";
-import { installShims, tildify } from "./cliShim";
+import type { LocalServer } from "./localServer";
+import { ensureWslServer, explainWsl, wslServer } from "./wslServer";
+import { installShims, SERVE_ENTRY, tildify } from "./cliShim";
 import { checkWord, hasDictionary, learnWord } from "./spelling";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
@@ -271,7 +271,18 @@ const store = await createConnectionStore({ inUse: () => windows.map((w) => w.co
 // One per process, however many windows dial it: the daemon is one process
 // behind one socket, and this is the app's one view of which daemon that is
 // (bun/localServer.ts). Every window's "This Mac" wire is a dial through it.
-const thisMac = localServer({ build: local?.version ?? BUILD_VERSION, channel: local?.channel ?? "" });
+// On Windows it is the server in WSL instead (bun/wslServer.ts), and the
+// daemon module is never loaded there: it opens libc when imported.
+const WINDOWS = process.platform === "win32";
+let wslSaid = "";
+const thisMac: LocalServer = WINDOWS
+  ? wslServer({
+      onStderr: (text) => {
+        for (const line of text.replaceAll("\0", "").split("\n")) if (line.trim()) console.log(`[wsl] ${line.trim()}`);
+        wslSaid = (wslSaid + text).slice(-4096);
+      },
+    })
+  : (await import("./localServer")).localServer({ build: local?.version ?? BUILD_VERSION, channel: local?.channel ?? "" });
 
 // --- opening a connection, for one window ------------------------------------
 
@@ -429,7 +440,7 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     // have exchanged hellos, the last stderr line is the far end's `serve`
     // saying it attached, and quoting that would call an up server
     // unreachable.
-    if (err instanceof Refused && here) {
+    if (err instanceof Refused && here && !WINDOWS) {
       // This Mac's daemon speaks another protocol: the daemon an earlier
       // build started is still up, an update having relaunched the app
       // inside its idle minute. It cannot serve this build at all, so it is
@@ -437,8 +448,10 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
       // starts one from this bundle. Whatever it was running ends with it,
       // which is what "Restart to Install Update" already meant.
       console.warn(`[connect] this machine's daemon refused this build (${err.message}); replacing it`);
-      if (!(await stopDaemon())) throw err;
+      if (!(await (await import("./daemon")).stopDaemon())) throw err;
       wire = await open();
+    } else if (here && WINDOWS && !(err instanceof Refused)) {
+      throw new Error(explainWsl(wslSaid) ?? (err instanceof Error ? err.message : String(err)));
     } else if (err instanceof Refused || here) {
       throw err;
     } else {
@@ -834,6 +847,33 @@ ApplicationMenu.on("application-menu-clicked", (event) => {
   const action = (event as { data?: { action?: unknown } }).data?.action;
   if (typeof action === "string" && action.length > 0) (focused ?? windows[0])?.push.menuCommand({ action });
 });
+
+// A fresh Windows install has no server in WSL to dial, and no window can
+// open without its local server, so this asks to install one first
+// (bun/wslServer.ts). Declining quits.
+if (WINDOWS) {
+  const ready = await ensureWslServer({
+    ask: async () =>
+      (
+        await Utils.showMessageBox({
+          type: "question",
+          title: "Ledge",
+          message: "Install Ledge's server in WSL?",
+          detail:
+            "Ledge on Windows keeps your notes and runs your code in WSL. Its server is not installed there yet. Installing runs https://ledge.sh/server.sh in your WSL account, which downloads Ledge's server and Bun into ~/.ledge/.server.",
+          buttons: ["Install", "Quit"],
+          defaultId: 0,
+          cancelId: 1,
+        })
+      ).response === 0,
+    started: () => Utils.showNotification({ title: "Installing Ledge's server in WSL", body: "Ledge opens when it is done." }),
+    fail: async (message) => {
+      console.error(`[wsl] ${message}`);
+      await Utils.showMessageBox({ type: "error", title: "Ledge", message: "Ledge cannot start", detail: message, buttons: ["Quit"] });
+    },
+  });
+  if (!ready) process.exit(0);
+}
 
 for (const [at, state] of wanted.entries()) {
   // Awaited one at a time, so each window knows which connections the ones

@@ -70,7 +70,8 @@ export default {
       // The PTY trampolines, beside index.js for the same reason: pty.ts finds
       // them at import.meta.dir, which reads the same in the bundle and in a
       // checkout.
-      [`dist-native/${NATIVE_LIB}`]: `bun/${NATIVE_LIB}`,
+      // Not on Windows, whose server runs in WSL (scripts/build-native.ts).
+      ...(process.platform === "win32" ? {} : { [`dist-native/${NATIVE_LIB}`]: `bun/${NATIVE_LIB}` }),
     },
     // Vite owns view rebuilds and HMR, so electrobun's watcher stays off its
     // output, and off the CLI and native prebuilds for the same reason.
@@ -92,7 +93,9 @@ export default {
     // the Icon Composer bundle: the installer writes it beside the app and
     // names it in the .desktop entry. `bun run icon` regenerates both.
     linux: { bundleCEF: false, icon: "assets/Ledge.png" },
-    win: { bundleCEF: false },
+    // WebView2 on Windows. The icon is an .ico with every size in it, from
+    // `bun run icon`: Hutch refuses a PNG over 256 pixels.
+    win: { bundleCEF: false, icon: "assets/Ledge.ico" },
   },
   release: {
     baseUrl: updateBaseUrl,

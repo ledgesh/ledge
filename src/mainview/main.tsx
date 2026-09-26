@@ -1,4 +1,4 @@
-// The desktop entry point, Mac and Linux: the view over Electrobun's typed RPC.
+// The desktop entry point, Mac, Linux and Windows: the view over Electrobun's typed RPC.
 //
 // One of the three entry points (ios.md §1), beside ios.tsx's socket and
 // harness.tsx's Map. boot.tsx holds everything the view does with a server.
@@ -28,7 +28,12 @@ const electrobun = new Electrobun.Electroview({ rpc });
 // follows from it here: a desktop where Mod is Ctrl has no menu bar, so Quit
 // is a command there (lib/shell.ts quitsByCommand, interactions.md §10). A Mac
 // keeps the shell's defaults, whose Quit is the menu bar's.
-configureShell({ quitsByCommand: modKey() === "Ctrl" });
+//
+// Windows' server is in WSL (bun/wslServer.ts), so a folder from its dialog is
+// a Windows path that server cannot attach, and `ledge` is already on WSL's
+// PATH from server.sh. Both verbs are left out there.
+const WINDOWS = navigator.platform.startsWith("Win");
+configureShell({ quitsByCommand: modKey() === "Ctrl", ...(WINDOWS ? { picksFolders: false, installsCli: false } : {}) });
 
 // The cast says two derivations of LedgeRPC agree. It is not a claim about
 // runtime shapes. Electrobun builds its per-method request map from the
