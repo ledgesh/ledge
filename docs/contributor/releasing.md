@@ -6,8 +6,8 @@ cutting a release; it is run rarely enough that nobody remembers it.
 
 `bun run release` is the whole procedure on every platform. §1 to §5 are the
 Mac's: what it needs, what it produces, and what to check before publishing.
-§9 is the Linux build and §10 the Windows build: the same command with nothing
-to sign, run by a workflow.
+§9 is the Linux build and §10 the Windows build: the same command, run by a
+workflow, with nothing to sign on Linux and Azure signing on Windows.
 
 ## 1. What a release consists of
 
@@ -70,6 +70,8 @@ and `src/bun/release.test.ts` both fail when the two files disagree.
 compares. It compares the build's hash (§7).
 
 ## 3. What signing needs
+
+This section is the Mac's. The Windows build signs through Azure (§10).
 
 Ledge signs and notarizes under **individual** Apple Developer enrollment. The
 Team ID that comes with it is semi-permanent: changing it later invalidates
@@ -418,9 +420,10 @@ it before relying on it.
   stops; `bun run build:server` (which runs `build:npm`) is a second command,
   run by hand. Folding it in means the release depends on Docker being up,
   which is a fair trade to make later and not one to discover mid-release.
-- **The signed build in CI.** Signing needs the certificate and the credentials,
-  and both live on this machine only. The Linux and Windows builds have
-  nothing to sign, which is why they are the builds a runner cuts.
+- **The signed Mac build in CI.** Signing needs the certificate and the
+  credentials, and both live on this machine only. The Linux build has nothing
+  to sign. The Windows build signs in Azure, where the key never leaves the
+  service, so a runner can cut it without holding any secret (§10).
 
 ## 9. The Linux build
 
@@ -518,18 +521,44 @@ The input `upload`, off, builds without touching any release, for any branch
 or tag, and keeps the files on the run as the `windows-x64` artifact. That is
 how to see a build before the first release carries one.
 
-**The build is not signed.** Windows shows SmartScreen's "Windows protected
-your PC" warning on the installer's first run, and the user clicks More info,
-then Run anyway. Signing through Azure Trusted Signing is the planned fix; it
-would add the signing secrets to this workflow and a signing step after the
-build. The README's Windows install lines tell users to click through the
-warning, and change when signing lands.
+**The build is signed through Azure Artifact Signing.** The key stays in
+Azure, and each signature is one call to the service, so the runner holds no
+secret. Two build hooks sign (`scripts/sign-windows.ts`, which runs the
+PowerShell `src/bun/windowsSigning.ts` builds):
+
+| Hook | What it signs |
+| --- | --- |
+| `postBuild`, `sign-windows-app.ts` | Every `.exe` and `.dll` in the built app that has no valid signature: `launcher.exe`, `bun.exe`, `bspatch.exe`, `zig-zstd.exe` and Electrobun's three DLLs. This runs before Electrobun packs the app, so the update tarball and the installer both carry the signed files. |
+| `postPackage`, `sign-windows-setup.ts` | The installer `.exe` inside the setup zip, replaced in the zip in place. It first checks that packaging left the app's files signed. |
+
+Each signature is SHA-256 and timestamped by Microsoft, so it stays valid
+after the three-day certificate behind it expires. `LEDGE_UNSIGNED=1` skips
+both hooks, as it skips the Mac's signing, and a dev build is never signed.
+
+The pieces in Azure and GitHub:
+
+| Piece | What it is |
+| --- | --- |
+| The signing account | `ledge`, in East US (`https://eus.codesigning.azure.net`), Basic tier, in the maintainer's own subscription. |
+| The certificate profile | `ledgepublic`, Public Trust, issued to the maintainer as an individual. The certificate names the maintainer and their city, state and country, and no street address. |
+| The identity validation | The maintainer's, done in the portal with a government ID. Azure emails from 60 days before it expires, and signing stops when it does. |
+| The app registration | `ledge-windows-signing` in the tenant's Entra ID, holding the Artifact Signing Certificate Profile Signer role on the account. Its one credential is federated: GitHub's OIDC token for the `windows-signing` environment of `ledgesh/ledge`. |
+| The GitHub environment | `windows-signing`, usable from `main` only. Its variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` name the app for `azure/login`. None of the three is a secret. |
+
+The workflow's `azure/login` step signs the Azure CLI in with that token, and
+the next step installs the ArtifactSigning PowerShell module at the version
+`windowsSigning.ts` pins. The preflight refuses a Windows release unless both
+happened. The signature carries the maintainer's name as the publisher. It
+does not stop SmartScreen's "Windows protected your PC" warning by itself:
+that stops once the signed installer has a download history (Artifact
+Signing issues no EV certificates, which used to skip the wait). Until then
+the user clicks More info, then Run anyway, as the README says.
 
 The runner writes the Linux build's kinds of file with the `win-x64` prefix:
 
 | File | What it is |
 | --- | --- |
-| The installer | What users download: Electrobun's `Ledge-Setup.exe`. Its exact artifact name is what the workflow's List the artifacts step prints, and the README and the site link to it by that name. |
+| The installer | What users download: a zip holding `Ledge-Setup.exe` and, beside it, the `.installer` folder that carries the app. Electrobun's documentation names it `win-x64-Ledge-Setup.zip`; the workflow's List the artifacts step prints the real name, and the README and the site link to it by that name. |
 | `stable-win-x64-Ledge.tar.zst` | The app itself, compressed. The updater downloads it when no patch applies. |
 | `stable-win-x64-update.json` | The manifest the updater reads (§7). |
 | `stable-win-x64-<hash>.patch` | The binary diff from the previous release, when the update server was serving one during the build. |
@@ -547,8 +576,12 @@ with no Linux distribution in it, the app says what to install and quits.
 **Verifying, on a Windows 11 PC with WSL**, from the installer a user would
 download, with the app not yet installed:
 
-- Run the installer through SmartScreen's warning. The app launches, and it is
-  in the Start menu with its icon.
+- The installer's Properties, Digital Signatures tab, names the maintainer,
+  and the signature is timestamped. So do `launcher.exe` and `bun.exe` in
+  the installed app's `bin` folder.
+- Run the installer. If SmartScreen warns, its More info shows the
+  maintainer as the publisher, not "Unknown publisher". The app launches, and
+  it is in the Start menu with its icon.
 - With no server in WSL, the app installs its own and then opens a window,
   with no question asked. Use a WSL account without `~/.ledge/.server` for
   this, and check that `~/.ledge/.server/bin/ledge` names the release's

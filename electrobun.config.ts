@@ -41,8 +41,12 @@ export default {
     // Info.plist, and a stable build generates two of them (the app, then the
     // self-extracting wrapper the DMG carries). Each hook fires after its own
     // plist is written and before it is signed. See scripts/stamp-version.ts.
-    postBuild: "scripts/stamp-version.ts",
+    // Windows has no plist. Its release build signs the app after the build,
+    // before it is packed, and the installer after packaging
+    // (scripts/sign-windows.ts, releasing.md §10).
+    postBuild: process.platform === "win32" ? "scripts/sign-windows-app.ts" : "scripts/stamp-version.ts",
     postWrap: "scripts/stamp-version.ts",
+    ...(process.platform === "win32" ? { postPackage: "scripts/sign-windows-setup.ts" } : {}),
   },
   build: {
     // Bun, not the 2.x default of Cottontail. The server the app starts calls

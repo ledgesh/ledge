@@ -1,8 +1,13 @@
 # The Windows release (docs/contributor/releasing.md §10). Cut on GitHub's
-# Windows runner for the Linux build's reasons: there is no Windows machine in
-# the release path, and nothing is signed yet, so no secret reaches the
-# runner. The runner runs the same `bun run release` a Mac does and uploads
-# what it built to the GitHub release for the tag.
+# Windows runner: there is no Windows machine in the release path. The runner
+# runs the same `bun run release` a Mac does and uploads what it built to the
+# GitHub release for the tag.
+#
+# The build is signed through Azure Artifact Signing, and no secret reaches the
+# runner for it. The build job runs in the `windows-signing` environment, which
+# only `main` may use, and Azure trusts GitHub's OIDC token for that
+# environment alone. The environment's variables name the Azure app, tenant
+# and subscription. The build's own hooks sign (scripts/sign-windows.ts).
 #
 # Started by hand, on a tag, after the release exists as a draft with the Mac
 # assets on it. Publishing the release and then the update manifest
@@ -63,6 +68,12 @@ jobs:
     needs: wsl-server
     runs-on: windows-2025
     timeout-minutes: 30
+    environment: windows-signing
+    # A job's permissions replace the workflow's, so the upload's write is
+    # repeated here beside the OIDC token azure/login asks for.
+    permissions:
+      contents: write
+      id-token: write
     # Git's bash, which every Windows runner has, so the steps read as the
     # Linux workflow's do.
     defaults:
@@ -100,9 +111,25 @@ jobs:
           name: wsl-server
           path: dist-wsl/
 
+      # The Azure CLI session the signing hooks sign as, from GitHub's OIDC
+      # token. The three IDs are the windows-signing environment's variables.
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # The version src/bun/windowsSigning.ts names, which the hooks import.
+      - name: Install the ArtifactSigning module
+        shell: pwsh
+        run: |
+          $version = bun -e 'console.log(require("./src/bun/windowsSigning").SIGNING_MODULE_VERSION)'
+          Install-Module -Name ArtifactSigning -RequiredVersion $version -Force -Repository PSGallery
+
       # The preflight, the view, the server bundle and the bundle with the
-      # server for WSL in it, then the installer, the update tarball, the
-      # manifest and, once a Windows release is published, the patch from it.
+      # server for WSL in it, signed, then the installer, signed, the update
+      # tarball, the manifest and, once a Windows release is published, the
+      # patch from it.
       - name: Build the release
         run: bun run release
 

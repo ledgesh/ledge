@@ -52,9 +52,11 @@ libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2` covers the
 libraries, and `libsecret-tools` and `enchant-2` add server passwords in the
 keyring and spelling suggestions.
 
-**Windows.** Download the installer from the
-[latest release](https://github.com/ledgesh/ledge/releases/latest) and run
-it. Windows does not recognize it yet, so choose More info, then Run anyway.
+**Windows.** Download the installer zip from the
+[latest release](https://github.com/ledgesh/ledge/releases/latest), extract
+it, and run `Ledge-Setup.exe`. Until the signed installer has built up a
+download history, Windows may say it protected your PC: choose More info,
+then Run anyway.
 Ledge runs on Windows 11 on x64, keeps your notes and runs your code in WSL,
 and updates itself along with the server it installs there. When WSL is
 missing, Ledge asks you to install it first: `wsl --install` in an

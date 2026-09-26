@@ -10,13 +10,14 @@
 // carries that checklist.
 //
 // On Linux and Windows the same script runs on the release workflows' runners
-// (releasing.md §9, §10). Neither build is signed, so the architecture and
-// signing sections below are the Mac's alone; the version, the update address
-// and the README are every platform's.
+// (releasing.md §9, §10). The Linux build is not signed. The Windows build is
+// signed through Azure, which has its own section below. The version, the
+// update address and the README are every platform's.
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import config, { UPDATE_BASE_URL } from "../electrobun.config";
 import { INSTALL_SCRIPT, scriptVersion, wslFiles } from "../src/bun/serverRelease";
+import { SIGNING, SIGNING_MODULE_VERSION } from "../src/bun/windowsSigning";
 
 const ROOT = resolve(import.meta.dir, "..");
 const MAC = process.platform === "darwin";
@@ -134,7 +135,27 @@ if (status.stdout.toString().trim().length > 0) {
 }
 
 // --- signing ------------------------------------------------------------------
-if (!MAC) {
+// Windows signs through Azure Artifact Signing, as whoever the Azure CLI is
+// signed in as (scripts/sign-windows.ts). The build hooks fail at the end of
+// the build without either of these, so they are asked for here.
+if (process.platform === "win32") {
+  if (process.env["LEDGE_UNSIGNED"] === "1") {
+    console.log("  skip  signing (LEDGE_UNSIGNED=1)");
+    notes.push("This is a dry run. Windows shows SmartScreen's warning for the installer it produces.");
+  } else {
+    const signer = Bun.spawnSync(
+      ["pwsh", "-NoProfile", "-NonInteractive", "-Command", `if (Get-Module -ListAvailable ArtifactSigning | Where-Object Version -eq '${SIGNING_MODULE_VERSION}') { 'yes' }`],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    if (signer.exitCode === 0 && signer.stdout.toString().includes("yes")) ok(`ArtifactSigning module ${SIGNING_MODULE_VERSION}`);
+    else bad(`PowerShell 7 has no ArtifactSigning module ${SIGNING_MODULE_VERSION}`, `Run in pwsh: Install-Module -Name ArtifactSigning -RequiredVersion ${SIGNING_MODULE_VERSION} -Repository PSGallery`);
+
+    // Through pwsh, because `az` is a .cmd script on Windows.
+    const az = Bun.spawnSync(["pwsh", "-NoProfile", "-NonInteractive", "-Command", "az account show --query user.name -o tsv"], { stdout: "pipe", stderr: "pipe" });
+    if (az.exitCode === 0) ok(`Azure CLI signed in as ${az.stdout.toString().trim()}, signing with ${SIGNING.account}/${SIGNING.profile}`);
+    else bad("the Azure CLI is not signed in", "The release workflow's azure/login step does this. By hand: `az login` as an identity with the Artifact Signing Certificate Profile Signer role.");
+  }
+} else if (!MAC) {
   console.log(`  skip  signing and notarization: a ${OS_NAME} build is not signed`);
 } else if (process.env["LEDGE_UNSIGNED"] === "1") {
   console.log("  skip  signing and notarization (LEDGE_UNSIGNED=1)");
@@ -238,7 +259,7 @@ for (const note of notes) console.log(`  note  ${note.replace(/\n/g, "\n        
 if (problems.length > 0) {
   console.error(`\n${problems.length} problem${problems.length === 1 ? "" : "s"} to fix before releasing:\n`);
   for (const p of problems) console.error(`  - ${p}`);
-  if (MAC) console.error("\nTo package without signing anything, run: LEDGE_UNSIGNED=1 bun run release");
+  if (MAC || process.platform === "win32") console.error("\nTo package without signing anything, run: LEDGE_UNSIGNED=1 bun run release");
   process.exit(1);
 }
 console.log("ready\n");
