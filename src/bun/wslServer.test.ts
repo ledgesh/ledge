@@ -2,7 +2,7 @@
 // faked, so these run on any host: what they check is the argv, the verdict on
 // another build, and the sentences for a dial that never reached the server.
 import { describe, expect, test } from "bun:test";
-import { ensureWslServer, explainWsl, WSL_CHECK, WSL_INSTALL, WSL_SERVE, wslServer, type WslRun } from "./wslServer";
+import { ensureWslServer, explainWsl, recordArgv, WSL_CHECK, WSL_HOME, WSL_INSTALL, WSL_SERVE, wslFolder, wslHome, wslServer, type WslRun } from "./wslServer";
 import type { Duplex } from "../shared/transport";
 
 const duplex: Duplex = { write() {}, close() {} };
@@ -112,4 +112,49 @@ describe("before the first window", () => {
     expect(await ensureWslServer(d)).toBe(false);
     expect(log).toEqual(["check", 'fail: WSL could not start a shell: Error: Executable not found in $PATH: "wsl.exe"']);
   });
+});
+
+describe("the folder dialog", () => {
+  const answering = (runs: Record<string, WslRun>) => {
+    const asked: (readonly string[])[] = [];
+    const run = async (argv: readonly string[]) => (asked.push(argv), runs[argv.at(-1)!] ?? { code: 1, output: `wslpath: ${argv.at(-1)}` });
+    return { asked, run };
+  };
+
+  test("opens in WSL's home, as Windows spells it", async () => {
+    const { asked, run } = answering({ 'wslpath -w "$HOME"': { code: 0, output: "\\\\wsl.localhost\\Ubuntu\\home\\dan\n" } });
+    expect(await wslHome(run)).toBe("\\\\wsl.localhost\\Ubuntu\\home\\dan");
+    expect(asked).toEqual([WSL_HOME]);
+  });
+
+  test("falls back when WSL cannot say where home is", async () => {
+    expect(await wslHome(async () => ({ code: 1, output: "" }))).toBeNull();
+    expect(await wslHome(async () => Promise.reject(new Error("spawn failed")))).toBeNull();
+  });
+
+  test("hands the server the path wslpath gives for the pick", async () => {
+    const picked = "C:\\Users\\dan\\My Notes";
+    const { asked, run } = answering({ [picked]: { code: 0, output: "/mnt/c/Users/dan/My Notes\n" } });
+    expect(await wslFolder(picked, run)).toBe("/mnt/c/Users/dan/My Notes");
+    expect(asked).toEqual([["wsl.exe", "--exec", "wslpath", "-u", picked]]);
+  });
+
+  test("answers null for a folder WSL cannot reach", async () => {
+    const { run } = answering({});
+    expect(await wslFolder("\\\\wsl.localhost\\Debian\\home", run)).toBeNull();
+    expect(await wslFolder("\\\\server\\share", async () => ({ code: 0, output: "" }))).toBeNull();
+  });
+});
+
+describe("the record for ledge open", () => {
+  test("carries the launcher as base64, which no command line quotes differently", () => {
+    const app = { launcher: "C:\\Users\\dan\\AppData\\Local\\sh.ledge.app\\stable\\app\\bin\\launcher.exe", pid: 4242 };
+    const argv = recordArgv(app);
+    expect(argv.slice(0, 4)).toEqual(["wsl.exe", "--exec", "sh", "-c"]);
+    expect(argv[4]).toContain('> "$HOME/.ledge/.windows-app.json".tmp && mv');
+    expect(argv[5]).toBe("sh");
+    expect(argv[6]).toMatch(/^[A-Za-z0-9+/=]+$/);
+    expect(JSON.parse(Buffer.from(argv[6]!, "base64").toString())).toEqual(app);
+  });
+
 });

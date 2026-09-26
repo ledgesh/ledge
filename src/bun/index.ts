@@ -21,7 +21,7 @@ import {
   type ApplicationMenuItemConfig,
 } from "electrobun/bun";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fitFrame, readWindows, writeWindows, type Rect, type WindowState } from "./windowFrame";
 import { startLogging } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
@@ -39,7 +39,8 @@ import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
 import { reconnectingClient, Refused, SESSION_HOLD_MS, type Duplex } from "../shared/transport";
 import { spawnDuplex } from "./transport";
 import type { LocalServer } from "./localServer";
-import { ensureWslServer, explainWsl, wslServer } from "./wslServer";
+import { ensureWslServer, explainWsl, recordWindowsApp, wslFolder, wslHome, wslServer } from "./wslServer";
+import { readWindowsClipboardHtml, readWindowsClipboardImage } from "./winclip";
 import { installShims, SERVE_ENTRY, tildify } from "./cliShim";
 import { checkWord, hasDictionary, learnWord } from "./spelling";
 import { BUILD_VERSION } from "../shared/version";
@@ -111,6 +112,9 @@ async function mainViewUrl(): Promise<string> {
 // the menu bar and New Window, are added per window by `nativeFor` below.
 const sharedNative: ClientNative = {
   clipboardFormats: () => {
+    // Windows' HTML read checks for the format itself (bun/winclip.ts), so
+    // null there has clipboardReadRich ask it every time.
+    if (process.platform === "win32") return null;
     try {
       return Utils.clipboardAvailableFormats();
     } catch {
@@ -123,19 +127,20 @@ const sharedNative: ClientNative = {
   // out where there is none (a Linux desktop without enchant-2), so every
   // word answers correct and the menu shows no spelling group.
   ...(hasDictionary() ? { spelling: { check: checkWord, learn: learnWord } } : {}),
-  // On Linux the pasteboard is read through Electrobun's GTK binding: text
-  // and images both, and the HTML flavor not at all, so a paste from a
-  // browser arrives there as plain text. A Mac keeps bun/clipboard.ts's
-  // route, which reads the HTML flavor and fixes pbcopy's text encoding.
+  // On Linux and Windows the pasteboard is read through Electrobun's binding:
+  // text and images both, and the HTML flavor not at all. Windows reads its
+  // HTML and images through user32 instead (bun/winclip.ts). On Linux a paste from a
+  // browser arrives as plain text. A Mac keeps bun/clipboard.ts's route,
+  // which reads the HTML flavor and fixes pbcopy's text encoding.
   ...(process.platform === "darwin"
     ? {}
     : {
         clipboard: {
           read: async () => Utils.clipboardReadText() ?? "",
           write: async (text: string) => Utils.clipboardWriteText(text),
-          readHtml: async () => "",
+          readHtml: async () => (process.platform === "win32" ? readWindowsClipboardHtml() : ""),
         },
-        readImage: async () => Utils.clipboardReadImage(),
+        readImage: async () => (process.platform === "win32" ? readWindowsClipboardImage() : Utils.clipboardReadImage()),
       }),
   // Insert Image…, on the machine with the screen. This one is the file
   // dialog; the phone's answer to the same verb is PHPicker (ios.md §11).
@@ -159,16 +164,30 @@ const sharedNative: ClientNative = {
   // Attach Folder as Workspace…, on the machine with the screen: the same
   // dialog, set to folders. It fills the dialog's field, and the path then
   // goes to the server the way a typed one does (rpc-schema.ts folderPick).
+  // On Windows the server is in WSL, so the dialog opens in WSL's home and
+  // the pick is translated to WSL's path for it (bun/wslServer.ts wslFolder).
   pickFolder: async () => {
+    const windows = process.platform === "win32";
     const picked = (
       await Utils.openFileDialog({
-        startingFolder: homedir(),
+        startingFolder: (windows ? await wslHome() : null) ?? homedir(),
         canChooseFiles: false,
         canChooseDirectory: true,
         allowsMultipleSelection: false,
       })
     ).join(",");
-    return picked || null;
+    if (!picked || !windows) return picked || null;
+    const path = await wslFolder(picked);
+    if (path === null) {
+      await Utils.showMessageBox({
+        type: "warning",
+        title: "Ledge",
+        message: "WSL cannot reach that folder",
+        detail: `Ledge's server runs in WSL and can attach only folders WSL can open: ones in its own Linux files, or on a drive it mounts under /mnt. ${picked} is neither.`,
+        buttons: ["OK"],
+      });
+    }
+    return path;
   },
   // Install Shell Command: `ledge` in ~/.ledge/.server/bin,
   // execing this bundle's bun on the serve.js the daemon runs from
@@ -873,6 +892,9 @@ if (WINDOWS) {
     },
   });
   if (!ready) process.exit(0);
+  // For `ledge open` in WSL, which cannot find this app by itself
+  // (bun/wslApp.ts). The launcher sits beside this bun.exe.
+  void recordWindowsApp({ launcher: join(dirname(process.execPath), "launcher.exe"), pid: process.pid });
 }
 
 for (const [at, state] of wanted.entries()) {

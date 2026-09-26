@@ -8,7 +8,9 @@
 // flavors Bun has no binding for. On Linux it is Enchant, the library
 // WebKitGTK's squiggles come from, through `enchant-2 -a`, its ispell-style
 // pipe mode. A warm run of either takes well under 100ms. The word arrives as
-// an argument or on the pipe, never as script text.
+// an argument or on the pipe, never as script text. On Windows it is
+// ISpellChecker, called in this process (bun/winspell.ts).
+import { checkWindowsWord, hasWindowsDictionary, learnWindowsWord } from "./winspell";
 
 // Letters, with apostrophes and hyphens inside a word ("don't", "e-mail").
 // The view sends only words of this shape (editor/spelling.ts wordAround),
@@ -80,10 +82,12 @@ const ENCHANT = "enchant-2";
 /**
  * Whether this machine has a dictionary to ask at all. A Mac always does. A
  * Linux desktop has one when `enchant-2` is installed, which Ubuntu does
- * beside WebKitGTK; without it the shell offers no spelling (bun/index.ts),
- * and every word answers correct.
+ * beside WebKitGTK, and Windows when it has one for the user's language.
+ * Without one the shell offers no spelling (bun/index.ts), and every word
+ * answers correct.
  */
 export function hasDictionary(): boolean {
+  if (process.platform === "win32") return hasWindowsDictionary();
   return process.platform === "darwin" || Bun.which(ENCHANT) !== null;
 }
 
@@ -129,6 +133,7 @@ const MAX_CONTEXT = 2000;
  * the squiggle that opened the menu. */
 export async function checkWord(word: string, context: string): Promise<{ misspelled: boolean; guesses: string[] }> {
   if (!isSpellableWord(word)) return { misspelled: false, guesses: [] };
+  if (process.platform === "win32") return checkWindowsWord(word);
   if (process.platform !== "darwin") return parseEnchant(await enchant(`^${word}\n`));
   return parseCheck(await jxa(CHECK_SCRIPT, word, context.slice(0, MAX_CONTEXT) || word));
 }
@@ -138,6 +143,7 @@ export async function checkWord(word: string, context: string): Promise<{ misspe
  * which `*word` adds to and `#` saves. */
 export async function learnWord(word: string): Promise<boolean> {
   if (!isSpellableWord(word)) return false;
+  if (process.platform === "win32") return learnWindowsWord(word);
   if (process.platform !== "darwin") return (await enchant(`*${word}\n#\n`)) !== null;
   return (await jxa(LEARN_SCRIPT, word)) === "ok";
 }

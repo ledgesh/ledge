@@ -29,11 +29,10 @@ const electrobun = new Electrobun.Electroview({ rpc });
 // is a command there (lib/shell.ts quitsByCommand, interactions.md §10). A Mac
 // keeps the shell's defaults, whose Quit is the menu bar's.
 //
-// Windows' server is in WSL (bun/wslServer.ts), so a folder from its dialog is
-// a Windows path that server cannot attach, and `ledge` is already on WSL's
-// PATH from server.sh. Both verbs are left out there.
+// Windows' server is in WSL (bun/wslServer.ts), and `ledge` is already on
+// WSL's PATH from server.sh, so Install Shell Command is left out there.
 const WINDOWS = navigator.platform.startsWith("Win");
-configureShell({ quitsByCommand: modKey() === "Ctrl", ...(WINDOWS ? { picksFolders: false, installsCli: false } : {}) });
+configureShell({ quitsByCommand: modKey() === "Ctrl", ...(WINDOWS ? { installsCli: false } : {}) });
 
 // The cast says two derivations of LedgeRPC agree. It is not a claim about
 // runtime shapes. Electrobun builds its per-method request map from the

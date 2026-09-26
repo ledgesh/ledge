@@ -1693,7 +1693,7 @@ decides only which text is checked.
 | Continuous checking | `bun/index.ts`, `spellCheck: true` on every window | Turns on WKWebView's spell checking, which is off by default. |
 | Checked text | `editor/spelling.ts` `spelling()` | Sets `spellcheck="true"` on the content, with `autocorrect` and `autocapitalize` off, so nothing is rewritten as you type. |
 | Skipped text | `editor/spelling.ts` `uncheckedRanges` | Marks code, URLs, HTML, frontmatter, wikilinks and tags `spellcheck="false"`, which WebKit honours on any element inside the editable region. |
-| Guesses and Learn | `bun/spelling.ts`, `spellingCheck` / `spellingLearn` | Ask `NSSpellChecker` through osascript. |
+| Guesses and Learn | `bun/spelling.ts`, `spellingCheck` / `spellingLearn` | Ask this device's dictionary: `NSSpellChecker` through osascript on a Mac, Enchant's `enchant-2 -a` on Linux, `ISpellChecker` through bun:ffi on Windows (`bun/winspell.ts`). |
 
 - **What is skipped is a syntax question.** Fenced and indented code, HTML
   blocks and comments take whole lines. Inline code, URLs, autolinks, HTML

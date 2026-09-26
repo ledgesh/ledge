@@ -5,6 +5,7 @@
 import { spawnDuplex } from "./transport";
 import type { LocalServer } from "./localServer";
 import type { Duplex } from "../shared/transport";
+import { WINDOWS_APP_FILE, type WindowsApp } from "./wslApp";
 
 /** The install script's address, the one a remote server's manual gives. */
 export const SERVER_SH_URL = "https://ledge.sh/server.sh";
@@ -119,4 +120,48 @@ export async function ensureWslServer(deps: EnsureDeps): Promise<boolean> {
 
 function lastLine(text: string): string {
   return text.trim().split("\n").pop()?.trim() ?? "";
+}
+
+/** The WSL account's home as Windows sees it, `\\wsl.localhost\<distro>\home\<user>`. */
+export const WSL_HOME: readonly string[] = ["wsl.exe", "--exec", "sh", "-c", 'wslpath -w "$HOME"'];
+
+/** The Windows path of WSL's home, where the folder dialog opens. Null when
+ * WSL could not say. */
+export async function wslHome(run: (argv: readonly string[]) => Promise<WslRun> = runWsl): Promise<string | null> {
+  const home = await run(WSL_HOME).catch(() => null);
+  return home?.code === 0 ? lastLine(home.output) || null : null;
+}
+
+/**
+ * A folder from the Windows dialog, as the path the server in WSL knows it
+ * by, from WSL's own `wslpath`: `\\wsl.localhost\Ubuntu\home\dan\notes` is
+ * `/home/dan/notes` and `C:\notes` is `/mnt/c/notes`. Null for a folder the
+ * default distro cannot reach: another distro's, a network share, a drive WSL
+ * has not mounted.
+ */
+export async function wslFolder(
+  windowsPath: string,
+  run: (argv: readonly string[]) => Promise<WslRun> = runWsl,
+): Promise<string | null> {
+  const res = await run(["wsl.exe", "--exec", "wslpath", "-u", windowsPath]).catch(() => null);
+  const path = res?.code === 0 ? lastLine(res.output) : "";
+  return path.startsWith("/") ? path : null;
+}
+
+/**
+ * The command that records this app's launcher for `ledge open` in WSL
+ * (bun/wslApp.ts). The record crosses as base64 in an argument, which no
+ * command line on either side can mangle, and lands through a temp file.
+ */
+export function recordArgv(app: WindowsApp): string[] {
+  const b64 = Buffer.from(JSON.stringify(app)).toString("base64");
+  const file = `"$HOME/.ledge/${WINDOWS_APP_FILE}"`;
+  return ["wsl.exe", "--exec", "sh", "-c", `mkdir -p "$HOME/.ledge" && printf %s "$1" | base64 -d > ${file}.tmp && mv ${file}.tmp ${file}`, "sh", b64];
+}
+
+/** Writes the record. A failure is logged and otherwise ignored: only `ledge
+ * open` in WSL needs it. */
+export async function recordWindowsApp(app: WindowsApp, run: (argv: readonly string[]) => Promise<WslRun> = runWsl): Promise<void> {
+  const res = await run(recordArgv(app)).catch((err) => ({ code: -1, output: String(err) }));
+  if (res.code !== 0) console.error(`[wsl] could not record the app for ledge open: ${lastLine(res.output) || `exit ${res.code}`}`);
 }

@@ -33,8 +33,9 @@ import { serve } from "./mcp";
 import { ledgeTools, resolveNoteForOpen } from "./mcpTools";
 import { tildify } from "./cliShim";
 import { openLinuxApp } from "./linuxApp";
+import { inWsl, openWindowsApp } from "./wslApp";
 import { writeOpenRequest } from "./openRequest";
-import { loadWorkspaces, rootContaining, roots, workspaceMatches } from "./workspaces";
+import { APP_HOME, loadWorkspaces, rootContaining, roots, workspaceMatches } from "./workspaces";
 
 export { tildify }; // display formatting; defined in cliShim.ts so the app's install handler shares it
 
@@ -261,7 +262,8 @@ function targetArgs(
 
 async function openApp(io: CliIo): Promise<number> {
   if (await io.openApp()) return 0;
-  io.err("ledge: could not open the app. Is this the `ledge` the app installed? (Install Shell Command)");
+  if (inWsl()) io.err("ledge: could not open the app. Start Ledge on Windows once, so WSL knows where it is installed.");
+  else io.err("ledge: could not open the app. Is this the `ledge` the app installed? (Install Shell Command)");
   return 1;
 }
 
@@ -499,6 +501,7 @@ export function processIo(): CliIo {
     stdin: async () => (process.stdin.isTTY ? null : await Bun.stdin.text()),
     cwd: () => process.cwd(),
     openApp: async () => {
+      if (inWsl()) return (await openWindowsApp(APP_HOME)) || openLinuxApp();
       if (process.platform === "linux") return openLinuxApp();
       if (process.platform !== "darwin") return false;
       const proc = Bun.spawn({ cmd: ["open", "-b", BUNDLE_ID], stdout: "ignore", stderr: "ignore" });
