@@ -78,7 +78,7 @@ A repository is also how a workspace reaches other people, with a clone each ([[
 Both setups start with a folder in the right place. Notes in a managed workspace live inside `~/.ledge`, which a sync service will not carry, so the workspace has to move out first.
 
 1. Close the workspace (⌫ on its row). Closing only detaches the folder; no note is touched.
-2. Move the folder out of `~/.ledge` into the synced location. The folder is hidden: Finder's Go to Folder… takes the path, and so does Ctrl+L in GNOME Files.
+2. Move the folder out of `~/.ledge` into the synced location. The folder is hidden: Finder's Go to Folder… takes the path, and so does Ctrl+L in GNOME Files. On Windows it is in WSL, under Linux in File Explorer.
 3. Run "Attach Folder as Workspace…" and give its new path.
 4. Attach the same folder on your other computer.
 

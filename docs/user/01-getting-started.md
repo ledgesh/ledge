@@ -80,7 +80,7 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 
 ## Ledge on Linux
 
-The Linux app is the same app. The keys in this manual are the keys of the desktop you are reading it on: a Mac reads Command chords, and Linux reads the same chords with Ctrl and Alt.
+The Linux app is the same app. The keys in this manual are the keys of the desktop you are reading it on: a Mac reads Command chords, and Linux and Windows read the same chords with Ctrl and Alt.
 
 | On Linux | What differs |
 | --- | --- |
@@ -92,13 +92,34 @@ The Linux app is the same app. The keys in this manual are the keys of the deskt
 | Spelling | Enchant's dictionaries, the ones WebKitGTK underlines with, through the `enchant-2` command ([[Notes and Workspaces]]). |
 | Files | The app lives under `~/.local/share/sh.ledge.app`. Notes, settings, and the log stay under `~/.ledge`, as on a Mac. |
 
+## Ledge on Windows
+
+The Windows app is the same app, and its keys are Linux's: the chords in this manual with Ctrl and Alt, Alt+1 to Alt+9 for tabs, no menu bar, and Quit Ledge on Ctrl+Q.
+
+Your notes and your code live in WSL, the Windows Subsystem for Linux. The app is a window onto a Ledge server in your default Linux distribution, and every block runs in that distribution's shell, as a Linux command.
+
+Ledge needs WSL with a Linux distribution in it before it can finish installing. When either is missing, Ledge says so and quits. To install both, open PowerShell as administrator, run `wsl --install`, restart Windows, and create the Linux account Ubuntu asks for. Then open Ledge again.
+
+Each time it starts, Ledge checks the server in WSL and installs its own version there when that one is missing or different, which is what happens on the first launch and on the first launch after an update. A notice says "Setting up Ledge's server in WSL", and the window opens when it is done.
+
+| On Windows | What differs |
+| --- | --- |
+| Paths | Everything a note names is a Linux path. `~` is your Linux home, and `cwd: /mnt/c/Users/you/project` reaches a folder on the C: drive. |
+| Where to keep notes | In your Linux home, which File Explorer shows under Linux. WSL reports no file changes under `/mnt`, so a workspace there does not follow edits other programs make, a `git pull` included. |
+| Choose Folder… | Opens in your Linux home. A folder picked on a Windows drive attaches by its `/mnt` path, and one WSL does not mount is refused. |
+| The CLI | `ledge` is already on the PATH of a new WSL terminal, and Install Shell Command (ledge) is not offered. `ledge <title>` in WSL opens the Windows app ([[The ledge CLI]]). |
+| Passwords | Kept in Windows Credential Manager, under Windows Credentials ([[Keep Notes on a Remote Server]]). |
+| Spelling | Windows' own spell checker, in the language Windows is set to ([[Notes and Workspaces]]). |
+| Your phone | The server in WSL serves this computer only. To read notes on your phone, keep them on a separate server ([[Ledge on Your Phone]]). |
+| Files | Notes and the server's settings are under `~/.ledge` in WSL, and profiles under `~/.config/ledge/profiles` there. The app's settings and its log are in `.ledge` in your Windows user folder. |
+
 ## Updating Ledge
 
 Ledge checks for a newer version when it starts and once a day after that, and downloads one in the background when it finds one.
 
-When the download finishes, a notice says so and Restart to Install Update appears in the Ledge menu (in the command palette, on Linux). Choosing it quits Ledge and reopens the new version. Notes are already saved. A block that is still running keeps running on the old server, and the new version waits for it to finish before it swaps the server for its own, so the output arrives in the new window.
+When the download finishes, a notice says so and Restart to Install Update appears in the Ledge menu (in the command palette, on Linux and Windows). Choosing it quits Ledge and reopens the new version. Notes are already saved. A block that is still running keeps running on the old server, and the new version waits for it to finish before it swaps the server for its own, so the output arrives in the new window.
 
-Ledge > Check for Updates… (Check for Updates… in the palette, on Linux) checks now and tells you the result.
+Ledge > Check for Updates… (Check for Updates… in the palette, on Linux and Windows) checks now and tells you the result.
 
 To check only when you ask, set `updates.automatic` to `false` under This app in Settings (⌘,) and relaunch. Ledge then makes no request at launch or during the day, and Check for Updates… still checks and downloads.
 
@@ -106,12 +127,15 @@ The check is a request to `ledge.sh` for the newest version's details. It carrie
 
 ## When something goes wrong
 
-Ledge writes a log of each session, and Help > Reveal Log in Finder (Reveal Log in File Manager, on Linux) opens the folder it is in.
+Ledge writes a log of each session, and Help > Reveal Log in Finder (Reveal Log in File Manager, on Linux and Windows) opens the folder it is in.
 
-Two files sit there.
-`ledge.log` is the session running now.
+Four files sit there.
+`ledge.log` is the app's session running now.
 `ledge.previous.log` is the one before it, which is the file you want after a crash: relaunching Ledge starts a new log, and this is where the old one went.
+`ledge-server.log` and `ledge-server.previous.log` are the same pair for the server that holds your notes and runs your blocks.
 
-Both are plain text. Attach them to a bug report.
+On Windows the server's pair is in WSL, in `~/.ledge/logs`, and the folder Reveal Log opens holds the app's pair.
 
-The manual ends with six tutorials that combine these into working routines: [[Tutorial: Run a Project from a Note]], [[Tutorial: A Daily Workflow]], [[Tutorial: Pair with an Agent]], [[Tutorial: Keep Notes Synced]], [[Tutorial: Set Up a Ledge Server]], and [[Tutorial: Back Up Your Notes to S3]].
+All four are plain text. Attach them to a bug report.
+
+The manual ends with seven tutorials that combine these into working routines: [[Tutorial: Run a Project from a Note]], [[Tutorial: A Daily Workflow]], [[Tutorial: Pair with an Agent]], [[Tutorial: Keep Notes Synced]], [[Tutorial: Set Up a Ledge Server]], [[Tutorial: Back Up Your Notes to S3]], and [[Tutorial: Share Notes with a Git Clone]].

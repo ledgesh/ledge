@@ -43,7 +43,7 @@ A removed attached folder is never in the trash, because Ledge did nothing to it
 
 The last workspace in the strip cannot be deleted or removed.
 
-To move an attached workspace's folder somewhere else on disk, remove it from Ledge, move the folder in Finder or your file manager, and attach it again at its new place. Everything travels with the folder: the notes, the images, and the trash. A managed folder can leave `~/.ledge` the same way: move it out (`~/.ledge` is hidden: Finder's Go to Folder… reaches it, and so does Ctrl+L in GNOME Files), attach it at its new place, then delete the empty workspace Ledge makes in the old one's place.
+To move an attached workspace's folder somewhere else on disk, remove it from Ledge, move the folder in Finder or your file manager, and attach it again at its new place. Everything travels with the folder: the notes, the images, and the trash. A managed folder can leave `~/.ledge` the same way: move it out (`~/.ledge` is hidden: Finder's Go to Folder… reaches it, and so does Ctrl+L in GNOME Files; on Windows it is in WSL, under Linux in File Explorer), attach it at its new place, then delete the empty workspace Ledge makes in the old one's place.
 
 ## Share a workspace with others
 
@@ -163,13 +163,13 @@ The sidebar answers a right-click too. On a row you get that row's menu, and on 
 
 ## Spell checking
 
-Ledge underlines misspelled words in a note with a red squiggle, using the system's spelling dictionary and its languages. On Linux that is Enchant, the checker WebKitGTK underlines with, and the right-click menu's suggestions need its `enchant-2` command, which Ubuntu installs beside WebKitGTK.
+Ledge underlines misspelled words in a note with a red squiggle, using the system's spelling dictionary and its languages. On Linux that is Enchant, the checker WebKitGTK underlines with, and the right-click menu's suggestions need its `enchant-2` command, which Ubuntu installs beside WebKitGTK. On Windows it is Windows' own spell checker.
 
 Only prose is checked. Code blocks, `inline code`, URLs, HTML, the frontmatter block, `[[wikilinks]]` and `#tags` are never underlined. The built-in documentation is not checked, and neither is a note on your phone.
 
 Right-click a misspelled word to fix it. The dictionary's suggestions sit at the top of the menu: choose one to replace the word. "Learn Spelling" adds the word to the system's dictionary, which every app on the machine shares, so it stops being underlined here and elsewhere.
 
-Words are judged in the language of the line they are on, so a German paragraph is checked as German.
+On a Mac, words are judged in the language of the line they are on, so a German paragraph is checked as German. On Linux and Windows they are judged in the desktop's language.
 
 Set `editor.spellCheck` to `false` under This app in Settings (⌘,) and relaunch to turn spell checking off. The right-click menu then offers no suggestions either.
 

@@ -7,7 +7,7 @@
 
 <h1 align="center">Ledge</h1>
 
-<p align="center">The notebook that runs code.<br>Markdown notes for developers and DevOps, on macOS, Linux, and iPhone.</p>
+<p align="center">The notebook that runs code.<br>Markdown notes for developers and DevOps, on macOS, Linux, Windows, and iPhone.</p>
 
 <p align="center">
   <a href="https://ledge.sh">Website</a> ·
@@ -25,7 +25,7 @@
 </p>
 
 Ledge is a Markdown notebook that runs the code in your notes. Press ⌘↩
-(Ctrl+Enter on Linux) on a fenced block and its output streams in beneath it:
+(Ctrl+Enter on Linux and Windows) on a fenced block and its output streams in beneath it:
 shell commands, Python, Node, Ruby, PHP, and TypeScript out of the box, SQL
 and Redis against the database the note points at, and `prompt` blocks that
 send their text to an AI agent.
@@ -52,6 +52,14 @@ libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2` covers the
 libraries, and `libsecret-tools` and `enchant-2` add server passwords in the
 keyring and spelling suggestions.
 
+**Windows.** Download the installer from the
+[latest release](https://github.com/ledgesh/ledge/releases/latest) and run
+it. Windows does not recognize it yet, so choose More info, then Run anyway.
+Ledge runs on Windows 11 on x64, keeps your notes and runs your code in WSL,
+and updates itself along with the server it installs there. When WSL is
+missing, Ledge asks you to install it first: `wsl --install` in an
+administrator PowerShell, then a restart.
+
 **iPhone and iPad.** Get
 [Ledge for iPhone](https://apps.apple.com/app/ledge-notebook/id6813315782) on the App
 Store. It holds no notes of its own: it connects over ssh to a Linux server or
@@ -72,7 +80,8 @@ S3-compatible bucket. See
 and the [server tutorial](https://ledge.sh/docs/tutorial-set-up-a-ledge-server).
 
 **CLI and agents.** Run "Install Shell Command (ledge)" from the command
-palette (⇧⌘P, or Ctrl+Shift+P on Linux). The `ledge` command then lists,
+palette (⇧⌘P, or Ctrl+Shift+P on Linux), or on Windows open a WSL terminal,
+where the app has already put it. The `ledge` command then lists,
 reads, searches, creates, and appends to notes from any terminal, and the app
 follows along live ([The ledge CLI](https://ledge.sh/docs/the-ledge-cli)). The
 same command serves Ledge's MCP server, so one line connects Claude Code or
@@ -157,7 +166,9 @@ the system WebView. The same Bun code, without the window, is the
 React view.
 
 You need [Bun](https://bun.sh), and either a Mac with the Xcode Command Line
-Tools or a Linux desktop with a C compiler and WebKitGTK.
+Tools or a Linux desktop with a C compiler and WebKitGTK. On Windows you need
+Bun and WSL, and a dev build dials the server already in WSL, so install one
+there with `server.sh` first.
 
 ```sh
 bun install

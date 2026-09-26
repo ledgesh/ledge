@@ -86,7 +86,7 @@ Choose "A password" in the form and type the password for that account on that m
 
 Use it when the machine has no key on it yet. A fresh VPS with a password is a machine you can reach today, and setting up a key afterwards is a change you make once. Keys are the better long-term answer, and switching a connection over to one later is one edit.
 
-Ledge keeps the password in the system keychain and never in `~/.ledge`: the macOS keychain on a Mac, and on Linux the desktop's keyring (GNOME Keyring or KWallet) through `secret-tool`, which the `libsecret-tools` package provides. When ssh asks for it, ssh reads it from the keychain itself, so the password does not pass through Ledge on its way out.
+Ledge keeps the password in the system keychain and never in `~/.ledge`: the macOS keychain on a Mac, Credential Manager on Windows, and on Linux the desktop's keyring (GNOME Keyring or KWallet) through `secret-tool`, which the `libsecret-tools` package provides. When ssh asks for it, ssh reads it from the keychain itself, so the password does not pass through Ledge on its way out.
 
 Anything running as you on this computer can read that keychain item. That is the same reach a private key file in `~/.ssh` gives, so a password here is neither safer nor less safe than the key it stands in for.
 
@@ -112,7 +112,7 @@ New Window in the File menu opens a second window, and each window is on its own
 
 A new window opens on this computer. Switch it wherever you like from inside it.
 
-Each window is titled after the machine it is on, so the title bar reads "This Mac" ("This Computer", on Linux) or the name you gave the connection. On a Mac that is the name in the Window menu too, and on a window's tab when macOS merges your windows into tabs.
+Each window is titled after the machine it is on, so the title bar reads "This Mac" ("This Computer", on Linux and Windows) or the name you gave the connection. On a Mac that is the name in the Window menu too, and on a window's tab when macOS merges your windows into tabs.
 
 The manual's window is the exception, titled "Documentation". It reads the copy of the manual that ships with this app, so it stays on this computer whichever machine the window you opened it from is on.
 
@@ -142,7 +142,7 @@ Running the same command again updates the server. A server that is already runn
 
 A computer that runs the Ledge app needs none of this. "Install Shell Command (ledge)" in the app's command palette puts `ledge` in `~/.ledge/.server/bin`, where an incoming ssh looks first, pointing at the app's own copy. Signing in as that account then reaches the notes the app shows, with the app's server answering both. The machine also needs an ssh server: Remote Login on a Mac ("Expose ssh carefully"), or the `openssh-server` package on a Linux desktop.
 
-macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported.
+macOS and Linux are supported, on arm64 or x64. On Linux the floor is glibc 2.29, which means Debian 11, Ubuntu 20.04, RHEL 9, or anything newer. Alpine and other musl systems are not supported. Windows itself is not either: the Windows app runs its server in WSL, which is Linux.
 
 Nothing else has to be installed and no port is opened. Ledge speaks its protocol over ssh's stdin and stdout.
 

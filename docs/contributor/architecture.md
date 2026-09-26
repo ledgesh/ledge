@@ -15,14 +15,18 @@ is the same one, allowed to be a wire. `remote.md` is where that lives.)
 - **The server** (`ledge daemon`, `src/bun/serve.ts` over
   `src/bun/server.ts`) owns everything with side effects on the notes: the
   filesystem (`notes.ts`), the PTYs (`pty.ts` via bun:ffi), the watchers, the
-  vault. It has no UI and no window. On a Mac it is a process the app starts
-  from its own bundle and reaches over a unix socket in the app home
-  (`remote.md` §1); on a VPS it is the same code reached over ssh.
-- **The Mac shell** (`src/bun/index.ts`, Electrobun's Bun main process) owns
+  vault. It has no UI and no window. On a Mac or a Linux desktop it is a
+  process the app starts from its own bundle and reaches over a unix socket in
+  the app home (`remote.md` §1); on a VPS it is the same code reached over ssh.
+  Windows cannot run it (no openpty, no fork), so there it runs in WSL, the
+  build the app carries and installs, reached through `wsl.exe`
+  (`bun/wslServer.ts`, `remote.md` §11).
+- **The desktop shell** (`src/bun/index.ts`, Electrobun's Bun main process) owns
   the windows, the menu bar, the updater, the pasteboard, and the list of
-  servers this Mac can reach. It is a client of the server, one connection per
+  servers this computer can reach. It is a client of the server, one connection per
   window, and holds no note state at all.
-- **WKWebView** (`src/mainview/`) runs the React app. It owns everything the
+- **The system webview** (`src/mainview/`: WKWebView on a Mac, WebKitGTK on
+  Linux, WebView2 on Windows) runs the React app. It owns everything the
   user sees and no machine state at all. One per window, and a window is a
   separate client of a possibly different server (`remote.md` §8a).
 - **`src/shared/`** is the contract between them — `rpc-schema.ts`, the pure

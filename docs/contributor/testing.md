@@ -417,6 +417,31 @@ signals — needs the SAME probe run twice against one scratch home: the second
 launch is what proves the state it wrote back is stable rather than creeping a
 title bar per restart.
 
+**The Windows variant** is for the seams only Windows has (`wsl.exe` and the
+carried server, Credential Manager, the clipboard's HTML and pictures, the
+spell checker, `ssh.exe`). It needs a Windows PC with WSL, and it differs from
+the Mac's recipe in five ways:
+
+- **Run the app in the desktop session.** A program started over ssh runs in
+  session 0, which has no desktop and no Credential Manager, and there `ssh.exe`
+  holds its stdout until something is written to its stdin. A scheduled task
+  created with `schtasks /create … /it` runs in the signed-in user's session,
+  and `schtasks /run` starts it from an ssh shell.
+- **The scratch root covers only Windows' half.** `LEDGE_NOTES_ROOT` moves the
+  app's own files, not the notes, which are the WSL server's. Probe the
+  server's own steps (install, version, retire, stop) as a scratch WSL account
+  with `wsl.exe -u <account>`. The app itself dials WSL's default account, so
+  a probe of the app reads and writes that account's `~/.ledge`: leave it as
+  it was found.
+- **Stop the dev app before building.** `electrobun build` fails with a bare
+  "Error: AccessDenied" while the app it built is still running, after
+  deleting part of the bundle. Stop its `launcher.exe` and `bun.exe` first.
+- **Follow outside edits from the Linux home.** WSL delivers no file events
+  under `/mnt`, not even for a write made inside WSL, so a workspace there
+  cannot show the watcher working.
+- **Decode `wsl.exe`'s own messages.** They are UTF-16, and read as UTF-8 they
+  have a NUL after every ASCII byte.
+
 **The iOS variant** — for the seams that exist only there (the bridge, ssh, the
 Secure Enclave, the pasteboard, the scheme handler, every number in `ios.md`
 §5). The server is `scripts/ssh-probe`'s container rather than a Bun process on

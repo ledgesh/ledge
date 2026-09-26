@@ -10,7 +10,7 @@ You publish the workspace in steps 1 to 4. Everyone else clones it in step 5, an
 
 An attached workspace is already a folder you chose, and a project workspace is usually a repository already. Either one is ready, so skip to step 2.
 
-A managed workspace lives inside `~/.ledge`, the app's own home. Close the workspace (⌫ on its row), move its folder to somewhere like `~/Projects` (`~/.ledge` is hidden: Finder's Go to Folder… reaches it, and so does Ctrl+L in GNOME Files), then run "Attach Folder as Workspace…" and give the folder's new path.
+A managed workspace lives inside `~/.ledge`, the app's own home. Close the workspace (⌫ on its row), move its folder to somewhere like `~/Projects` (`~/.ledge` is hidden: Finder's Go to Folder… reaches it, and so does Ctrl+L in GNOME Files; on Windows it is in WSL, under Linux in File Explorer), then run "Attach Folder as Workspace…" and give the folder's new path.
 
 ## 2. Look at what you are about to publish
 

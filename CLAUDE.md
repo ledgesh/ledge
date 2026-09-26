@@ -1,9 +1,10 @@
 # Ledge
 
-The macOS notebook for developers and DevOps: it runs code and commands
-straight from your Markdown. Built on Electrobun: Bun main process (`src/bun/`,
-owns the filesystem and PTYs) + WKWebView React app (`src/mainview/`), talking
-over the typed RPC in `src/shared/rpc-schema.ts`.
+The notebook for developers and DevOps, on macOS, Linux and Windows: it runs
+code and commands straight from your Markdown. Built on Electrobun: Bun main
+process (`src/bun/`, owns the filesystem and PTYs) + a React app in the system
+webview (`src/mainview/`), talking over the typed RPC in
+`src/shared/rpc-schema.ts`. On Windows the server runs in WSL (remote.md §11).
 
 ## Standards — read the one that governs your change
 

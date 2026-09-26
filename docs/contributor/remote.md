@@ -40,8 +40,9 @@ process boundary allowed to be a network:
 
 | Case | Transport |
 | ---- | --------- |
-| Mac app, this Mac's notes | the unix socket in the app home, dialled directly |
-| Mac app, remote notes | `ssh <target> ledge serve` |
+| Mac or Linux app, this computer's notes | the unix socket in the app home, dialled directly |
+| Windows app, this computer's notes | `wsl.exe` running `ledge serve` in WSL (§11) |
+| Desktop app, remote notes | `ssh <target> ledge serve` |
 | iOS app, your Mac | `ssh <target> ledge serve` |
 | iOS app, your VPS | `ssh <target> ledge serve` |
 | `serve` to the machine's own daemon | that same unix socket |
@@ -2073,7 +2074,7 @@ no notion of who is asking beyond the client id in a hello, which is why
   root.
 
 **Seventeen RPC entries are the client's outright** and never become frames
-(`NATIVE_METHODS` in `shared/wire.ts`, served on a Mac by `bun/clientSeams.ts`):
+(`NATIVE_METHODS` in `shared/wire.ts`, served on a desktop by `bun/clientSeams.ts`):
 `clipboardWrite`, `clipboardRead`, `clipboardReadRich`, `spellingCheck`,
 `spellingLearn`, `assetPaste`,
 `assetPick`, `folderPick`, `cliInstall`, `linkOpen`, `menuSet`, `windowNew`,
@@ -2852,11 +2853,14 @@ Each phase leaves the app shippable.
    (§10) that writes `ledge` into `~/.ledge/.server/bin`, so a phone
    reaches a Mac running the app through the app's own daemon; the
    `cliShim` handshake flag went with the in-process server's CLI.
-7. **The iOS client**, which is `docs/contributor/ios.md` and depends on
-   nothing above being redone. That document is written and none of it is code
-   yet; its own §14 phases the work, starting with a move of this transport's
-   portable half into `src/shared/` so a webview can run it. Writing it
-   amended two sentences here, both marked below: §4's "Ledge parses no key
-   material" is true of a client that spawns OpenSSH and false of one that
-   links an SSH library, and §7's reconnect ladder is sized for a client the
+7. **Done.** The iOS client, which is `docs/contributor/ios.md` and depended
+   on nothing above being redone. Its own §14 phased the work, starting with a
+   move of this transport's portable half into `src/shared/` so a webview can
+   run it. Writing it amended two sentences here, both marked below: §4's
+   "Ledge parses no key material" is true of a client that spawns OpenSSH and
+   false of one that links an SSH library, and §7's reconnect ladder is sized for a client the
    operating system leaves running.
+8. **Done.** The desktop app on Linux and Windows. The Linux app dials its own
+   daemon over the unix socket, as the Mac app does. Windows cannot run the
+   server, so its app dials `ledge serve` in WSL through `wsl.exe` and carries
+   the linux-x64 server it installs there (§11).

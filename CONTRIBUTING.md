@@ -5,9 +5,15 @@ running, what "done" means here, and how to send a change.
 
 ## Getting set up
 
-Ledge is a macOS and Linux app. You need [Bun](https://bun.sh), and either a
-Mac with the Xcode Command Line Tools or a Linux desktop with a C compiler and
-WebKitGTK (`build-essential libgtk-3-0 libwebkit2gtk-4.1-0` on Ubuntu).
+Ledge is a macOS, Linux and Windows app. You need [Bun](https://bun.sh), and
+either a Mac with the Xcode Command Line Tools or a Linux desktop with a C
+compiler and WebKitGTK (`build-essential libgtk-3-0 libwebkit2gtk-4.1-0` on
+Ubuntu). On Windows you need Bun and WSL with a Linux distribution. The app
+there is a client of a server in WSL, and a dev build dials whatever server
+WSL has, so install one first with
+`curl -fsSL https://ledge.sh/server.sh | sh` in WSL. Check the repository out
+with `core.autocrlf=false`: a CRLF checkout breaks the shell scripts and the
+tests.
 
 ```sh
 bun install

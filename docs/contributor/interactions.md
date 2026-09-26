@@ -526,8 +526,8 @@ out, one of which is typing in the note.
   `navigator.platform`, the fact CodeMirror reads for the same decision). Every
   binding above is spelled with Mod, so a Linux desktop gets Ctrl+N, Ctrl+Shift+P
   and Ctrl+Alt+B without a second table, and chips and tooltips print
-  `Ctrl+Shift+W` rather than glyphs (`commands/format.ts`). Windows, when it
-  comes, inherits the same grammar. What the swap changes:
+  `Ctrl+Shift+W` rather than glyphs (`commands/format.ts`). Windows gets the
+  same grammar from the same test. What the swap changes:
   - **The tab jump moves to Alt+1…9** (`tabSelectKey`), since Ctrl+1…9 is now
     the workspace jump. Alt+number is what Firefox and GNOME Terminal spend on
     tabs there. ⌃Tab and ⌃` keep their Ctrl spelling on both platforms.
@@ -1449,7 +1449,9 @@ secret written to a synced file — because focus never moved.
   (`bun/cliShim.ts`). The `ledge` it writes reads this Mac's notes whichever
   server the window is showing, and its `serve` verb is how a phone reaches
   them (remote.md §11). A phone has no PATH to write
-  to, so there the verb is absent.
+  to, so there the verb is absent. Nor does the Windows app offer it: its
+  server is in WSL, where `server.sh` already put `ledge` on the PATH
+  (`mainview/main.tsx`), and Windows itself runs no server to point a shim at.
 
   Attaching a folder is gated by nothing: the path is typed and the server
   checks it, so the verb works against every server. What a phone lacks is a
@@ -1520,12 +1522,15 @@ app rather than growing its own dialect.
 - **`ledge` is one command, on every machine** (`src/bun/serve.ts` hands
   the CLI everything but the server verbs), so every machine with a server
   has the CLI: the npm package installs it, `server.sh` writes the launcher,
-  and on a Mac **Install Shell Command (ledge)** is the palette entry that
-  writes the shim into `~/.ledge/.server/bin`
+  and on a Mac or Linux desktop **Install Shell Command (ledge)** is the
+  palette entry that writes the shim into `~/.ledge/.server/bin`
   (bun/cliShim.ts, the client's seam per remote.md §10). Its outcome always
   surfaces: success in the browser's notice strip, failure in the error
   strip (§4's surface and its latest-outcome rule). There is no `install` verb: each
-  installer already put `ledge` where it belongs.
+  installer already put `ledge` where it belongs. On Windows that is WSL,
+  whose `ledge` cannot see the Windows app's install folder, so every start
+  of the app records its launcher in WSL's app home and `ledge open` there
+  runs it (`bun/wslApp.ts`).
 
 ## 10. The menu bar
 
@@ -1598,7 +1603,7 @@ through the same dispatcher the palette uses.
 - Bun sets a **minimal fallback menu at boot** (Quit, the edit roles) so a
   view that fails to load still leaves a way out. The first push replaces it
   wholesale.
-- **No bar off macOS.** A Linux window has no application menu bar:
+- **No bar off macOS.** A Linux or Windows window has no application menu bar:
   Electrobun's menu calls are no-ops there, and the shell skips both the
   fallback and the view's pushes (`bun/index.ts` HAS_MENU_BAR). The palette is
   the whole surface, which R1 already guarantees: every item in the spec is a
@@ -1685,12 +1690,13 @@ the editor's verbs too.
 
 ## 12. Spell checking
 
-WebKit draws the squiggles and the editor's context menu offers the fixes. Ledge
-decides only which text is checked.
+The webview draws the squiggles (WebKit on a Mac and Linux, WebView2 on
+Windows) and the editor's context menu offers the fixes. Ledge decides only
+which text is checked.
 
 | Piece | Where | What it does |
 | --- | --- | --- |
-| Continuous checking | `bun/index.ts`, `spellCheck: true` on every window | Turns on WKWebView's spell checking, which is off by default. |
+| Continuous checking | `bun/index.ts`, `spellCheck: true` on every window | Turns on the webview's spell checking, which is off by default in WKWebView. |
 | Checked text | `editor/spelling.ts` `spelling()` | Sets `spellcheck="true"` on the content, with `autocorrect` and `autocapitalize` off, so nothing is rewritten as you type. |
 | Skipped text | `editor/spelling.ts` `uncheckedRanges` | Marks code, URLs, HTML, frontmatter, wikilinks and tags `spellcheck="false"`, which WebKit honours on any element inside the editable region. |
 | Guesses and Learn | `bun/spelling.ts`, `spellingCheck` / `spellingLearn` | Ask this device's dictionary: `NSSpellChecker` through osascript on a Mac, Enchant's `enchant-2 -a` on Linux, `ISpellChecker` through bun:ffi on Windows (`bun/winspell.ts`). |

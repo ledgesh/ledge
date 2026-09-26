@@ -522,7 +522,8 @@ how to see a build before the first release carries one.
 your PC" warning on the installer's first run, and the user clicks More info,
 then Run anyway. Signing through Azure Trusted Signing is the planned fix; it
 would add the signing secrets to this workflow and a signing step after the
-build.
+build. The README's Windows install lines tell users to click through the
+warning, and change when signing lands.
 
 The runner writes the Linux build's kinds of file with the `win-x64` prefix:
 
