@@ -111,7 +111,7 @@ Each time it starts, Ledge checks the server in WSL and installs its own version
 | Passwords | Kept in Windows Credential Manager, under Windows Credentials ([[Keep Notes on a Remote Server]]). |
 | Spelling | Windows' own spell checker, in the language Windows is set to ([[Notes and Workspaces]]). |
 | Your phone | The server in WSL serves this computer only. To read notes on your phone, keep them on a separate server ([[Ledge on Your Phone]]). |
-| Files | Notes and the server's settings are under `~/.ledge` in WSL, and profiles under `~/.config/ledge/profiles` there. The app's settings and its log are in `.ledge` in your Windows user folder. |
+| Files | The app lives under `%LOCALAPPDATA%\sh.ledge.app`, and Settings > Apps lists it for uninstalling. Notes and the server's settings are under `~/.ledge` in WSL, and profiles under `~/.config/ledge/profiles` there. The app's settings and its log are in `.ledge` in your Windows user folder. |
 
 ## Updating Ledge
 

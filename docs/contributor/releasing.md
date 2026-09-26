@@ -528,7 +528,7 @@ PowerShell `src/bun/windowsSigning.ts` builds):
 
 | Hook | What it signs |
 | --- | --- |
-| `postBuild`, `sign-windows-app.ts` | Every `.exe` and `.dll` in the built app that has no valid signature: `launcher.exe`, `bun.exe`, `bspatch.exe`, `zig-zstd.exe` and Electrobun's three DLLs. This runs before Electrobun packs the app, so the update tarball and the installer both carry the signed files. Electrobun rewrites `bun.exe`'s resources and drops Oven's signature but not the header entry that points at it, which signtool refuses as a bad exe (0x800700C1), so the hook clears that entry first. |
+| `postBuild`, `sign-windows-app.ts` | Every `.exe` and `.dll` in the built app that has no valid signature: `launcher.exe`, `bun.exe`, `bspatch.exe`, `zig-zstd.exe` and Electrobun's three DLLs. Also `Resources\uninstall`, which has no extension: the installer copies it out as `uninstall.exe`, and each update runs a copy of it from the temp folder. This runs before Electrobun packs the app, so the update tarball and the installer both carry the signed files. Electrobun rewrites `bun.exe`'s resources and drops Oven's signature but not the header entry that points at it, which signtool refuses as a bad exe (0x800700C1), so the hook clears that entry first. |
 | `postPackage`, `sign-windows-setup.ts` | The installer `.exe` inside the setup zip, replaced in the zip in place. The build folder is not what ships by then: Electrobun embeds the icon in its `launcher.exe` again after compressing the update tarball, which strips that copy's signature and not the tarball's. |
 
 Each signature is SHA-256 and timestamped by Microsoft, so it stays valid
@@ -558,14 +558,17 @@ The runner writes the Linux build's kinds of file with the `win-x64` prefix:
 
 | File | What it is |
 | --- | --- |
-| The installer | What users download: a zip holding `Ledge-Setup.exe` and, beside it, the `.installer` folder that carries the app. Electrobun's documentation names it `win-x64-Ledge-Setup.zip`; the workflow's List the artifacts step prints the real name, and the README and the site link to it by that name. |
+| `win-x64-Ledge-Setup.zip` | The installer, what users download: `Ledge-Setup.exe` and, beside it, the `.installer` folder that carries the app. The exe reads the app from that folder, so it runs only once the zip is extracted. |
 | `stable-win-x64-Ledge.tar.zst` | The app itself, compressed. The updater downloads it when no patch applies. |
 | `stable-win-x64-update.json` | The manifest the updater reads (§7). |
 | `stable-win-x64-<hash>.patch` | The binary diff from the previous release, when the update server was serving one during the build. |
 
-The app runs `bin\launcher.exe`, with `bun.exe` beside it, from the folder
-the installer extracts it to. Where that folder is has not been observed on
-an install yet; the first one records it here. The app's own files, its log
+The installer puts the app in `%LOCALAPPDATA%\sh.ledge.app\stable\app`,
+per user and with no administrator prompt. The app runs `bin\launcher.exe`
+there, with `bun.exe` beside it. `uninstall.exe` sits one folder up, and the
+installer adds a Start menu shortcut, a Desktop shortcut, and an entry in
+Settings > Apps (under `HKCU\...\Uninstall`, with no publisher named). The
+app's own files, its log
 and client state, are in `%USERPROFILE%\.ledge`. The notes are the server's,
 in `~/.ledge` inside WSL, with the server itself in `~/.ledge/.server`.
 
@@ -578,7 +581,7 @@ download, with the app not yet installed:
 
 - The installer's Properties, Digital Signatures tab, names the maintainer,
   and the signature is timestamped. So do `launcher.exe` and `bun.exe` in
-  the installed app's `bin` folder.
+  the installed app's `bin` folder, and `uninstall.exe` beside `app`.
 - Run the installer. If SmartScreen warns, its More info shows the
   maintainer as the publisher, not "Unknown publisher". The app launches, and
   it is in the Start menu with its icon.

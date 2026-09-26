@@ -53,8 +53,10 @@ libraries, and `libsecret-tools` and `enchant-2` add server passwords in the
 keyring and spelling suggestions.
 
 **Windows.** Download the installer zip from the
-[latest release](https://github.com/ledgesh/ledge/releases/latest), extract
-it, and run `Ledge-Setup.exe`. Until the signed installer has built up a
+[latest release](https://github.com/ledgesh/ledge/releases/latest),
+right-click it and choose Extract All, then run `Ledge-Setup.exe` from the
+extracted folder. It needs the `.installer` folder beside it, so it cannot
+run from inside the zip. Until the signed installer has built up a
 download history, Windows may say it protected your PC: choose More info,
 then Run anyway.
 Ledge runs on Windows 11 on x64, keeps your notes and runs your code in WSL,

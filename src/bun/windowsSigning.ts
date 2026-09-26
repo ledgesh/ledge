@@ -33,9 +33,14 @@ export function signsWindows(env: Record<string, string | undefined>): boolean {
   return env["ELECTROBUN_OS"] === "win" && env["ELECTROBUN_BUILD_ENV"] !== "dev" && env["LEDGE_UNSIGNED"] !== "1";
 }
 
-/** Whether a file carries an Authenticode signature: executables and libraries. */
+/**
+ * Whether a file carries an Authenticode signature: executables, libraries,
+ * and Electrobun's `Resources/uninstall`. That last one has no extension in
+ * the build, but the installer copies it out as `uninstall.exe`, and each
+ * update runs a copy of it from the temp folder.
+ */
 export function isSignable(path: string): boolean {
-  return /\.(exe|dll)$/i.test(path);
+  return /\.(exe|dll)$|(^|[\\/])uninstall$/i.test(path);
 }
 
 /**

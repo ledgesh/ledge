@@ -31,13 +31,17 @@ describe("signsWindows", () => {
 });
 
 describe("what gets signed", () => {
-  test("executables and libraries, in any case", () => {
+  test("executables, libraries and the uninstaller, in any case", () => {
     expect(isSignable("C:\\b\\bin\\launcher.exe")).toBe(true);
     expect(isSignable("bun.EXE")).toBe(true);
     expect(isSignable("WebView2Loader.dll")).toBe(true);
     expect(isSignable("index.js")).toBe(false);
     expect(isSignable("server.sh")).toBe(false);
     expect(isSignable("exe")).toBe(false);
+    expect(isSignable("C:\\b\\Resources\\uninstall")).toBe(true);
+    expect(isSignable("uninstall")).toBe(true);
+    expect(isSignable("uninstall.json")).toBe(false);
+    expect(isSignable("preuninstall")).toBe(false);
   });
 
   test("the setup zip, on any channel, and not the update tarball", () => {

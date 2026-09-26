@@ -89,7 +89,7 @@ function required(name: string): string {
 }
 
 /** The postBuild hook: every executable and library in the built app that is
- * not signed already. */
+ * not signed already, and the uninstaller (isSignable). */
 export function signApp(): void {
   if (!signsWindows(process.env)) {
     console.log("[sign] not a signed Windows build; nothing to sign");
