@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   SIGNING,
   SIGNING_MODULE_VERSION,
+  clearStaleCertificateTable,
   extractSetupScript,
   isSetupZip,
   isSignable,
@@ -89,4 +90,37 @@ test("the release workflow installs the module the scripts import", () => {
   expect(workflow).toContain('require("./src/bun/windowsSigning").SIGNING_MODULE_VERSION');
   expect(workflow).toContain("environment: windows-signing");
   expect(workflow).toContain("id-token: write");
+});
+
+describe("clearStaleCertificateTable", () => {
+  // A minimal PE32+ header: "MZ", e_lfanew at 0x3c, "PE\0\0", the file header,
+  // then the optional header whose data directory 4 is the certificate table.
+  function pe(fileSize: number, certOffset: number, certSize: number): Buffer {
+    const b = Buffer.alloc(fileSize);
+    b.write("MZ", 0, "latin1");
+    b.writeUInt32LE(0x80, 0x3c);
+    b.write("PE\0\0", 0x80, "latin1");
+    const optional = 0x80 + 24;
+    b.writeUInt16LE(0x20b, optional);
+    b.writeUInt32LE(certOffset, optional + 112 + 32);
+    b.writeUInt32LE(certSize, optional + 112 + 36);
+    return b;
+  }
+  const entry = 0x80 + 24 + 112 + 32;
+
+  test("an entry past the end of the file is cleared, as in Electrobun's bun.exe", () => {
+    const b = pe(1024, 2048, 300);
+    expect(clearStaleCertificateTable(b)).toBe(true);
+    expect(b.readUInt32LE(entry)).toBe(0);
+    expect(b.readUInt32LE(entry + 4)).toBe(0);
+  });
+
+  test("a real signature, no signature, and a file that is not a PE are left alone", () => {
+    const signed = pe(1024, 700, 300);
+    expect(clearStaleCertificateTable(signed)).toBe(false);
+    expect(signed.readUInt32LE(entry)).toBe(700);
+    expect(clearStaleCertificateTable(pe(1024, 0, 0))).toBe(false);
+    const text = Buffer.from("#!/bin/sh\necho not an exe\n".padEnd(512, " "));
+    expect(clearStaleCertificateTable(text)).toBe(false);
+  });
 });

@@ -7,10 +7,11 @@
 // It signs as whoever the Azure CLI is signed in as. The release workflow's
 // `azure/login` step does that, and installs the ArtifactSigning module the
 // scripts import. release-preflight.ts checks both before the build starts.
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  clearStaleCertificateTable,
   extractSetupScript,
   isSetupZip,
   isSignable,
@@ -54,7 +55,14 @@ function signAll(files: readonly string[], what: string): void {
     console.log(`[sign] ${what}: all ${files.length} already signed`);
     return;
   }
-  for (const f of todo) console.log(`[sign] ${what}: signing ${f}`);
+  for (const f of todo) {
+    const bytes = readFileSync(f);
+    if (clearStaleCertificateTable(bytes)) {
+      writeFileSync(f, bytes);
+      console.log(`[sign] ${what}: cleared a certificate table entry past the end of ${f}`);
+    }
+    console.log(`[sign] ${what}: signing ${f}`);
+  }
   pwsh(signScript(todo));
   const still = unsigned(files);
   if (still.length > 0) throw new Error(`still unsigned after signing:\n  ${still.join("\n  ")}`);

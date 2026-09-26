@@ -38,6 +38,33 @@ export function isSignable(path: string): boolean {
   return /\.(exe|dll)$/i.test(path);
 }
 
+/**
+ * Clears a certificate table entry that points past the end of the file, and
+ * says whether there was one. Electrobun rewrites `bun.exe`'s resources and
+ * drops the signature Oven appended, but leaves the PE header's entry for it,
+ * and signtool refuses such a file as a bad exe (0x800700C1). Any other file
+ * is left as it is.
+ */
+export function clearStaleCertificateTable(exe: Buffer): boolean {
+  if (exe.length < 0x40 || exe.toString("latin1", 0, 2) !== "MZ") return false;
+  const pe = exe.readUInt32LE(0x3c);
+  if (pe + 24 + 2 > exe.length || exe.toString("latin1", pe, pe + 4) !== "PE\0\0") return false;
+  const optional = pe + 24;
+  const magic = exe.readUInt16LE(optional);
+  if (magic !== 0x10b && magic !== 0x20b) return false;
+  // The data directories follow the optional header's fixed fields, 96 bytes
+  // of them in PE32 and 112 in PE32+. The certificate table is entry 4.
+  const entry = optional + (magic === 0x20b ? 112 : 96) + 4 * 8;
+  if (entry + 8 > exe.length) return false;
+  const offset = exe.readUInt32LE(entry);
+  const size = exe.readUInt32LE(entry + 4);
+  if (offset === 0 && size === 0) return false;
+  if (offset + size <= exe.length) return false;
+  exe.writeUInt32LE(0, entry);
+  exe.writeUInt32LE(0, entry + 4);
+  return true;
+}
+
 /** The installer's zip among a release's artifacts: `win-x64-Ledge-Setup.zip`
  * on the stable channel, `…-Setup-canary.zip` on another. */
 export function isSetupZip(name: string): boolean {
