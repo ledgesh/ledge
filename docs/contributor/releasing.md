@@ -1,13 +1,13 @@
 # Releasing Ledge
 
 How a build becomes something someone else can install: a DMG from this Mac,
-and a Linux installer from GitHub's runners. Read this before cutting a
-release; it is run rarely enough that nobody remembers it.
+and Linux and Windows installers from GitHub's runners. Read this before
+cutting a release; it is run rarely enough that nobody remembers it.
 
-`bun run release` is the whole procedure on either platform. §1 to §5 are the
+`bun run release` is the whole procedure on every platform. §1 to §5 are the
 Mac's: what it needs, what it produces, and what to check before publishing.
-§9 is the Linux build, which is the same command with nothing to sign, run
-by a workflow.
+§9 is the Linux build and §10 the Windows build: the same command with nothing
+to sign, run by a workflow.
 
 ## 1. What a release consists of
 
@@ -23,7 +23,7 @@ by a workflow.
 Every release uploads all of them. A missing patch costs installs a full
 download. A missing tarball or manifest breaks the update. A Linux release
 adds the same three kinds of file per architecture, built and uploaded by the
-workflow in §9.
+workflow in §9, and a Windows release adds them once more, for x64 (§10).
 
 Two app bundles get built, and both are signed:
 
@@ -125,8 +125,8 @@ preflight first for that reason.
 4. Verify the artifact (§5).
 5. Tag the commit `v<version>` and push the tag. Create the GitHub release on
    `ledgesh/ledge` as a draft, with every file in `artifacts/`.
-6. Run the Linux workflow on the tag (§9). It uploads the Linux files to the
-   draft.
+6. Run the Linux workflow (§9) and the Windows workflow (§10) on the tag. They
+   upload their files to the draft.
 7. Publish the release, then publish the tag to the update server for every
    prefix (§7). Publishing the tag is the step that offers the release to every
    existing install.
@@ -343,7 +343,7 @@ channel, platform and architecture:
 | --- | --- |
 | `<prefix>-update.json?<random>` | The current release's manifest, or 404 while nothing is published |
 | `<prefix>-<its own hash>.patch` | The patch from that install's build, or 404, which falls back to the tarball |
-| `<prefix>-Ledge.app.tar.zst?cache=<random>` (`<prefix>-Ledge.tar.zst` on Linux) | The current release's tarball |
+| `<prefix>-Ledge.app.tar.zst?cache=<random>` (`<prefix>-Ledge.tar.zst` on Linux and Windows) | The current release's tarball |
 
 The prefixes a release publishes:
 
@@ -352,6 +352,7 @@ The prefixes a release publishes:
 | `stable-macos-arm64` | The Mac app (§1) |
 | `stable-linux-x64` | The Linux app on x86_64 (§9) |
 | `stable-linux-arm64` | The Linux app on arm64 (§9) |
+| `stable-win-x64` | The Windows app (§10) |
 
 **A 404 for the manifest reads as up to date.** That is how every install
 behaves before the first release is published, and `noRelease` in
@@ -370,7 +371,8 @@ whenever the manifest's `hash` differs from its own. So:
 
 **Publishing is `bun run updates:publish v<version>` in `ledgesh/ledge-www`**,
 once per prefix, with `--prefix stable-linux-x64` and
-`--prefix stable-linux-arm64` for the Linux builds (the Mac's is the default),
+`--prefix stable-linux-arm64` for the Linux builds and `--prefix stable-win-x64`
+for the Windows one (the Mac's is the default),
 run after every asset has finished uploading to the GitHub release. It
 downloads that release's manifest, validates it against the rules Electrobun
 enforces, checks that the tarball downloads, and only then writes the manifest
@@ -410,15 +412,15 @@ it before relying on it.
 - **Publishing.** Nothing uploads this Mac's `artifacts/` or `dist-server/`,
   nothing publishes a tag to the update server (§7), and nothing runs
   `npm publish` (§6). CI builds the app but does not release it. The one
-  upload a workflow does is the Linux build's, onto a draft release a human
-  created and will publish (§9).
+  uploads a workflow does are the Linux and Windows builds', onto a draft
+  release a human created and will publish (§9, §10).
 - **The server in `bun run release`.** The release script builds the Mac app and
   stops; `bun run build:server` (which runs `build:npm`) is a second command,
   run by hand. Folding it in means the release depends on Docker being up,
   which is a fair trade to make later and not one to discover mid-release.
 - **The signed build in CI.** Signing needs the certificate and the credentials,
-  and both live on this machine only. The Linux build has nothing to sign,
-  which is why it is the one build a runner cuts.
+  and both live on this machine only. The Linux and Windows builds have
+  nothing to sign, which is why they are the builds a runner cuts.
 
 ## 9. The Linux build
 
@@ -491,3 +493,54 @@ per prefix.
 Probing an update on Linux is the §7 recipe with two substitutions: the
 installer already saved the tar the patch applies to, and the app to run is
 `~/.local/share/sh.ledge.app/stable/app/bin/launcher`.
+
+## 10. The Windows build
+
+`.github/workflows/release-windows.yml` cuts it, the way §9's workflow cuts
+Linux's: started by hand on a tag, it checks the tag out on `windows-2025`,
+refuses a tag that does not name `package.json`'s version, runs
+`bun run release`, and uploads what it built to the GitHub release for that
+tag. Only x64 ships, the one Windows target Electrobun builds.
+
+The input `upload`, off, builds without touching any release, for any branch
+or tag, and keeps the files on the run as the `windows-x64` artifact. That is
+how to see a build before the first release carries one.
+
+The build has no PTY library to compile. The Windows app is a client of a
+server in WSL (`bun/wslServer.ts`), and that server is the Linux one server.sh
+installs (§6), so a Windows release changes nothing on the server side.
+
+**The build is not signed.** Windows shows SmartScreen's "Windows protected
+your PC" warning on the installer's first run, and the user clicks More info,
+then Run anyway. Signing through Azure Trusted Signing is the planned fix; it
+would add the signing secrets to this workflow and a signing step after the
+build.
+
+The runner writes the Linux build's kinds of file with the `win-x64` prefix:
+
+| File | What it is |
+| --- | --- |
+| The installer | What users download: Electrobun's `Ledge-Setup.exe`. Its exact artifact name is what the workflow's List the artifacts step prints, and the README and the site link to it by that name. |
+| `stable-win-x64-Ledge.tar.zst` | The app itself, compressed. The updater downloads it when no patch applies. |
+| `stable-win-x64-update.json` | The manifest the updater reads (§7). |
+| `stable-win-x64-<hash>.patch` | The binary diff from the previous release, when the update server was serving one during the build. |
+
+The app runs `bin\launcher.exe`, with `bun.exe` beside it, from the folder
+the installer extracts it to. Where that folder is has not been observed on
+an install yet; the first one records it here. The app home is not there: it
+is `~/.ledge` inside WSL, the server's.
+
+**Verifying, on a Windows 11 PC with WSL**, from the installer a user would
+download, with the app not yet installed:
+
+- Run the installer through SmartScreen's warning. The app launches, and it is
+  in the Start menu with its icon.
+- With no server in WSL, the app offers to install one, and a window opens
+  when server.sh is done. Use a WSL account without `~/.ledge/.server` for this.
+- A shell block runs in WSL, and Ctrl-C stops it.
+- Attach Folder's Choose Folder opens in WSL's home and attaches the folder
+  picked. Formatted text and a picture paste into a note. A misspelled word
+  offers guesses on right-click.
+- `ledge <a note's title>` in a WSL terminal, with the app closed, opens it
+  there (`bun/wslApp.ts`).
+- Check for Updates… answers "Ledge <version> is the latest version."

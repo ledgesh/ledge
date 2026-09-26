@@ -1,0 +1,88 @@
+# The Windows release (docs/contributor/releasing.md §10). Cut on GitHub's
+# Windows runner for the Linux build's reasons: there is no Windows machine in
+# the release path, and nothing is signed yet, so no secret reaches the
+# runner. The runner runs the same `bun run release` a Mac does and uploads
+# what it built to the GitHub release for the tag.
+#
+# Started by hand, on a tag, after the release exists as a draft with the Mac
+# assets on it. Publishing the release and then the update manifest
+# (`updates:publish --prefix stable-win-x64` in ledge-www) stays a human step.
+#
+# `upload: false` builds without touching any release, for a branch or a tag,
+# and leaves the files on the run only.
+name: Release (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag to build and upload to, e.g. v0.1.3 (with upload off, any branch or tag)"
+        required: true
+        type: string
+      upload:
+        description: "Upload to the GitHub release for the tag"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    # Git's bash, which every Windows runner has, so the steps read as the
+    # Linux workflow's do.
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      # The same pin as ci.yml, for the same reason.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # As in release-linux.yml. A build that uploads nothing names no release,
+      # so it has no tag to agree with.
+      - name: Check that the tag names this version
+        if: inputs.upload
+        run: |
+          version="$(bun -e 'console.log(require("./package.json").version)')"
+          if [ "v$version" != "${{ inputs.tag }}" ]; then
+            echo "package.json is $version but the tag is ${{ inputs.tag }}" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The preflight, the view, the server bundle and the bundle, then the
+      # installer, the update tarball, the manifest and, once a Windows
+      # release is published, the patch from it. No PTY library: the server
+      # this app dials runs in WSL (bun/wslServer.ts).
+      - name: Build the release
+        run: bun run release
+
+      - name: List the artifacts
+        run: ls -la artifacts/
+
+      # `--clobber` so a re-run replaces its own uploads.
+      - name: Upload to the GitHub release
+        if: inputs.upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" artifacts/* --clobber
+
+      # Kept on the run as well, so a build can be inspected without
+      # touching the release.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64
+          path: artifacts/
+          retention-days: 14

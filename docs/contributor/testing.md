@@ -611,6 +611,10 @@ that is broken only once launched. And it runs the e2e suite every time, because
 runner the suite also gets `forbidOnly` (a committed `test.only` shrinks the
 suite to one test and still goes green) and one retry — a test that passes only
 on the retry is reported as flaky, which is a finding, not a green.
+A third job builds the app on a Windows runner and runs the tests of the
+modules only Windows uses (`bun/winclip.ts`, `bun/winspell.ts`,
+`bun/wslServer.ts` and the ssh and secrets seams). The rest of the suite is
+the server's, which runs in WSL there, so the Linux job covers it.
 
 What CI cannot do is §6. The live probe's whole subject is the real app on a
 real desktop, and a runner has nobody watching. A green run on a change that

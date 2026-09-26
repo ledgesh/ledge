@@ -9,6 +9,7 @@
 # compiles, the bundle each assembles, and the WebKit each drives. Chromium,
 # the engine Android's WebView is, runs on the Linux job only: it is the same
 # engine on both runners, and macOS minutes bill at ten times the rate.
+# Windows, the third desktop, has a smaller job of its own below.
 name: CI
 
 on:
@@ -111,6 +112,40 @@ jobs:
           name: playwright-report-${{ runner.os }}
           path: playwright-report/
           retention-days: 7
+
+  # The Windows app: the bundle, built on a clean Windows machine, and the
+  # tests of the modules only Windows runs. Not the whole suite: the rest is
+  # the server's and the CLI's, which run in WSL on Windows and are covered by
+  # the Linux job, and many of their tests spell paths with "/".
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Cache the Bun install cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Tests of the Windows seams
+        run: bun test src/bun/winclip.test.ts src/bun/winspell.test.ts src/bun/wslServer.test.ts src/bun/secrets.test.ts src/bun/connections.test.ts src/bun/spelling.test.ts src/bun/clientSeams.test.ts src/bun/transport.test.ts
+
+      - name: Build the app
+        run: bun run build
 
   # The Android client: its unit tests and the release bundle, unsigned. The
   # signed one is built on a Mac with the upload key (android.md §8); this

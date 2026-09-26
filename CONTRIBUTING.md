@@ -73,7 +73,8 @@ the feature. A feature whose logic is pure but untested is not done.
 
 CI runs the same bar on every pull request, on a macOS runner and a Linux one
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)), and builds the whole
-app bundle rather than only the view. It cannot do the live-webview check: no one
+app bundle rather than only the view. A Windows runner builds the Windows app
+and runs its own modules' tests. It cannot do the live-webview check: no one
 is there to watch a window open. That one is yours, and saying you did it
 belongs in the PR description.
 
