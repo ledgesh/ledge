@@ -129,9 +129,12 @@ jobs:
       # The preflight, the view, the server bundle and the bundle with the
       # server for WSL in it, signed, then the installer, signed, the update
       # tarball, the manifest and, once a Windows release is published, the
-      # patch from it.
+      # patch from it. System32 goes first on PATH, so Electrobun's `tar` is
+      # Windows' own bsdtar: Git's GNU tar, first on this shell's PATH, reads
+      # `D:\a\...` as a remote host named D ("Cannot connect to D: resolve
+      # failed").
       - name: Build the release
-        run: bun run release
+        run: PATH="/c/Windows/System32:$PATH" bun run release
 
       - name: List the artifacts
         run: ls -la artifacts/
