@@ -52,8 +52,8 @@ libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2` covers the
 libraries, and `libsecret-tools` and `enchant-2` add server passwords in the
 keyring and spelling suggestions.
 
-**Windows.** Download the installer zip from the
-[latest release](https://github.com/ledgesh/ledge/releases/latest),
+**Windows.** Download
+[the installer zip](https://github.com/ledgesh/ledge/releases/latest/download/win-x64-Ledge-Setup.zip),
 right-click it and choose Extract All, then run `Ledge-Setup.exe` from the
 extracted folder. It needs the `.installer` folder beside it, so it cannot
 run from inside the zip. Until the signed installer has built up a

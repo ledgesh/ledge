@@ -28,7 +28,7 @@ export default {
     identifier: "sh.ledge.app",
     // Keep in step with package.json's version; release.test.ts fails
     // otherwise. This is the copy that reaches the bundle.
-    version: "0.1.2",
+    version: "0.1.3",
   },
   scripts: {
     // The PTY trampolines, compiled to a dylib (a .so on Linux) before
