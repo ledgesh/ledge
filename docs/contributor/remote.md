@@ -336,7 +336,7 @@ invalidates its pin exactly as moving it to another machine does. Two sshd
 instances on one box really can offer different keys.
 
 **Secrets at rest go in the platform keychain**, macOS's on the Mac, the
-desktop's keyring on Linux, and iOS's on the phone. A password has to survive the reconnect ladder, which re-dials
+desktop's keyring on Linux, Credential Manager on Windows, and iOS's on the phone. A password has to survive the reconnect ladder, which re-dials
 from scratch on every rung (§7) and which a closed laptop lid is enough to
 start, so "ask the user each time" is not an option that exists. This is a
 smaller change than it sounds: `keyPath` already names a private key on disk,
@@ -376,6 +376,13 @@ Fedora), so a desktop can have a keyring and no way for a script to reach it,
 and `storePassword` names the package in its refusal. The reach is the Mac's:
 any process running as the user reads the item with one command.
 
+**On Windows the item is a generic credential in Credential Manager, written
+and deleted through advapi32 with bun:ffi** (bun/wincred.ts). Windows ships no
+command-line client that reads a credential back: `cmdkey` only lists and
+writes. The target is `sh.ledge.app.server/<connection id>`, and Credential
+Manager lists it under Windows Credentials. The reach is the Mac's again: any
+process running as the user can call CredReadW.
+
 **The askpass helper reads the keychain itself.** `SSH_ASKPASS` names a script
 written into the client home at 0700, the connection id arrives in its
 environment, and the script answers with what `security find-generic-password
@@ -383,7 +390,11 @@ environment, and the script answers with what `security find-generic-password
 in Bun's memory and never on an argv. A helper handed the password instead
 would need it in both. The Linux helper execs `secret-tool lookup` instead,
 which prints the stored bytes with no newline after them and exits 1 with
-nothing printed when there is no item.
+nothing printed when there is no item. On Windows `SSH_ASKPASS` names
+`askpass.cmd`, one line that runs the app's own `bun.exe` on a generated
+`askpass.js`, which calls CredReadW and prints the password the same way. The
+app's own reads (checking a write, `has`, `swapPassword`) run that same
+program, so the stored form has one reader.
 
 **The stored value is the hex of the password's UTF-8 bytes**, which is one
 decoding rule instead of a guess. `security find-generic-password -w` prints
@@ -393,7 +404,8 @@ not, with nothing in the output saying which happened: `pässwörd` comes back a
 makes the stored value printable always, so the read is always hex and the
 helper always decodes. Getting this wrong would not error, it would send the
 wrong password. Linux stores the password itself: `secret-tool lookup` prints
-the bytes it was given, so there is nothing to disambiguate.
+the bytes it was given, so there is nothing to disambiguate. Windows stores the
+password's UTF-16 bytes, the form `cmdkey` and the Credential Manager UI write.
 
 **The write goes in on stdin, not on an argv.** `security`'s own usage text
 calls `-w <password>` insecure and it is right, for the reason §10 gives about
@@ -483,7 +495,11 @@ no blind accept and no "continue anyway" that remembers.
 The enforcement is ssh's own, which is the point of being ssh's client rather
 than its replacement (§3). Pairing runs `ssh-keyscan`, describes the key with
 `ssh-keygen -lf`, and stores the `known_hosts` line only after a person has
-compared the fingerprint; every connection then runs with
+compared the fingerprint. On Windows the scan is `ssh.exe` with
+`StrictHostKeyChecking=accept-new` into a temporary file, because the
+`ssh-keyscan.exe` Windows ships (9.5p2) fails against OpenSSH 8.5 and later: it
+proposes `sntrup761x25519-sha512@openssh.com`, which those servers pick first,
+and then reports it unsupported. Every connection then runs with
 `StrictHostKeyChecking=yes`, `GlobalKnownHostsFile=/dev/null`, and Ledge's own
 `known_hosts` followed by the user's. Ledge parses no key material and computes
 no hash of its own. The user's file is included because their entry for a host

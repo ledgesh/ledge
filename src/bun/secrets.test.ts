@@ -14,7 +14,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   ASKPASS_ACCOUNT_ENV,
+  askpassCmd,
   askpassScript,
+  CREDENTIAL_PREFIX,
   fromHex,
   KEYCHAIN_SERVICE,
   SECRET_TOOL_PATH,
@@ -23,6 +25,7 @@ import {
   toHex,
   XXD_PATH,
 } from "./secrets";
+import { askpassJs } from "./wincred";
 
 describe("the stored form", () => {
   // `security find-generic-password -w` prints the value as text when the
@@ -203,5 +206,41 @@ describe("the askpass helper on Linux", () => {
 
   test("the file ensureAskpass writes is this platform's", () => {
     expect(askpassScript()).toBe(askpassScript(process.platform));
+  });
+});
+
+// Windows has no command-line reader for Credential Manager, so ssh runs a
+// .cmd that runs a generated program with the app's own bun.exe.
+describe("the askpass helper on Windows", () => {
+  test("the .cmd runs bun on the program, both paths quoted", () => {
+    expect(askpassCmd("C:\\Ledge\\bin\\bun.exe", "C:\\Users\\Ana Lima\\.ledge\\.client\\askpass.js")).toBe(
+      '@"C:\\Ledge\\bin\\bun.exe" "C:\\Users\\Ana Lima\\.ledge\\.client\\askpass.js"\r\n',
+    );
+  });
+
+  // cmd expands %VAR% inside double quotes too.
+  test("doubles a percent sign in a path", () => {
+    expect(askpassCmd("C:\\100%\\bun.exe", "C:\\a.js")).toBe('@"C:\\100%%\\bun.exe" "C:\\a.js"\r\n');
+  });
+
+  const js = askpassJs(CREDENTIAL_PREFIX, ASKPASS_ACCOUNT_ENV);
+
+  test("reads the item the store wrote: the service, a slash, the connection id", () => {
+    expect(CREDENTIAL_PREFIX).toBe(`${KEYCHAIN_SERVICE}/`);
+    expect(js).toContain(`${JSON.stringify(CREDENTIAL_PREFIX)} + account`);
+    expect(js).toContain(`process.env[${JSON.stringify(ASKPASS_ACCOUNT_ENV)}]`);
+  });
+
+  test("exits without printing when it was not told a connection or finds nothing", () => {
+    expect(js).toContain("if (!account) process.exit(1);");
+    expect(js).toContain("process.exit(1);\nconst cred");
+  });
+
+  test("prints the password with no newline", () => {
+    expect(js).toContain("process.stdout.write(secret);");
+  });
+
+  test("parses as a module", () => {
+    expect(() => new Bun.Transpiler({ loader: "js" }).scan(js)).not.toThrow();
   });
 });

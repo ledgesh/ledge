@@ -14,7 +14,7 @@
 // present, cannot be edited, and cannot be removed, so "no connection
 // configured" is never a state the app has to render. The local case is not
 // special, only cheaper (§1).
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isHostName } from "../shared/frontmatter";
@@ -51,10 +51,14 @@ export const CONNECTIONS_PATH = join(CLIENT_HOME, "connections.json");
 export const KNOWN_HOSTS_PATH = join(CLIENT_HOME, "known_hosts");
 
 // Fixed, not PATH-resolved, for the same reason bun/remoteSpawn.ts fixes it:
-// these are spawned without a shell, and every macOS ships them here.
-export const SSH_PATH = "/usr/bin/ssh";
-export const KEYSCAN_PATH = "/usr/bin/ssh-keyscan";
-export const KEYGEN_PATH = "/usr/bin/ssh-keygen";
+// these are spawned without a shell, and every macOS ships them here. Windows
+// 10 and 11 ship them as the OpenSSH Client feature, installed by default.
+const WINDOWS = process.platform === "win32";
+const OPENSSH_DIR = WINDOWS ? join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "OpenSSH") : "/usr/bin";
+const EXE = WINDOWS ? ".exe" : "";
+export const SSH_PATH = join(OPENSSH_DIR, `ssh${EXE}`);
+export const KEYSCAN_PATH = join(OPENSSH_DIR, `ssh-keyscan${EXE}`);
+export const KEYGEN_PATH = join(OPENSSH_DIR, `ssh-keygen${EXE}`);
 
 export interface Connection {
   id: string;
@@ -237,7 +241,7 @@ export function sshDial(
     "-o",
     "StrictHostKeyChecking=yes",
     "-o",
-    `UserKnownHostsFile=${files.knownHosts} ${files.userKnownHosts}`,
+    `UserKnownHostsFile=${configPath(files.knownHosts)} ${configPath(files.userKnownHosts)}`,
     "-o",
     "GlobalKnownHostsFile=/dev/null",
   ];
@@ -287,6 +291,12 @@ export function sshDial(
   // and the remote login shell parses the result.
   argv.push(conn.destination, SERVE_COMMAND);
   return { argv, env };
+}
+
+/** A path as one token of an ssh option's value, which ssh splits on
+ * whitespace. A Windows home such as `C:\\Users\\Ana Lima` has a space in it. */
+export function configPath(path: string): string {
+  return /\s/.test(path) ? `"${path}"` : path;
 }
 
 /**
@@ -523,14 +533,19 @@ export async function probeHostKey(
     // the line that gets pinned. With a port it comes back as `[host]:port`,
     // which is the shape ssh looks for at connect time (shared/connections.ts
     // knownHostsHost).
-    const argv = [KEYSCAN_PATH, "-T", "5"];
-    if (port !== PORT_UNSET) argv.push("-p", String(port));
-    argv.push(hostPart(destination));
-    const p = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore" });
-    scanned = await new Response(p.stdout).text();
-    await p.exited;
+    if (WINDOWS) {
+      scanned = await scanWithSsh(hostPart(destination), port);
+    } else {
+      const argv = [KEYSCAN_PATH, "-T", "5"];
+      if (port !== PORT_UNSET) argv.push("-p", String(port));
+      argv.push(hostPart(destination));
+      const p = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore" });
+      scanned = await new Response(p.stdout).text();
+      await p.exited;
+    }
   } catch (err) {
-    return { error: `Could not run ssh-keyscan (${err instanceof Error ? err.message : String(err)}).` };
+    const tool = WINDOWS ? "ssh" : "ssh-keyscan";
+    return { error: `Could not run ${tool} (${err instanceof Error ? err.message : String(err)}).` };
   }
   const hostKey = pickHostKey(scanned);
   if (!hostKey) {
@@ -549,5 +564,53 @@ export async function probeHostKey(
     return { hostKey, ...described };
   } catch (err) {
     return { error: `Could not run ssh-keygen (${err instanceof Error ? err.message : String(err)}).` };
+  }
+}
+
+/**
+ * The argv that has ssh record a host's key in `file` and then stop, for
+ * Windows, whose ssh-keyscan.exe fails against OpenSSH 8.5 and later: it
+ * proposes sntrup761x25519-sha512@openssh.com, which those servers pick first,
+ * and then reports it unsupported. ssh.exe negotiates the same servers.
+ * `accept-new` writes the key to `file` before authentication, and with no
+ * method left to try the login fails there. The line ssh writes has the shape
+ * keyscan prints, `[host]:port` included.
+ */
+export function scanArgv(host: string, port: number, file: string): string[] {
+  const argv = [
+    SSH_PATH,
+    "-o",
+    `ConnectTimeout=5`,
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=accept-new",
+    "-o",
+    `UserKnownHostsFile=${configPath(file)}`,
+    "-o",
+    "GlobalKnownHostsFile=/dev/null",
+    "-o",
+    "HashKnownHosts=no",
+    "-o",
+    "PreferredAuthentications=publickey",
+    "-o",
+    "PubkeyAuthentication=no",
+    "-n",
+  ];
+  if (port !== PORT_UNSET) argv.push("-p", String(port));
+  argv.push(host, "exit");
+  return argv;
+}
+
+/** Runs `scanArgv` and returns the file ssh wrote, "" when it wrote none. */
+async function scanWithSsh(host: string, port: number): Promise<string> {
+  await ensureClientHome();
+  const file = join(CLIENT_HOME, `hostkey-scan-${process.pid}-${Date.now()}`);
+  try {
+    const p = Bun.spawn(scanArgv(host, port, file), { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    await p.exited;
+    return await readFile(file, "utf8").catch(() => "");
+  } finally {
+    await rm(file, { force: true });
   }
 }

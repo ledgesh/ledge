@@ -8,6 +8,7 @@
 // would notice.
 import { describe, expect, test } from "bun:test";
 import {
+  configPath,
   explainDial,
   fingerprintOf,
   keyTypeOf,
@@ -19,6 +20,7 @@ import {
   pickHostKey,
   pinConflict,
   PORT_UNSET,
+  scanArgv,
   SERVE_COMMAND,
   SSH_PATH,
   sshDial,
@@ -493,5 +495,41 @@ describe("whether a pairing code may dial past the pins", () => {
 
   test("a record that pins nothing has no say", () => {
     expect(pinConflict([conn("VPS", "ledge@vps", PORT_UNSET, "")], "ledge@vps", PORT_UNSET, [ECDSA_FP])).toBeNull();
+  });
+});
+
+describe("known_hosts paths in an option", () => {
+  test("a path with a space is quoted, since ssh splits the value on whitespace", () => {
+    expect(configPath("C:\\Users\\Ana Lima\\.ssh\\known_hosts")).toBe('"C:\\Users\\Ana Lima\\.ssh\\known_hosts"');
+    expect(configPath(USER)).toBe(USER);
+  });
+
+  test("the dial quotes each file on its own", () => {
+    const { argv } = sshDial(CONN, { ...FILES, userKnownHosts: "C:\\Users\\Ana Lima\\.ssh\\known_hosts" });
+    expect(argv).toContain(`UserKnownHostsFile=${KNOWN} "C:\\Users\\Ana Lima\\.ssh\\known_hosts"`);
+  });
+});
+
+// Windows records a host key with ssh itself (scanArgv's comment says why).
+describe("the host-key scan through ssh", () => {
+  const argv = scanArgv("vps", PORT_UNSET, "/tmp/scan");
+
+  test("writes an unknown host's key into the scan file and nowhere else", () => {
+    expect(argv).toContain("StrictHostKeyChecking=accept-new");
+    expect(argv).toContain("UserKnownHostsFile=/tmp/scan");
+    expect(argv).toContain("GlobalKnownHostsFile=/dev/null");
+    expect(argv).toContain("HashKnownHosts=no");
+  });
+
+  test("offers no credential and asks nothing", () => {
+    expect(argv).toContain("BatchMode=yes");
+    expect(argv).toContain("PubkeyAuthentication=no");
+    expect(argv).toContain("PreferredAuthentications=publickey");
+    expect(argv).toContain("-n");
+  });
+
+  test("names the port only when the connection does", () => {
+    expect(argv).not.toContain("-p");
+    expect(scanArgv("vps", 2222, "/tmp/scan").slice(-4)).toEqual(["-p", "2222", "vps", "exit"]);
   });
 });

@@ -8,9 +8,10 @@
 // warns about for items created with `SecItemAdd`. On Linux it is
 // `secret-tool`, libsecret's client for the desktop's keyring (GNOME Keyring,
 // KWallet): a keyring speaks D-Bus, and this process has no binding for it.
-// The cost either way is that any process running as this user reads the item
-// with that one command, the same reach the mode 600 key file `keyPath`
-// already names.
+// On Windows it is Credential Manager, written through advapi32
+// (bun/wincred.ts), since Windows ships no client that reads an item back. The
+// cost everywhere is that any process running as this user reads the item,
+// the same reach the mode 600 key file `keyPath` already names.
 //
 // The plaintext does not pass through this process on the way to ssh. The
 // helper script below reads the keychain itself under `SSH_ASKPASS`, and its
@@ -20,6 +21,9 @@ import { existsSync } from "node:fs";
 import { chmod, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
+import { askpassJs, deleteCredential, writeCredential } from "./wincred";
+
+const WINDOWS = process.platform === "win32";
 
 // Fixed, not PATH-resolved, for the reason connections.ts fixes ssh's tools:
 // these are spawned without a shell. `security` is part of macOS, and xxd, the
@@ -40,8 +44,14 @@ export const SECRET_TOOL_PATH = "/usr/bin/secret-tool";
 export const KEYCHAIN_SERVICE = "sh.ledge.app.server";
 
 /** The helper ssh runs when it wants a password, written into the client home
- * before a password connection is dialled (`ensureAskpass`). */
-export const ASKPASS_PATH = join(CLIENT_HOME, "askpass.sh");
+ * before a password connection is dialled (`ensureAskpass`). On Windows it is a
+ * .cmd that runs askpass.js with this app's bun.exe. */
+export const ASKPASS_PATH = join(CLIENT_HOME, WINDOWS ? "askpass.cmd" : "askpass.sh");
+export const ASKPASS_JS_PATH = join(CLIENT_HOME, "askpass.js");
+
+/** The Credential Manager target a connection's password is filed under: the
+ * keychain service, a slash, the connection id. */
+export const CREDENTIAL_PREFIX = `${KEYCHAIN_SERVICE}/`;
 
 /** Tells the helper which connection is being dialled. The value is a
  * connection id and not a secret, so it is safe in the environment of the ssh
@@ -108,6 +118,16 @@ printf '%s' "\$hex" | ${XXD_PATH} -r -p
 `;
 }
 
+/**
+ * The Windows helper ssh runs: one line of cmd that runs askpass.js
+ * (wincred.ts `askpassJs`) with `bun`. The prompt ssh passes is ignored, as on
+ * the other platforms. cmd expands `%` even inside quotes, so it is doubled.
+ */
+export function askpassCmd(bun: string, js: string): string {
+  const q = (path: string) => `"${path.replaceAll("%", "%%")}"`;
+  return `@${q(bun)} ${q(js)}\r\n`;
+}
+
 // What Keychain Access, or Seahorse, shows for these items. The label names
 // the row, and the comment tells anyone who opens it why the value is hex.
 const LABEL = "Ledge server password";
@@ -165,7 +185,7 @@ function quoted(value: string): string {
  * reach the user as a server rejecting a credential they can see is right.
  */
 export async function storePassword(id: string, password: string): Promise<{ ok: boolean; error: string }> {
-  if (process.platform !== "darwin" && !existsSync(SECRET_TOOL_PATH)) return { ok: false, error: NO_SECRET_TOOL };
+  if (keychain() === SECRET_TOOL && !existsSync(SECRET_TOOL_PATH)) return { ok: false, error: NO_SECRET_TOOL };
   try {
     if (!(await keychain().write(id, password))) return { ok: false, error: KEYCHAIN_REFUSED };
   } catch (err) {
@@ -250,16 +270,23 @@ export async function swapPassword(
  */
 export async function ensureAskpass(): Promise<string> {
   await ensureClientHome();
-  const tmp = `${ASKPASS_PATH}.tmp-${process.pid}`;
+  // Windows writes the program before the .cmd that runs it. The bun.exe named
+  // is this process's, whose path changes when the app is updated or moved.
+  if (WINDOWS) await writeAtomically(ASKPASS_JS_PATH, askpassJs(CREDENTIAL_PREFIX, ASKPASS_ACCOUNT_ENV));
+  await writeAtomically(ASKPASS_PATH, WINDOWS ? askpassCmd(process.execPath, ASKPASS_JS_PATH) : askpassScript());
+  return ASKPASS_PATH;
+}
+
+async function writeAtomically(path: string, text: string): Promise<void> {
+  const tmp = `${path}.tmp-${process.pid}`;
   try {
-    await writeFile(tmp, askpassScript(), "utf8");
+    await writeFile(tmp, text, "utf8");
     await chmod(tmp, 0o700);
-    await rename(tmp, ASKPASS_PATH);
+    await rename(tmp, path);
   } catch (err) {
     await unlink(tmp).catch(() => {});
     throw err;
   }
-  return ASKPASS_PATH;
 }
 
 // --- inside -------------------------------------------------------------------
@@ -289,7 +316,7 @@ interface Keychain {
 }
 
 function keychain(): Keychain {
-  return process.platform === "darwin" ? SECURITY : SECRET_TOOL;
+  return process.platform === "darwin" ? SECURITY : WINDOWS ? CREDENTIAL_MANAGER : SECRET_TOOL;
 }
 
 const SECURITY: Keychain = {
@@ -357,6 +384,26 @@ const SECRET_TOOL: Keychain = {
     const p = Bun.spawn([SECRET_TOOL_PATH, "clear", ...ATTRS, id], { stdout: "ignore", stderr: "ignore" });
     await p.exited;
   },
+};
+
+// Reads go through askpass.js, the program ssh runs, so there is one reader of
+// the stored form and not two. `has` is a read with the secret dropped, as it
+// is for `secret-tool`.
+const CREDENTIAL_MANAGER: Keychain = {
+  write: async (id, password) => writeCredential(CREDENTIAL_PREFIX + id, id, "Stored by Ledge for one server connection.", password),
+  read: async (id) => {
+    await ensureAskpass();
+    const p = Bun.spawn([process.execPath, ASKPASS_JS_PATH], {
+      env: { ...process.env, [ASKPASS_ACCOUNT_ENV]: id },
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const out = await new Response(p.stdout).text();
+    if ((await p.exited) !== 0) return null;
+    return out;
+  },
+  has: async (id) => (await CREDENTIAL_MANAGER.read(id)) !== null,
+  forget: async (id) => deleteCredential(CREDENTIAL_PREFIX + id),
 };
 
 function reason(err: unknown): string {
