@@ -9,7 +9,7 @@
 // and wiping the real one would delete the user's managed notes and
 // settings.jsonc. The guard below aborts the file unless the app home is under
 // tmpdir.
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -243,11 +243,19 @@ describe("the workspace trash", () => {
   });
 
   test("lists deleted workspaces newest first, with the name, icon and note count they had", async () => {
+    // The clock is pinned for each deletion: two in the same millisecond have
+    // no order to list them in.
     const a = await createManaged("Alpha");
     await writeFile(join(a, "one.md"), "# One\n", "utf8");
-    await trashRoot(a, "Alpha", "book");
     const b = await createManaged("Beta");
-    await trashRoot(b, "Beta Notes", "flask");
+    try {
+      setSystemTime(new Date("2026-09-01T10:00:00Z"));
+      await trashRoot(a, "Alpha", "book");
+      setSystemTime(new Date("2026-09-01T10:01:00Z"));
+      await trashRoot(b, "Beta Notes", "flask");
+    } finally {
+      setSystemTime();
+    }
     const items = await listTrashedWorkspaces();
     expect(items.map((i) => [i.id, i.name, i.symbol, i.notes])).toEqual([
       ["beta", "Beta Notes", "flask", 0],
