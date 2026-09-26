@@ -10,6 +10,10 @@
 #
 # `upload: false` builds without touching any release, for a branch or a tag,
 # and leaves the files on the run only.
+#
+# The app carries its server into WSL (bun/wslServer.ts). That server's PTY
+# library is ELF, which a Windows runner cannot compile, so a Linux job builds
+# it first and hands it over.
 name: Release (Windows)
 
 on:
@@ -29,7 +33,34 @@ permissions:
   contents: write
 
 jobs:
+  # `bun run build:wsl`: a linux-x64 server release, plus the Bun it installs.
+  wsl-server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the server for WSL
+        run: bun run build:wsl
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wsl-server
+          path: dist-wsl/
+          retention-days: 1
+
   build:
+    needs: wsl-server
     runs-on: windows-2025
     timeout-minutes: 30
     # Git's bash, which every Windows runner has, so the steps read as the
@@ -62,10 +93,16 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # The preflight, the view, the server bundle and the bundle, then the
-      # installer, the update tarball, the manifest and, once a Windows
-      # release is published, the patch from it. No PTY library: the server
-      # this app dials runs in WSL (bun/wslServer.ts).
+      # Where electrobun.config.ts copies it from, and release-preflight.ts
+      # checks it.
+      - uses: actions/download-artifact@v7
+        with:
+          name: wsl-server
+          path: dist-wsl/
+
+      # The preflight, the view, the server bundle and the bundle with the
+      # server for WSL in it, then the installer, the update tarball, the
+      # manifest and, once a Windows release is published, the patch from it.
       - name: Build the release
         run: bun run release
 

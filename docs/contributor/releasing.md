@@ -502,13 +502,21 @@ refuses a tag that does not name `package.json`'s version, runs
 `bun run release`, and uploads what it built to the GitHub release for that
 tag. Only x64 ships, the one Windows target Electrobun builds.
 
+**The build carries the server it runs in WSL.** The Windows app is a client
+of `ledge serve` in WSL (`bun/wslServer.ts`, `remote.md` §11), and it installs
+that server itself, at its own version. A Linux job in the same workflow runs
+`bun run build:wsl` first: a server release for linux-x64 alone, with the
+pinned Bun tarball beside it, in `dist-wsl/`. Its PTY library is ELF, which is
+why a Linux runner builds it. The Windows job downloads that directory, and
+`electrobun.config.ts` copies it into the bundle as `bun/wsl/`. The preflight
+refuses a Windows release without `dist-wsl/` or with one of another version.
+That tarball has one target and is never published. `build:wsl` writes it to
+`dist-wsl/` rather than `dist-server/`, so it cannot replace the one §6
+publishes. A Mac with Docker can run `bun run build:wsl` as well.
+
 The input `upload`, off, builds without touching any release, for any branch
 or tag, and keeps the files on the run as the `windows-x64` artifact. That is
 how to see a build before the first release carries one.
-
-The build has no PTY library to compile. The Windows app is a client of a
-server in WSL (`bun/wslServer.ts`), and that server is the Linux one server.sh
-installs (§6), so a Windows release changes nothing on the server side.
 
 **The build is not signed.** Windows shows SmartScreen's "Windows protected
 your PC" warning on the installer's first run, and the user clicks More info,
@@ -527,16 +535,28 @@ The runner writes the Linux build's kinds of file with the `win-x64` prefix:
 
 The app runs `bin\launcher.exe`, with `bun.exe` beside it, from the folder
 the installer extracts it to. Where that folder is has not been observed on
-an install yet; the first one records it here. The app home is not there: it
-is `~/.ledge` inside WSL, the server's.
+an install yet; the first one records it here. The app's own files, its log
+and client state, are in `%USERPROFILE%\.ledge`. The notes are the server's,
+in `~/.ledge` inside WSL, with the server itself in `~/.ledge/.server`.
+
+Electrobun's installer runs nothing of Ledge's, so the app checks for WSL when
+it first starts, which the installer does as its last step. Without WSL, or
+with no Linux distribution in it, the app says what to install and quits.
 
 **Verifying, on a Windows 11 PC with WSL**, from the installer a user would
 download, with the app not yet installed:
 
 - Run the installer through SmartScreen's warning. The app launches, and it is
   in the Start menu with its icon.
-- With no server in WSL, the app offers to install one, and a window opens
-  when server.sh is done. Use a WSL account without `~/.ledge/.server` for this.
+- With no server in WSL, the app installs its own and then opens a window,
+  with no question asked. Use a WSL account without `~/.ledge/.server` for
+  this, and check that `~/.ledge/.server/bin/ledge` names the release's
+  version.
+- Installing the next release, over this one, replaces the server in WSL with
+  that release's before the first window opens. The log says
+  `[wsl] installing server <new> over <old>`.
+- On a PC without WSL, the app says that WSL has to be installed first, and
+  how, and quits.
 - A shell block runs in WSL, and Ctrl-C stops it.
 - Attach Folder's Choose Folder opens in WSL's home and attaches the folder
   picked. Formatted text and a picture paste into a note. A misspelled word

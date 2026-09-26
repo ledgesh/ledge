@@ -37,6 +37,7 @@ usage() {
   say ""
   say "  --dry-run          say what would be installed, and change nothing"
   say "  --no-modify-path   leave shell startup files alone"
+  say "  --from <dir>       take both tarballs from <dir> instead of downloading them"
   say ""
   say "LEDGE_SERVER_REGISTRY=<url> downloads from an npm mirror instead of $registry."
 }
@@ -66,6 +67,11 @@ detect_platform() {
   fi
   if [ "$os" = linux ]; then
     check_glibc
+  fi
+  # WSL sets it for every process wsl.exe starts, a terminal's or the app's.
+  wsl=0
+  if [ "$os" = linux ] && [ -n "${WSL_DISTRO_NAME:-}" ]; then
+    wsl=1
   fi
 }
 
@@ -111,10 +117,16 @@ sha256_of() {
 
 # Downloads a package tarball into $tmp/<name>.tgz, checks it against its
 # checksum and unpacks it into $tmp/<name>, where npm puts it under package/.
+# With --from, the tarball is copied from that directory under the same name.
+# The Windows app installs its server into WSL that way (remote.md §11).
 get() {
   url=$1
   file=${url##*/}
-  fetch "$url" "$tmp/$2.tgz" || refuse "could not download $url"
+  if [ -n "$from" ]; then
+    cp "$from/$file" "$tmp/$2.tgz" || refuse "$from has no $file"
+  else
+    fetch "$url" "$tmp/$2.tgz" || refuse "could not download $url"
+  fi
   got=$(sha256_of "$tmp/$2.tgz")
   if [ "$got" = none ]; then
     refuse "checking the download needs sha256sum or shasum, and this machine has neither."
@@ -153,17 +165,27 @@ add_to_path() {
 main() {
   dry_run=0
   modify_path=1
-  for arg in "$@"; do
-    case "$arg" in
+  from=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
       --dry-run) dry_run=1 ;;
       --no-modify-path) modify_path=0 ;;
+      --from)
+        [ $# -ge 2 ] || refuse "--from needs a directory."
+        from=$2
+        shift
+        ;;
       -h | --help)
         usage
         exit 0
         ;;
-      *) refuse "unknown option $arg. The options are --dry-run and --no-modify-path." ;;
+      *) refuse "unknown option $1. The options are --dry-run, --no-modify-path and --from <dir>." ;;
     esac
+    shift
   done
+  if [ -n "$from" ] && [ ! -d "$from" ]; then
+    refuse "--from $from is not a directory."
+  fi
 
   if [ "$(id -u)" -eq 0 ]; then
     refuse "run this as the account Ledge signs in to, not as root. The server installs into that account's home directory. For an account named ledge: curl -fsSL https://ledge.sh/server.sh | sudo -iu ledge sh"
@@ -188,8 +210,13 @@ main() {
 
   if [ "$dry_run" -eq 1 ]; then
     say "Would install ledge-server $version for $os-$arch"
-    say "  from $server_url"
-    say "  with Bun $bun_version from $bun_url"
+    if [ -n "$from" ]; then
+      say "  from ${server_url##*/} in $from"
+      say "  with Bun $bun_version from ${bun_url##*/} in $from"
+    else
+      say "  from $server_url"
+      say "  with Bun $bun_version from $bun_url"
+    fi
     say "  into $target"
     exit 0
   fi
@@ -198,7 +225,11 @@ main() {
   if usable "$target"; then
     say "ledge-server $version is already in $target."
   else
-    say "Downloading ledge-server $version and Bun $bun_version for $os-$arch..."
+    if [ -n "$from" ]; then
+      say "Copying ledge-server $version and Bun $bun_version for $os-$arch from $from..."
+    else
+      say "Downloading ledge-server $version and Bun $bun_version for $os-$arch..."
+    fi
     tmp=$(mktemp -d "$root/.download.XXXXXX")
     trap 'rm -rf "$tmp"' EXIT
     trap 'exit 1' HUP INT TERM
@@ -257,11 +288,16 @@ main() {
     case "$(launchctl print-disabled system 2>/dev/null | grep '"com.openssh.sshd"' || true)" in
       *"=> disabled"* | *"=> true"*) say "Warning: Remote Login is off, so Ledge cannot reach this Mac. Turn it on in System Settings > General > Sharing." ;;
     esac
-  elif [ ! -x /usr/sbin/sshd ] && [ ! -x /usr/bin/sshd ]; then
+  elif [ "$wsl" -eq 0 ] && [ ! -x /usr/sbin/sshd ] && [ ! -x /usr/bin/sshd ]; then
     say "Warning: no ssh server was found in /usr/sbin or /usr/bin, and Ledge connects over ssh. Install openssh-server."
   fi
   if [ -n "$path_added" ]; then
     say "New terminals find it as ledge (a PATH line was added to $path_added)."
+  fi
+  # Ledge on Windows reaches a server in WSL through wsl.exe, not ssh, and a
+  # phone cannot reach WSL at all.
+  if [ "$wsl" -eq 1 ]; then
+    return 0
   fi
   say ""
   say "To pair Ledge on a phone with this machine, run:"

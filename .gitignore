@@ -17,8 +17,10 @@ build/
 
 # A server release (scripts/build-server.ts): the packed package and the
 # install script, and the pinned Bun tarballs it checks and probe:install serves.
+# dist-wsl/ is the linux-x64 one a Windows build carries (scripts/build-wsl.ts).
 dist-server/
 dist-bun/
+dist-wsl/
 
 # What `npm pack ./dist-npm` drops in the current directory, on the way to a
 # publish or to a test machine.

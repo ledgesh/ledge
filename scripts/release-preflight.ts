@@ -16,6 +16,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import config, { UPDATE_BASE_URL } from "../electrobun.config";
+import { INSTALL_SCRIPT, scriptVersion, wslFiles } from "../src/bun/serverRelease";
 
 const ROOT = resolve(import.meta.dir, "..");
 const MAC = process.platform === "darwin";
@@ -68,6 +69,23 @@ if (!MAC) {
     `this is an ${process.arch} Mac and 0.1.0 ships arm64 only`,
     "Cut the release on Apple Silicon. Electrobun 2.x builds for the build host, so there is no target to override.",
   );
+}
+
+// --- the server a Windows build carries ----------------------------------------
+// The app installs it into WSL and keeps it at its own version (bun/wslServer.ts).
+// electrobun.config.ts copies dist-wsl/ only when it is there, so a release
+// without it would build and then install nothing.
+if (process.platform === "win32") {
+  const dir = resolve(ROOT, "dist-wsl");
+  const missing = wslFiles(pkg.version).filter((f) => !existsSync(resolve(dir, f)));
+  const script = existsSync(resolve(dir, INSTALL_SCRIPT)) ? scriptVersion(readFileSync(resolve(dir, INSTALL_SCRIPT), "utf8")) : null;
+  if (missing.length > 0) {
+    bad(`dist-wsl/ lacks ${missing.join(", ")}`, "Run `bun run build:wsl` on a Linux x64 machine or a Mac with Docker, and copy dist-wsl/ here.");
+  } else if (script !== pkg.version) {
+    bad(`dist-wsl/server.sh installs ${script}, and this is ${pkg.version}`, "Run `bun run build:wsl` again from this commit.");
+  } else {
+    ok(`the server for WSL, ${pkg.version}`);
+  }
 }
 
 // --- the update address -------------------------------------------------------

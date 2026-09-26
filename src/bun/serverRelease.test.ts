@@ -57,6 +57,8 @@ interface Machine {
   shell?: string;
   remoteLogin?: string;
   path?: string;
+  /** WSL_DISTRO_NAME, which WSL sets for every process wsl.exe starts. */
+  wsl?: string;
   registry?: string;
 }
 
@@ -165,6 +167,7 @@ function install(w: World, text: string, machine: Machine, args: string[] = [], 
   if (machine.uid) env["FAKE_UID"] = machine.uid;
   if (machine.remoteLogin) env["FAKE_REMOTE_LOGIN"] = machine.remoteLogin;
   if (machine.registry) env["LEDGE_SERVER_REGISTRY"] = machine.registry;
+  if (machine.wsl) env["WSL_DISTRO_NAME"] = machine.wsl;
   const file = join(w.base, "server.sh");
   writeFileSync(file, text);
   const argv = piped ? [shell, "-s", "--", ...args] : [shell, file, ...args];
@@ -301,6 +304,43 @@ describe("server.sh", () => {
     expect(listing(w.home)).toEqual([]);
   });
 
+  // What the Windows app does with the server its installer carries.
+  describe("--from a directory", () => {
+    test("copies both tarballs from it, checks them, and downloads nothing", () => {
+      const w = world();
+      const run = install(w, release(w, "0.1.0"), LINUX, ["--from", w.release]);
+      expect(run.err).toBe("");
+      expect(run.code).toBe(0);
+      expect(run.out).toContain(`Copying ledge-server 0.1.0 and Bun ${BUN_VERSION} for linux-arm64 from ${w.release}...`);
+      expect(w.downloads()).toEqual([]);
+      expect(listing(join(installed(w), "versions", "0.1.0"))).toEqual(["bin", "bun", "lib"]);
+    });
+
+    test("--dry-run names the files it would take", () => {
+      const w = world();
+      const run = install(w, script("0.1.0"), LINUX, ["--dry-run", "--from", w.release]);
+      expect(run.out).toContain(`from ledge-server-0.1.0.tgz in ${w.release}`);
+      expect(run.out).toContain(`with Bun ${BUN_VERSION} from bun-linux-aarch64-${BUN_VERSION}.tgz in ${w.release}`);
+    });
+
+    test("refuses a directory that is not there, or lacks a tarball, or holds one that does not match", () => {
+      const w = world();
+      const text = release(w, "0.1.0");
+      for (const [args, said] of [
+        [["--from"], "--from needs a directory"],
+        [["--from", join(w.base, "nowhere")], "is not a directory"],
+        [["--from", w.base], `${w.base} has no ledge-server-0.1.0.tgz`],
+      ] as const) {
+        const run = install(w, text, LINUX, [...args]);
+        expect(run.code).toBe(1);
+        expect(run.err).toContain(said);
+      }
+      const bad = install(w, release(w, "0.1.0", { serverSum: "1".repeat(64) }), LINUX, ["--from", w.release]);
+      expect(bad.err).toContain("ledge-server-0.1.0.tgz does not match its checksum");
+      expect(existsSync(join(installed(w), "bin", "ledge"))).toBe(false);
+    });
+  });
+
   describe("refusals, each of which leaves the home directory untouched", () => {
     const refused = (w: World, run: { code: number; err: string }, said: string) => {
       expect(run.code).toBe(1);
@@ -427,6 +467,17 @@ describe("server.sh", () => {
     test("a csh login shell, which cannot run what ssh is asked to run", () => {
       const w = world();
       expect(install(w, release(w, "0.1.0"), { ...LINUX, shell: "/bin/tcsh" }).out).toContain("login shell is tcsh, which cannot start ledge over ssh");
+    });
+
+    // Ledge on Windows reaches it through wsl.exe rather than ssh, and a phone
+    // cannot reach WSL.
+    test("in WSL, neither the missing sshd nor pairing a phone", () => {
+      const w = world();
+      const run = install(w, release(w, "0.1.0"), { ...LINUX, wsl: "Ubuntu" });
+      expect(run.code).toBe(0);
+      expect(run.out).toContain("ledge-server 0.1.0 is installed");
+      expect(run.out).not.toContain("ssh server");
+      expect(run.out).not.toContain("ledge pair");
     });
 
     test("a Mac with Remote Login off", () => {

@@ -16,6 +16,7 @@
     "build:native": "bun scripts/build-native.ts",
     "build:npm": "bun scripts/build-npm.ts",
     "build:server": "bun scripts/build-server.ts",
+    "build:wsl": "bun scripts/build-wsl.ts",
     "icon": "bun scripts/make-icon.ts",
     "mcp": "bun src/bun/serve.ts mcp",
     "serve": "bun src/bun/serve.ts serve",

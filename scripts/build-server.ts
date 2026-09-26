@@ -3,6 +3,7 @@
 //
 //   bun run build:server                          every target; what a release publishes
 //   bun run build:server -- --targets=linux-arm64 one, for a fast local loop
+//   --out=<dir>                                   somewhere other than dist-server/
 //
 // It runs build-npm.ts, packs dist-npm/ into the tarball a release publishes, and
 // renders server.sh with that tarball's checksum and the Bun pinned in
@@ -24,7 +25,10 @@ import {
 } from "../src/bun/serverRelease";
 
 const ROOT = resolve(import.meta.dir, "..");
-const OUT = join(ROOT, "dist-server");
+// build:wsl builds a one-target release with this, into a directory that is
+// never the one releasing.md §6 publishes from.
+const outFlag = process.argv.find((a) => a.startsWith("--out="));
+const OUT = outFlag ? resolve(ROOT, outFlag.slice("--out=".length)) : join(ROOT, "dist-server");
 /** The Bun tarballs, downloaded once to check the pins and kept for probe:install. */
 const CACHE = join(ROOT, "dist-bun", `bun-v${BUN_VERSION}`);
 
@@ -105,7 +109,7 @@ writeFileSync(
   ]),
 );
 
-console.log(`[server] ledge-server ${version} with Bun ${BUN_VERSION}, in dist-server/`);
+console.log(`[server] ledge-server ${version} with Bun ${BUN_VERSION}, in ${OUT}`);
 console.log(`[server]   ${tarball}  ${(statSync(join(OUT, tarball)).size / 1e3).toFixed(0)} KB`);
 for (const t of NATIVE_TARGETS) console.log(`[server]   ${targets.includes(t) ? "✓" : "·"} ${targetKey(t)}`);
 if (targets.length < NATIVE_TARGETS.length) {

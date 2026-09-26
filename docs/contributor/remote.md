@@ -2187,6 +2187,21 @@ distinguishes: the timeout exists for the daemon an ssh conjured, and a
 supervisor restarting a unit every minute for correctly deciding nobody was
 home is not a design anyone would choose.
 
+**The Windows app carries its own server into WSL.** Windows cannot run the
+server (no openpty, no fork), so the app dials `ledge serve` in the default
+WSL distribution through `wsl.exe` (`bun/wslServer.ts`). A Windows build
+carries a linux-x64 server release in `bun/wsl/`: `server.sh` and the two
+tarballs it installs, made by `bun run build:wsl` on a Linux runner. Before
+the first window, the app reads the version in WSL's launcher and, when it
+is missing or differs from the carried one, runs
+`server.sh --from <that directory>`, which copies the tarballs instead of
+downloading them and checks the same checksums. A daemon still running the
+replaced version is retired once idle, and one that refuses the handshake is
+stopped, as on a Mac (§1). So the server in WSL is always the app's version,
+and the app's updates are its updates. Without WSL, without a distribution,
+or with WSL signing in as root, the app says what to install and quits. A
+dev build carries no server and dials whatever WSL has.
+
 **Backups: restic is the engine, and `ledge backup` is everything around it.**
 Ledge ships no backup engine and should not grow one. restic already does
 client-side encryption, deduplication, versions, restore and repository

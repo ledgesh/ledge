@@ -49,6 +49,24 @@ export function serverTarball(version: string): string {
 export const INSTALL_SCRIPT = "server.sh";
 export const SUMS_FILE = "SHA256SUMS";
 
+/** The one target the Windows app's server runs on: x64 WSL. */
+export const WSL_TARGET = "linux-x64";
+
+/**
+ * What the Windows app carries into WSL, all in one directory: server.sh, and
+ * the two tarballs it installs with `--from` (remote.md §11). `bun run
+ * build:wsl` makes it.
+ */
+export function wslFiles(version: string): string[] {
+  const bun = tarballPath(BUN_PACKAGES[WSL_TARGET]!.name, BUN_VERSION).split("/").pop()!;
+  return [INSTALL_SCRIPT, serverTarball(version), bun];
+}
+
+/** The version a rendered server.sh installs, or null for text that is not one. */
+export function scriptVersion(text: string): string | null {
+  return /^version='([^']+)'$/m.exec(text)?.[1] ?? null;
+}
+
 /** SHA256SUMS in the format `sha256sum -c` reads: hash, two spaces, name. */
 export function sumsText(sums: ReadonlyArray<{ name: string; sha256: string }>): string {
   return sums.map((s) => `${s.sha256}  ${s.name}\n`).join("");

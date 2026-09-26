@@ -39,7 +39,7 @@ import { ASKPASS_PATH, ensureAskpass, hasPassword } from "./secrets";
 import { reconnectingClient, Refused, SESSION_HOLD_MS, type Duplex } from "../shared/transport";
 import { spawnDuplex } from "./transport";
 import type { LocalServer } from "./localServer";
-import { ensureWslServer, explainWsl, recordWindowsApp, wslFolder, wslHome, wslServer } from "./wslServer";
+import { ensureWslServer, explainWsl, recordWindowsApp, stopWslDaemon, wslFolder, wslHome, wslPayload, wslServer } from "./wslServer";
 import { readWindowsClipboardHtml, readWindowsClipboardImage } from "./winclip";
 import { installShims, SERVE_ENTRY, tildify } from "./cliShim";
 import { checkWord, hasDictionary, learnWord } from "./spelling";
@@ -293,9 +293,12 @@ const store = await createConnectionStore({ inUse: () => windows.map((w) => w.co
 // On Windows it is the server in WSL instead (bun/wslServer.ts), and the
 // daemon module is never loaded there: it opens libc when imported.
 const WINDOWS = process.platform === "win32";
+// The server a Windows build carries into WSL. A dev build carries none.
+const wslCarried = WINDOWS ? wslPayload() : null;
 let wslSaid = "";
 const thisMac: LocalServer = WINDOWS
   ? wslServer({
+      build: wslCarried?.version,
       onStderr: (text) => {
         for (const line of text.replaceAll("\0", "").split("\n")) if (line.trim()) console.log(`[wsl] ${line.trim()}`);
         wslSaid = (wslSaid + text).slice(-4096);
@@ -459,15 +462,17 @@ async function attachFor(win: Win, conn: Connection): Promise<Attached> {
     // have exchanged hellos, the last stderr line is the far end's `serve`
     // saying it attached, and quoting that would call an up server
     // unreachable.
-    if (err instanceof Refused && here && !WINDOWS) {
+    if (err instanceof Refused && here && (!WINDOWS || wslCarried)) {
       // This Mac's daemon speaks another protocol: the daemon an earlier
       // build started is still up, an update having relaunched the app
       // inside its idle minute. It cannot serve this build at all, so it is
       // stopped now rather than asked to retire, and the dial that follows
       // starts one from this bundle. Whatever it was running ends with it,
-      // which is what "Restart to Install Update" already meant.
+      // which is what "Restart to Install Update" already meant. On Windows
+      // the dial starts one from the server just installed in WSL.
       console.warn(`[connect] this machine's daemon refused this build (${err.message}); replacing it`);
-      if (!(await (await import("./daemon")).stopDaemon())) throw err;
+      const stopped = WINDOWS ? await stopWslDaemon() : await (await import("./daemon")).stopDaemon();
+      if (!stopped) throw err;
       wire = await open();
     } else if (here && WINDOWS && !(err instanceof Refused)) {
       throw new Error(explainWsl(wslSaid) ?? (err instanceof Error ? err.message : String(err)));
@@ -867,28 +872,18 @@ ApplicationMenu.on("application-menu-clicked", (event) => {
   if (typeof action === "string" && action.length > 0) (focused ?? windows[0])?.push.menuCommand({ action });
 });
 
-// A fresh Windows install has no server in WSL to dial, and no window can
-// open without its local server, so this asks to install one first
-// (bun/wslServer.ts). Declining quits.
+// Before the first window, WSL gets the server this build carries: installed
+// on the first launch, replaced on the first launch after an update. Without
+// WSL, or a distribution in it, this explains what to install and quits
+// (bun/wslServer.ts).
 if (WINDOWS) {
+  console.log(`[wsl] this build carries server ${wslCarried ? `${wslCarried.version} in ${wslCarried.dir}` : "none"}`);
   const ready = await ensureWslServer({
-    ask: async () =>
-      (
-        await Utils.showMessageBox({
-          type: "question",
-          title: "Ledge",
-          message: "Install Ledge's server in WSL?",
-          detail:
-            "Ledge on Windows keeps your notes and runs your code in WSL. Its server is not installed there yet. Installing runs https://ledge.sh/server.sh in your WSL account, which downloads Ledge's server and Bun into ~/.ledge/.server.",
-          buttons: ["Install", "Quit"],
-          defaultId: 0,
-          cancelId: 1,
-        })
-      ).response === 0,
-    started: () => Utils.showNotification({ title: "Installing Ledge's server in WSL", body: "Ledge opens when it is done." }),
-    fail: async (message) => {
-      console.error(`[wsl] ${message}`);
-      await Utils.showMessageBox({ type: "error", title: "Ledge", message: "Ledge cannot start", detail: message, buttons: ["Quit"] });
+    payload: wslCarried,
+    started: () => Utils.showNotification({ title: "Setting up Ledge's server in WSL", body: "Ledge opens when it is done." }),
+    fail: async ({ headline, detail }) => {
+      console.error(`[wsl] ${headline}: ${detail}`);
+      await Utils.showMessageBox({ type: "error", title: "Ledge", message: headline, detail, buttons: ["Quit"] });
     },
   });
   if (!ready) process.exit(0);

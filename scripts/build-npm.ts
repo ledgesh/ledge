@@ -68,6 +68,32 @@ function head(path: string, n: number): Uint8Array {
   return buf;
 }
 
+/**
+ * Stops the build when a target's ELF library is for another architecture or
+ * needs a glibc newer than the floor. Docker answers `--platform` with the
+ * host's architecture when it has no emulator for the one asked for, and
+ * reports that only as a warning.
+ */
+function checkElf(t: NativeTarget): void {
+  const lib = join(OUT, nativePath(t));
+  const got = elfMachine(head(lib, 20));
+  const want = ELF_MACHINE[t.arch];
+  if (got !== want) {
+    console.error(
+      `[npm] ${nativePath(t)} declares e_machine ${got === null ? "not-an-ELF" : `0x${got.toString(16)}`}, ` +
+        `expected 0x${want!.toString(16)} for ${t.arch}.`,
+    );
+    console.error(`[npm] docker built for the wrong architecture; check that ${dockerPlatform(t)} can be emulated.`);
+    process.exit(1);
+  }
+  const needs = glibcNeeded(readFileSync(lib));
+  if (needs && glibcNewer(needs, GLIBC_FLOOR)) {
+    console.error(`[npm] ${nativePath(t)} requires glibc ${needs}, and servers down to glibc ${GLIBC_FLOOR} are supported.`);
+    console.error("[npm] it calls a function whose symbol version moved; objdump -T names it (ptyNative.ts).");
+    process.exit(1);
+  }
+}
+
 // --- start clean -------------------------------------------------------------
 //
 // The output directory is removed rather than overwritten. A native directory
@@ -134,6 +160,9 @@ const own = linux.find((t) => routeFor(t, host, process.arch) === "host-cc");
 if (own) {
   run([process.execPath, "scripts/build-native.ts"], `building the ${own.platform}-${own.arch} trampolines`);
   copyInto(join(ROOT, "dist-native", nativeLibName("linux")), join(OUT, nativePath(own)));
+  // The host's own libc is newer than the floor on a current runner, so its
+  // build is held to the floor the same as a container's.
+  checkElf(own);
 }
 
 // Every other ELF slice comes out of a container, because ELF has no fat
@@ -153,29 +182,11 @@ for (const t of linux.filter((t) => t !== own)) {
     `building the ${t.platform}-${t.arch} trampolines`,
   );
 
-  // Docker answers `--platform` with the host's architecture when it has no
-  // emulator for the one asked for, and reports that only as a warning.
-  const lib = join(OUT, nativePath(t));
-  if (!existsSync(lib)) {
+  if (!existsSync(join(OUT, nativePath(t)))) {
     console.error(`[npm] docker produced no ${nativePath(t)}`);
     process.exit(1);
   }
-  const got = elfMachine(head(lib, 20));
-  const want = ELF_MACHINE[t.arch];
-  if (got !== want) {
-    console.error(
-      `[npm] ${nativePath(t)} declares e_machine ${got === null ? "not-an-ELF" : `0x${got.toString(16)}`}, ` +
-        `expected 0x${want!.toString(16)} for ${t.arch}.`,
-    );
-    console.error(`[npm] docker built for the wrong architecture; check that ${dockerPlatform(t)} can be emulated.`);
-    process.exit(1);
-  }
-  const needs = glibcNeeded(readFileSync(lib));
-  if (needs && glibcNewer(needs, GLIBC_FLOOR)) {
-    console.error(`[npm] ${nativePath(t)} requires glibc ${needs}, and servers down to glibc ${GLIBC_FLOOR} are supported.`);
-    console.error("[npm] it calls a function whose symbol version moved; objdump -T names it (ptyNative.ts).");
-    process.exit(1);
-  }
+  checkElf(t);
 }
 
 // --- the manifest, written last ---------------------------------------------

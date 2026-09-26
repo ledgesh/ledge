@@ -92,6 +92,7 @@ bun run probe:ssh    # the ssh hop against a real sshd in Docker
 bun run build:npm    # assemble the publishable `ledge-server` package (Mac + Docker; remote.md §11)
 bun run probe:npm    # install that package on a toolchain-free container and drive it
 bun run build:server # a server release: the packed npm tarball, and server.sh that installs it with a pinned Bun (remote.md §11)
+bun run build:wsl    # the linux-x64 server a Windows build carries into WSL, in dist-wsl/ (releasing.md §10)
 bun run probe:install # run that server.sh on Debian, Ubuntu and Alpine, dial it over sshd, update it
 bun run probe:backup # ledge backup against an S3 server in Docker: setup, now, status, restore, the daemon's idle-exit backup
 ```

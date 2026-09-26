@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { ElectrobunConfig } from "electrobun";
 import { nativeLibName } from "./src/bun/ptyNative";
 
@@ -72,6 +74,12 @@ export default {
       // checkout.
       // Not on Windows, whose server runs in WSL (scripts/build-native.ts).
       ...(process.platform === "win32" ? {} : { [`dist-native/${NATIVE_LIB}`]: `bun/${NATIVE_LIB}` }),
+      // On Windows, that server: the linux-x64 release `bun run build:wsl`
+      // makes, which the app installs into WSL (src/bun/wslServer.ts). A dev
+      // build without one dials whatever server WSL has. release-preflight.ts
+      // refuses a release without it. Hutch evaluates this file from a
+      // directory of its own, so the check names the checkout's.
+      ...(process.platform === "win32" && existsSync(join(import.meta.dir, "dist-wsl")) ? { "dist-wsl": "bun/wsl" } : {}),
     },
     // Vite owns view rebuilds and HMR, so electrobun's watcher stays off its
     // output, and off the CLI and native prebuilds for the same reason.
