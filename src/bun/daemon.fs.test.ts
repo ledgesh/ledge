@@ -995,24 +995,25 @@ describe("runs the client that started them can no longer show", () => {
     const first = await watching(socketPath, "mac-1");
     // A subshell, so the status is the block's. A bare `exit` would end the
     // note's own shell, and the pool closes that run out with no status.
-    const sent = Date.now();
     await first.conn.requests.runBlock({ sessionId: "note-1", id: "run-1", code: "sleep 0.4; (exit 7)", language: "sh" });
     expect(await until(() => first.runs().some((ev) => ev.kind === "began"))).toBe(true);
+    const began = Date.now();
     first.conn.close();
-    await new Promise((r) => setTimeout(r, 900));
+    await new Promise((r) => setTimeout(r, 1_500));
 
+    const back = Date.now();
     const next = await watching(socketPath, "mac-1");
     expect(await next.conn.requests.inlineClaim({ ids: ["run-1"] })).toEqual({ running: [], orphaned: 0 });
 
     expect(await until(() => next.runs().some((ev) => ev.kind === "ended"))).toBe(true);
-    const heard = Date.now();
     const end = next.runs().find((ev) => ev.kind === "ended");
     expect(end).toMatchObject({ id: "run-1", kind: "ended", exitCode: 7 });
-    // The length is the run's, measured when it ended, not the time until
-    // this client heard: the ending sat in the hold for most of the 900 ms.
+    // The length is the run's, measured when it ended. Measured when this
+    // client heard, it would span the whole outage, from before `began` to
+    // after `back`. A slow runner stretches the 0.4 s sleep, not the outage.
     const durationMs = end?.kind === "ended" ? end.durationMs : undefined;
     expect(durationMs).toBeGreaterThanOrEqual(400);
-    expect(durationMs).toBeLessThan(heard - sent - 400);
+    expect(durationMs).toBeLessThan(back - began);
   });
 
   // Held for the client it was addressed to and no other, the same as the live
