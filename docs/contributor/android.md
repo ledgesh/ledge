@@ -188,15 +188,16 @@ password is in the login keychain, so `release.env` stays free of secrets.
 Once per Mac:
 
 ```bash
-keytool -genkeypair -keystore ~/.config/ledge/android-upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Ledge"
+/opt/homebrew/opt/openjdk@21/bin/keytool -genkeypair -keystore ~/.config/ledge/android-upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Ledge"
 ```
 
 ```bash
 security add-generic-password -s ledge-android-upload -a "$USER" -w
 ```
 
-The alias must be `upload`. The keystore is PKCS12, so the key's password is
-the store's. A lost upload key is recoverable: the Play Console resets it on
+The full path matters: `/usr/bin/keytool` is macOS's stub, which looks for
+a system Java and finds none. The alias must be `upload`. The keystore is
+PKCS12, so the key's password is the store's. A lost upload key is recoverable: the Play Console resets it on
 request. The keystore still belongs in the same backup as the Apple
 certificates.
 
