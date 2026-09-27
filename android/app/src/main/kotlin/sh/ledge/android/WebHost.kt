@@ -188,7 +188,12 @@ class WebHost : ComponentActivity() {
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime(),
             )
             view.setPadding(clear.left, clear.top, clear.right, clear.bottom)
+            val wasTyping = typing
             typing = insets.isVisible(WindowInsetsCompat.Type.ime())
+            // A put-away keyboard leaves the editor focused, and Chromium
+            // raises it again on any tap while it is, a run button's too.
+            // Blurring matches iOS, whose keyboard takes focus with it (android.md §6).
+            if (wasTyping && !typing) web.evaluateJavascript("document.activeElement?.blur()", null)
             showBar()
             WindowInsetsCompat.CONSUMED
         }

@@ -121,6 +121,7 @@ so `recheck` restarts the beat (`arm()`) in `shared/transport.ts`.
 | --- | --- |
 | The keyboard bar | plain Views at the foot of the insets-padded layout, focusable false so the web view keeps focus; shown while the IME is up and `@focus` is `note` or `run` |
 | Hide Keyboard | none: Back and the navigation bar put the keyboard away |
+| The keyboard going away | the shell blurs the page's focused element, as iOS does. Chromium raises the keyboard on any tap while an editable element has focus, so an editor left focused brought it up on every run or copy button |
 | Back | the page reports whether a layer is open (`@back`, from `layers.ts`); Back with one open sends `{t:"back"}` and the page closes the top layer; with none open the shell calls `moveTaskToBack` |
 | A long press in text | Android's own selection and toolbar |
 | Insets | a `FrameLayout` padded by the system bars and the IME; a WebView ignores its own padding |
