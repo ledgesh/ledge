@@ -7,7 +7,7 @@
 
 <h1 align="center">Ledge</h1>
 
-<p align="center">The notebook that runs code.<br>Markdown notes for developers and DevOps, on macOS, Linux, Windows, and iPhone.</p>
+<p align="center">The notebook that runs code.<br>Markdown notes for developers and DevOps, on macOS, Linux, Windows, iPhone, and Android.</p>
 
 <p align="center">
   <a href="https://ledge.sh">Website</a> ·
@@ -32,7 +32,7 @@ send their text to an AI agent.
 
 Notes are plain `.md` files in folders you choose. They can live on your own
 computer, or on a Linux or Mac server you reach over ssh, and the same notes
-open on your iPhone or iPad. There is no account, no service, and no database
+open on your iPhone, iPad, or Android phone. There is no account, no service, and no database
 on the side.
 
 ## Install
@@ -68,6 +68,11 @@ administrator PowerShell, then a restart.
 [Ledge for iPhone](https://apps.apple.com/app/ledge-notebook/id6813315782) on the App
 Store. It holds no notes of its own: it connects over ssh to a Linux server or
 to your own computer, and reads, edits, and runs the same notes from anywhere.
+
+**Android.** Ledge for Android is in an open beta on Google Play, and anyone
+can join: [ledge.sh/android](https://ledge.sh/android) walks through joining
+the testers group, opting in, and installing. It runs on Android 10 or newer
+and connects to a server the same way the iPhone app does.
 
 **Server.** Host your notes on a Linux server or a Mac, run their blocks
 there, and reach them from every device over ssh. Signed in as the account
@@ -117,8 +122,8 @@ claude mcp add ledge -- ledge mcp
   window onto it. Running blocks survive a dropped connection, and your Mac,
   your phone, and a second window can all be on one server at once.
   [Keep Notes on a Remote Server](https://ledge.sh/docs/keep-notes-on-a-remote-server)
-- **Works on your phone.** Pair the iOS app with a server by scanning a
-  code. Tap Run on a block and it runs on the server, and keeps running when
+- **Works on your phone.** Pair the iPhone or Android app with a server by
+  scanning a code. Tap Run on a block and it runs on the server, and keeps running when
   you switch apps.
   [Ledge on Your Phone](https://ledge.sh/docs/ledge-on-your-phone)
 - **Keeps secrets out of notes.** A profile is a dotenv file kept outside the
@@ -158,16 +163,16 @@ the features into working routines.
 [docs/contributor/](docs/contributor) describes how Ledge is built, from the
 process and trust boundaries in
 [architecture.md](docs/contributor/architecture.md) to the ssh protocol in
-[remote.md](docs/contributor/remote.md) and the iOS client in
-[ios.md](docs/contributor/ios.md).
+[remote.md](docs/contributor/remote.md) and the phone clients in
+[ios.md](docs/contributor/ios.md) and [android.md](docs/contributor/android.md).
 
 ## Build from source
 
 Ledge is built on [Electrobun](https://electrobun.dev): a Bun process owns
 the files and the shells, and a React app with a CodeMirror editor runs in
 the system WebView. The same Bun code, without the window, is the
-`ledge-server` package, and the iOS app is a Swift shell around the same
-React view.
+`ledge-server` package. The iOS app is a Swift shell and the Android app a
+Kotlin shell around the same React view.
 
 You need [Bun](https://bun.sh), and either a Mac with the Xcode Command Line
 Tools or a Linux desktop with a C compiler and WebKitGTK. On Windows you need

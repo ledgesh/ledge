@@ -186,9 +186,12 @@ that all other testing uses:
   shim execs the bundle's own `bun`, from outside the bundle.
 - Open a workspace under `~/Documents` or `~/Desktop` and confirm the TCC prompt
   appears and, once granted, that notes read and write.
-- Ledge > Check for Updates… answers "Ledge <version> is the latest version."
-  That is the answer before the release is published to the update server (a
-  404) and after (a manifest naming this build's own hash). An error strip here
+- Ledge > Check for Updates… answers "Ledge <version> is the latest version"
+  once the release is published to the update server (§7), whose manifest
+  then names this build's own hash. Before that, the server still serves the
+  previous release, and the updater compares hashes rather than versions, so
+  it downloads the previous release and offers to install it. Do not install
+  it: that is a downgrade. Check again after publishing. An error strip here
   is the updater's fetch failing under the hardened runtime.
 
 A signed build that fails one of these is not a release; it is a bug in the
@@ -488,8 +491,9 @@ per prefix.
 - Run Install Shell Command (ledge), then `ledge ls` in a new terminal, and
   `ledge <a note's title>` with the app closed: the shim starts the launcher
   beside its own `bun` (`bun/linuxApp.ts`).
-- Check for Updates… answers "Ledge <version> is the latest version." That is
-  a 404 before the prefix is published and this build's own hash after.
+- Check for Updates… answers "Ledge <version> is the latest version" once the
+  prefix is published, or while it has never been (a 404). Before a later
+  release is published, it offers the previous one instead, as on a Mac (§5).
 - `~/.local/share/sh.ledge.app/stable/uninstall` removes the app and both
   desktop entries.
 
@@ -600,4 +604,6 @@ download, with the app not yet installed:
   offers guesses on right-click.
 - `ledge <a note's title>` in a WSL terminal, with the app closed, opens it
   there (`bun/wslApp.ts`).
-- Check for Updates… answers "Ledge <version> is the latest version."
+- Check for Updates… answers "Ledge <version> is the latest version" once the
+  prefix is published, or while it has never been. Before a later release is
+  published, it offers the previous one instead, as on a Mac (§5).
