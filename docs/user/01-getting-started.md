@@ -74,7 +74,7 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 - **The CLI.** "Install Shell Command (ledge)" puts `ledge` on your PATH, so `ledge <title>` opens a note from any terminal and `ledge today` lands in the daily note. See [[The ledge CLI]].
 - **Remote hosts.** A `host:` line sends a note's blocks over ssh to another machine while the note stays here. See [[Run Code on Remote Hosts]].
 - **Remote servers.** Keep your notes on a server and use this app as the window onto it: the server holds the notes and runs the shells, over ssh. See [[Keep Notes on a Remote Server]].
-- **Your phone.** The same app on an iPhone or iPad, reading and running the notes on that server. See [[Ledge on Your Phone]].
+- **Your phone.** The same app on an iPhone, an iPad or an Android phone, reading and running the notes on that server. See [[Ledge on Your Phone]].
 - **Appearance.** Ledge follows the system's light or dark setting. To pin one instead, set `appearance.theme` to `"light"` or `"dark"` under This app in Settings (⌘,) and relaunch.
 - **Fonts.** `editor.fontSize` sizes note text and `terminal.fontSize` sizes the terminal, both under This app in Settings (⌘,). Relaunch to apply.
 

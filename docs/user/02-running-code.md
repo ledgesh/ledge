@@ -36,7 +36,7 @@ The bar above the keyboard changes while the run holds it. In place of the writi
 
 Back to note is the last button on that bar as well as in the panel's header, because a full screen program can push the header off the top of the screen.
 
-Everywhere else that last button hides the keyboard, which on a phone is the only way to put one away: the note fills the screen, so there is no blank space to tap.
+Everywhere else on an iPhone or iPad that last button hides the keyboard, which is the only way to put one away there: the note fills the screen, so there is no blank space to tap. Android's bar has no such button, because Back and the navigation bar put the keyboard away.
 
 ## Confirm before running
 

@@ -1,8 +1,8 @@
 # Ledge on Your Phone
 
-Ledge runs on an iPhone or iPad as a window onto a server. The phone holds no notes: it reaches a server over ssh, the way the desktop app does in [[Keep Notes on a Remote Server]], and shows you what is there.
+Ledge runs on an iPhone, an iPad or an Android phone as a window onto a server. The phone holds no notes: it reaches a server over ssh, the way the desktop app does in [[Keep Notes on a Remote Server]], and shows you what is there.
 
-Get Ledge for iPhone from the App Store. It runs on iOS and iPadOS 17 or newer, and it needs a server to connect to before it shows anything.
+Get Ledge for iPhone from the App Store. It runs on iOS and iPadOS 17 or newer. Ledge for Android is in an open beta on Google Play and runs on Android 10 or newer: [ledge.sh/android](https://ledge.sh/android) has the three steps to join. Either one needs a server to connect to before it shows anything.
 
 A server that already serves your desktop needs nothing more. A machine without one needs the server installed first, as "Install the server" on that page describes, and the phone shows the same commands ("Set up a server" below).
 
@@ -30,7 +30,7 @@ A desktop that already has the server in its list can show the same code without
 
 The code names one address, and the reader connects to exactly that, so pick the one your other devices reach from where they will be. A tailnet name works from anywhere a device is on the tailnet. A home network address works from a device on that network. A cloud machine's public address works from anywhere, when its sshd is reachable from outside. A machine behind a router's port forward has an outside address no source knows: type it at the menu with its port, or give them with `--host` and `--port`. A desktop's code names the address that desktop dials, with the same reach.
 
-On the phone, tap Scan a pairing code on the first screen, or in Add Server… inside the app ("More than one server" below), and point the camera at the QR code. Scan it from Ledge rather than the Camera app, which opens the code in Safari. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as in "Pair by address": with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
+On the phone, tap Scan a pairing code on the first screen, or in Add Server… inside the app ("More than one server" below), and point the camera at the QR code. Scan it from Ledge rather than the phone's camera app, which opens the code in the browser. Ledge shows what the code names and connects only when you tap Connect. Choose how to sign in first, the same way as in "Pair by address": with a key, whose line still has to be in the server's `authorized_keys`, or with a password. Ledge signs in only if the server offers one of the host keys in the code, so there is no fingerprint to check by eye.
 
 The code holds no password and no key. Someone who photographs it learns where the server is and which account to try, and nothing that signs them in.
 
@@ -49,7 +49,7 @@ curl -fsSL https://ledge.sh/server.sh | sh
 
 Run them in a terminal on that machine, signed in as the account the phone should use rather than root. The first installs the server in that account's home, where a command run over ssh finds it, and needs no `sudo`. The second prints a pairing code for that account, and Scan the pairing code on the same screen reads it. It names `ledge` by its full path because the PATH line the installer adds reaches only new terminals.
 
-Copy commands puts them on the phone's pasteboard. Share commands hands them to AirDrop, Messages, or any app that can carry them to a computer with a terminal open on that machine.
+Copy commands puts them on the phone's clipboard. Share commands opens the phone's share sheet, for AirDrop, Quick Share, a message, or any app that can carry them to a computer with a terminal open on that machine.
 
 On a Mac, turn on Remote Login first, in System Settings under General, then Sharing; on a Linux desktop, install the `openssh-server` package. A computer that runs the Ledge app needs only "Install Shell Command (ledge)" from the app's command palette in place of the first command: it puts `ledge` where the phone's ssh looks, pointing at the app's own copy, so the phone sees the same notes the app shows. The second command then prints the code.
 
@@ -63,7 +63,7 @@ Add an existing server opens "Pair with a server", a form with three parts. The 
 
 The first part is the machine: `user@host`, and a port when sshd is not on 22. A phone reads no `~/.ssh/config`, so write the address out.
 
-The second is how to sign in. With A key, the default, the form shows a command to run on the server. On its first launch the phone makes a key of its own in the Secure Enclave, and that key never leaves the phone: there is no file to copy in or out. What leaves is the public half, as one line for the server's `~/.ssh/authorized_keys`:
+The second is how to sign in. With A key, the default, the form shows a command to run on the server. On its first launch the phone makes a key of its own, in the Secure Enclave on an iPhone or iPad and in the Android Keystore on Android, and that key never leaves the phone: there is no file to copy in or out. What leaves is the public half, as one line for the server's `~/.ssh/authorized_keys`:
 
 ```
 restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3f2a91c0
@@ -75,7 +75,7 @@ The command adds that line to the file, creating `~/.ssh` first if the account h
 mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\n%s\n' 'restrict,command="PATH=$HOME/.ledge/.server/bin:$PATH ledge serve" ecdsa-sha2-nistp256 AAAA... ledge-iphone-3f2a91c0' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
 ```
 
-Run it on the server, signed in as the account Ledge uses: over ssh from your computer, or in the provider's web console for a new VPS. Copy command puts it on the phone's pasteboard. Share command hands it to AirDrop, Messages, or any app that can carry it to that terminal, which is where the pasteboard on a phone falls short. The comment at the end of the line names the phone, so the line is easy to find again when you want to revoke it.
+Run it on the server, signed in as the account Ledge uses: over ssh from your computer, or in the provider's web console for a new VPS. Copy command puts it on the phone's clipboard. Share command opens the share sheet, for AirDrop, Quick Share, a message, or any app that can carry it to that terminal, which is where a phone's clipboard falls short. The comment at the end of the line names the phone, `ledge-iphone-…` or `ledge-android-…`, so the line is easy to find again when you want to revoke it.
 
 The line arrives already restricted, in the way "Restrict the key to Ledge" on [[Keep Notes on a Remote Server]] describes: the phone's key can speak Ledge's protocol and nothing else. It looks for `ledge` in `~/.ledge/.server/bin` first and then on the PATH an incoming ssh gets, so a server installed in either place starts ("Check that ssh can find the server" on the same page).
 
@@ -85,7 +85,7 @@ Ledge adds the server only once `ledge serve` answers there. On a machine where 
 
 ## Sign in with a password instead
 
-Choose "A password" under Sign in with and type the password for that account. The eye button at the end of the field shows what you typed, to check it before connecting. The phone keeps the password in its own keychain, and no key line has to be installed.
+Choose "A password" under Sign in with and type the password for that account. The eye button at the end of the field shows what you typed, to check it before connecting. The phone keeps the password to itself, in the keychain on an iPhone or iPad and sealed with an Android Keystore key on Android, and no key line has to be installed.
 
 The trade-off is the one described on [[Keep Notes on a Remote Server]]: a password reaches a fresh machine today, and a key is the better long-term answer. A server with `PasswordAuthentication no` refuses it.
 
@@ -97,7 +97,7 @@ A server that cannot be reached shows "Ledge could not reach a server." with the
 
 A host key that has changed, or a key or password the server no longer accepts, lands you back on the pairing form with the address filled in. Retrying cannot fix either, so the pin is dropped and you compare the fingerprint again.
 
-Removing the last server returns the phone to the first screen. Deleting the app deletes its key with it, so a reinstalled phone is a new device to every server and needs its line installed again.
+Removing the last server returns the phone to the first screen. Deleting the app deletes its key with it, so a reinstalled phone is a new device to every server and needs its line installed again. A new phone set up from a backup of an old one starts the same way: the key and the server list stay behind.
 
 ## More than one server
 
@@ -126,8 +126,10 @@ The pages for those features say how each works on a touch screen: Run on every 
 
 Tapping through the tree reuses one tab rather than filling the strip, since a note you tap opens as an italic preview ([[Panes and Tabs]]). A long press on the tab holds Keep Tab Open, which is what makes it stay, and so does typing in the note. It matters more here than on a desktop: there is no ⌘W, so a strip that filled up would take a long press and a menu item per tab to empty.
 
-A block keeps running on the server while the app is in the background, and what it printed is waiting when you come back. A program that needs a whole terminal belongs in a desktop's drawer on the same server.
+A block keeps running on the server while the app is in the background, and what it printed is waiting when you come back. Android drops the connection a few seconds after the app leaves the screen, and Ledge reconnects when you return. A program that needs a whole terminal belongs in a desktop's drawer on the same server.
 
-Unlocking a locked note asks for the passphrase every time. The phone stores none of it, and Face ID does not stand in for it. The relock timer is the server's, so a phone put away for an hour finds its locked notes closed again ([[Note Locking]]).
+On Android, Back closes whatever is open on top, a menu, a dialog or the sidebar, and with nothing open it puts Ledge in the background without closing it. Back and the navigation bar also put the keyboard away.
+
+Unlocking a locked note asks for the passphrase every time. The phone stores none of it, and Face ID or a fingerprint does not stand in for it. The relock timer is the server's, so a phone put away for an hour finds its locked notes closed again ([[Note Locking]]).
 
 The manual a phone shows is the connected server's copy, so it describes the version of Ledge that server runs.
