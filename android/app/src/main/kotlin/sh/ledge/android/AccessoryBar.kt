@@ -68,6 +68,10 @@ class AccessoryBar(context: Context, private val verb: (String) -> Unit, private
                 isAllCaps = false
                 minWidth = 0
                 minimumWidth = 0
+                // A Button's own side padding leaves too little of an eighth of
+                // a 384 dp phone for "esc", which wrapped to "e…".
+                setPadding(0, 0, 0, 0)
+                isSingleLine = true
             }
         }
         view.apply {

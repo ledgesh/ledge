@@ -213,11 +213,13 @@ What the first submission asks for, and the answers:
 | Target audience | 18 and over, which keeps the app out of the Families policy |
 | Content rating | a utility with no content shared between users |
 | Permissions | CAMERA, for the QR scanner and Take Photo; nothing that needs a declaration form |
-| Store listing | `android/store/play-icon-512.png` and `play-feature-1024x500.png`, and at least two phone screenshots |
+| Store listing | `android/store/play-icon-512.png`, `play-feature-1024x500.png` and the six phone screenshots in `android/store/screenshots/` |
 
 The feature graphic and the 512 px icon are drawn from `assets/Ledge.icon`'s
-mark and fill. The screenshots follow the App Store lesson: a bigger editor
-font, one idea per shot, checked at about 250 px wide.
+mark and fill. The screenshots are the App Store set's six notes and frames,
+taken on a Galaxy A15 against the same fixture server, and cropped to the
+web view: Play refuses a long side more than twice the short one, which the
+phone's full 1080 × 2340 is.
 
 **CI builds the bundle unsigned.** The `android` job in `ci.yml` runs the
 Kotlin unit tests, lint and `bundleRelease` on Linux, so a clean machine
