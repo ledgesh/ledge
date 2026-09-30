@@ -36,6 +36,15 @@ test("⌘N opens on the title with the placeholder selected", async ({ page }) =
   await expect(tab(page, "Ship It")).toBeVisible();
 });
 
+test("⌘N takes the caret from a focused sidebar row", async ({ page }) => {
+  await noteRow(page, "Alpha").click();
+  await expect(noteRow(page, "Alpha")).toBeFocused();
+  await page.keyboard.press("Meta+n");
+  await expect(tab(page, "Untitled")).toBeVisible();
+  await page.keyboard.type("Ship It");
+  await expect(titleLine(page)).toHaveText("# Ship It");
+});
+
 test("⌘J's new daily note gets the caret but keeps its date", async ({ page }) => {
   await page.keyboard.press("Meta+j");
   await expect(tab(page, today())).toBeVisible();

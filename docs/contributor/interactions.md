@@ -47,7 +47,9 @@ Rules:
   div on its own) and nothing may take that focus away: opening a note from
   the sidebar shows it, but leaves focus on the row, so the verbs still work.
   Clicking into the editor is the gesture that says you want to type
-  (`PaneTree.tsx` skips its auto-focus while a row has focus).
+  (`PaneTree.tsx` skips its auto-focus while a row has focus). A new note
+  is the exception: ⌘N opens it to be typed in, so it takes the caret from
+  the row.
 - **R6.** Every row kind gets the same grammar: **Enter** is its primary
   action, **⌫** its destructive one, and a mnemonic letter (`d`, `r`) may
   double up for either. A row kind with a verb missing from its context menu is

@@ -150,11 +150,13 @@ function PaneBody({ leaf, focused }: { leaf: LeafNode; focused: boolean }) {
   // Where the keyboard is on screen, only a new scratch note takes the caret.
   // There, focus raises the keyboard, and this runs inside the tap on a tab, so
   // a tab switch would cover the note it just showed (interactions.md §1a). A
-  // new note is opened to be typed in.
+  // new note is opened to be typed in, so it takes the caret from a list row
+  // too: ⌘N pressed after a sidebar click would otherwise type into the row.
   useLayoutEffect(() => {
     if (!focused || !docId) return;
-    if (softKeyboard() && (active?.path || active?.seed !== "scratch")) return;
-    if (document.activeElement?.closest("[data-list-row]")) return;
+    const fresh = !active?.path && active?.seed === "scratch";
+    if (softKeyboard() && !fresh) return;
+    if (!fresh && document.activeElement?.closest("[data-list-row]")) return;
     focusEditor(docId);
   }, [focused, docId]);
 
