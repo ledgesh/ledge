@@ -57,6 +57,12 @@ export function audienceOf<T>(clients: ReadonlyMap<string, T>, pushOf: (held: T)
       }
       return one;
     },
+    // Not memoized like `to`: it runs once per registry change, never on a
+    // byte path.
+    others: (client) =>
+      fanout(function* () {
+        for (const [id, held] of clients) if (id !== client) yield pushOf(held);
+      }),
     has: (client) => clients.has(client),
   };
 }

@@ -10,13 +10,17 @@ import {
   deleteTrashedWorkspace,
   detachWorkspaceFolder,
   docsFolder,
+  labelWorkspaceFolder,
+  listWorkspaceRoots,
   restoreTrashedWorkspace,
   trashWorkspaceFolder,
   workspaceKind,
 } from "./channel";
 import { reviveWorkspace, snapshotWorkspace, type WorkspaceSnapshot } from "./persist";
-import { docsLanding, notesOf, trashOf, type Action, type AppState } from "./store";
-import { tabPaths } from "./tree";
+import { docsLanding, folderName, notesOf, trashOf, type Action, type AppState } from "./store";
+import { tabPaths, type Workspace } from "./tree";
+import { isIconKey } from "./icons";
+import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
 // New Workspace. Bun creates the folder first (it slugs the display name and
 // allocates a name nothing else holds, bun/workspaces.ts), then this adds the
@@ -58,9 +62,54 @@ export async function attachWorkspace(
   }
   if (res.root === null) return res.error ?? "the folder could not be attached";
   const folder = res.root;
-  dispatch({ type: "addWorkspace", name: folder.split("/").pop() || folder, folder });
+  dispatch({ type: "addWorkspace", name: folderName(folder), folder });
   await refreshFolder(folder, dispatch);
   return null;
+}
+
+// Rename a workspace, here and on the server, so every client's strip shows
+// the new name (remote.md §5). The reducer applies it first and the label
+// follows, best-effort (channel.ts labelWorkspaceFolder).
+export function renameWorkspace(ws: Workspace, name: string, dispatch: (action: Action) => void): void {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === ws.name) return;
+  dispatch({ type: "renameWorkspace", id: ws.id, name: trimmed });
+  if (workspaceKind(ws.folder) !== "docs") void labelWorkspaceFolder(ws.folder, trimmed, ws.symbol);
+}
+
+// Pick a workspace's icon, here and on the server: renameWorkspace's sibling.
+export function setWorkspaceIcon(ws: Workspace, symbol: string, dispatch: (action: Action) => void): void {
+  if (symbol === ws.symbol || !isIconKey(symbol)) return;
+  dispatch({ type: "setWorkspaceIcon", id: ws.id, symbol });
+  if (workspaceKind(ws.folder) !== "docs") void labelWorkspaceFolder(ws.folder, ws.name, symbol);
+}
+
+// Bring the strip in line with the server's registry, on the workspacesChanged
+// push and on every focus and relink refresh (remote.md §5). Roots no
+// workspace shows have their lists fetched first, so each arrives with its
+// notes. `current` is the live state, read once the registry answers. A failed
+// registry read changes nothing.
+export async function syncWorkspaces(current: () => AppState, dispatch: (action: Action) => void): Promise<void> {
+  let roots: Awaited<ReturnType<typeof listWorkspaceRoots>>;
+  try {
+    roots = await listWorkspaceRoots();
+  } catch (err) {
+    console.error("[workspace] registry refresh failed", err);
+    return;
+  }
+  const shown = new Set(current().workspaces.map((w) => w.folder));
+  const fresh = roots.filter((r) => r.available && r.kind !== "docs" && !shown.has(r.root));
+  const notes: Record<string, NoteMeta[]> = {};
+  const trash: Record<string, TrashMeta[]> = {};
+  await Promise.all(
+    fresh.map(async (r) => {
+      [notes[r.root], trash[r.root]] = await Promise.all([
+        listNotes(r.root).catch(() => []),
+        listTrash(r.root).catch(() => []),
+      ]);
+    }),
+  );
+  dispatch({ type: "syncWorkspaces", roots, notes, trash });
 }
 
 // The workspace the manual was opened from, so the same button can put it
@@ -270,6 +319,9 @@ async function reattach(
   }
   if (res.root === null) return res.error ?? "the folder could not be added back";
   await bringBack(res.root, dispatch, { snap, index }, { name: snap.name, symbol: snap.symbol });
+  // Removing it dropped the registry's label with the line, so the server
+  // gets back the one this client still had.
+  void labelWorkspaceFolder(res.root, snap.name, snap.symbol);
   return null;
 }
 

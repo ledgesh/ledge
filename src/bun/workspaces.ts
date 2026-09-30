@@ -115,11 +115,26 @@ export function kindOf(root: string): "managed" | "external" | "docs" {
   return dirname(r) === resolve(APP_HOME) ? "managed" : "external";
 }
 
-// Resolved root -> availability, in registration order. Loaded once at startup
-// (server.ts createServer), before any RPC is served. `available` is that
-// load-time snapshot: an external volume mounted mid-session becomes available
-// at the next launch, not live.
-const entries = new Map<string, { available: boolean }>();
+// Resolved root -> availability and label, in registration order, loaded once
+// at startup (server.ts createServer). `available` is that load-time snapshot:
+// a volume mounted mid-session is available at the next launch. `name` and
+// `symbol` are the label every client's strip shows (remote.md §5), null until
+// something sets them.
+interface Entry {
+  available: boolean;
+  name: string | null;
+  symbol: string | null;
+}
+const entries = new Map<string, Entry>();
+
+// Display strings from the view are capped rather than refused: they are
+// labels, never names on disk. The workspace trash's meta uses the same caps.
+const NAME_MAX = 200;
+const SYMBOL_MAX = 64;
+
+function unlabeled(available: boolean): Entry {
+  return { available, name: null, symbol: null };
+}
 
 export function roots(): string[] {
   return [...entries.keys()];
@@ -148,7 +163,13 @@ export function lockableRoots(): string[] {
 }
 
 export function listWorkspaceRoots(): WorkspaceRootInfo[] {
-  return [...entries].map(([root, e]) => ({ root, kind: kindOf(root), available: e.available }));
+  return [...entries].map(([root, e]) => ({
+    root,
+    kind: kindOf(root),
+    available: e.available,
+    ...(e.name !== null ? { name: e.name } : {}),
+    ...(e.symbol !== null ? { symbol: e.symbol } : {}),
+  }));
 }
 
 // The registered root containing `path`, or null. Every note-path guard starts
@@ -183,15 +204,27 @@ export function assertWritableRoot(root: string): string {
 
 // --- persistence -------------------------------------------------------------
 
-// On-disk shape, version 1: just the root paths. Same atomic temp-plus-rename
-// as every other write in APP_HOME.
+// On-disk shape, version 1: the root paths, and `labels` keyed by root for the
+// ones that have a name or an icon. The labels are a sibling of `roots` rather
+// than a change to it, so a build that predates them still reads every root.
+// It drops the labels on its next save, which costs names and no workspace.
+// Same atomic temp-plus-rename as every other write in APP_HOME.
 let tmpCounter = 0;
 async function save(): Promise<void> {
   await ensureAppHome();
   // The docs root never persists: loadWorkspaces registers it in memory at
   // every load. A stored line would go stale, and would come back as an
   // ordinary writable root if DOCS_ROOT ever moved.
-  const text = JSON.stringify({ version: 1, roots: [...entries.keys()].filter((r) => kindOf(r) !== "docs") });
+  const kept = [...entries].filter(([r]) => kindOf(r) !== "docs");
+  const labels: Record<string, { name?: string; symbol?: string }> = {};
+  for (const [root, e] of kept) {
+    if (e.name === null && e.symbol === null) continue;
+    labels[root] = {
+      ...(e.name !== null ? { name: e.name } : {}),
+      ...(e.symbol !== null ? { symbol: e.symbol } : {}),
+    };
+  }
+  const text = JSON.stringify({ version: 1, roots: kept.map(([r]) => r), labels });
   tmpCounter += 1;
   const tmp = join(APP_HOME, `.workspaces.json.tmp-${process.pid}-${tmpCounter}`);
   try {
@@ -241,7 +274,7 @@ export async function loadWorkspaces(): Promise<void> {
   // shield it from a hand-edited line that would nest with it.
   {
     const available = await mkdir(DOCS_ROOT, { recursive: true }).then(() => true).catch(() => false);
-    entries.set(resolve(DOCS_ROOT), { available });
+    entries.set(resolve(DOCS_ROOT), unlabeled(available));
   }
   let raw: string | null = null;
   try {
@@ -258,10 +291,9 @@ export async function loadWorkspaces(): Promise<void> {
     await rename(WORKSPACES_PATH, aside).catch(() => {});
     return;
   }
-  const list =
-    typeof json === "object" && json !== null && !Array.isArray(json) && Array.isArray((json as Record<string, unknown>)["roots"])
-      ? ((json as Record<string, unknown>)["roots"] as unknown[])
-      : [];
+  const record = typeof json === "object" && json !== null && !Array.isArray(json) ? (json as Record<string, unknown>) : {};
+  const list = Array.isArray(record["roots"]) ? (record["roots"] as unknown[]) : [];
+  const labels = isPlainObject(record["labels"]) ? record["labels"] : {};
   for (const item of list) {
     // Absoluteness is checked on the raw string: resolve() would silently
     // absolutize a relative entry against whatever cwd the app launched from.
@@ -279,8 +311,26 @@ export async function loadWorkspaces(): Promise<void> {
       // such mkdir: a missing volume must not grow a shadow directory.
       available = await mkdir(p, { recursive: true }).then(() => true).catch(() => false);
     }
-    entries.set(p, { available });
+    // Keyed by the string as stored, which save() writes resolved. A label
+    // that is not a string costs itself only.
+    const label = isPlainObject(labels[item]) ? labels[item] : {};
+    entries.set(p, {
+      available,
+      name: labelText(label["name"], NAME_MAX),
+      symbol: labelText(label["symbol"], SYMBOL_MAX),
+    });
   }
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// A stored or sent label, trimmed and capped, or null for nothing usable.
+function labelText(v: unknown, max: number): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim().slice(0, max);
+  return t === "" ? null : t;
 }
 
 // Guarantees the view boots with at least one folder to put a note in. Runs
@@ -315,7 +365,9 @@ export async function createManaged(name: string): Promise<string> {
   await writeFile(join(root, GITIGNORE), WORKSPACE_GITIGNORE, "utf8").catch((err) => {
     console.warn(`[workspaces] could not write ${GITIGNORE} in ${root}`, err);
   });
-  entries.set(resolve(root), { available: true });
+  // The name it was created under is the one every client shows, so a phone
+  // reads "Scratch" rather than the slug.
+  entries.set(resolve(root), { available: true, name: labelText(name, NAME_MAX), symbol: null });
   await save();
   return resolve(root);
 }
@@ -352,9 +404,25 @@ export async function attachExternal(path: string): Promise<{ root: string } | {
   if (reason) return { error: `cannot attach ${path}: ${reason}` };
   const conflict = nestingConflict(p);
   if (conflict) return { error: `cannot attach ${path}: nested with the workspace folder ${conflict}` };
-  entries.set(p, { available: true });
+  entries.set(p, unlabeled(true));
   await save();
   return { root: p };
+}
+
+// Sets the name and icon every client shows for a root (remote.md §5). The view
+// validates the icon key, since the icon set is the view's. The server only
+// caps both, as labels rather than names on disk. The docs root is refused: its
+// name is the app's, and it never persists. False when nothing changed, so the
+// caller does not tell the other clients about a write that was a no-op.
+export async function labelRoot(root: string, name: string, symbol: string): Promise<boolean> {
+  const r = assertRegisteredRoot(root);
+  if (kindOf(r) === "docs") throw new Error("the built-in documentation cannot be renamed");
+  const entry = entries.get(r)!;
+  const next = { name: labelText(name, NAME_MAX), symbol: labelText(symbol, SYMBOL_MAX) };
+  if (next.name === entry.name && next.symbol === entry.symbol) return false;
+  entries.set(r, { ...entry, ...next });
+  await save();
+  return true;
 }
 
 // Removes a root from the registry. This never touches the filesystem: Remove
@@ -382,11 +450,6 @@ export async function detachRoot(root: string): Promise<boolean> {
 // here; Remove from Ledge (detachRoot) is their only verb.
 export const WORKSPACE_TRASH = join(APP_HOME, ".ledge-trash");
 const ENTRY_META = "workspace.json";
-
-// Display strings from the view are capped rather than refused: they are
-// labels, never names on disk.
-const NAME_MAX = 200;
-const SYMBOL_MAX = 64;
 
 interface EntryMeta {
   name: string;
@@ -543,7 +606,13 @@ export async function restoreTrashedWorkspace(
   } catch (err) {
     return { error: `restore failed: ${err instanceof Error ? err.message : String(err)}` };
   }
-  entries.set(next, { available: true });
+  // The label comes back with the folder, so every client shows the name it
+  // was deleted under.
+  entries.set(next, {
+    available: true,
+    name: labelText(meta.name, NAME_MAX),
+    symbol: labelText(meta.symbol, SYMBOL_MAX),
+  });
   await save();
   await unlink(join(dir, ENTRY_META)).catch(() => {});
   await rmdir(dir).catch(() => {});

@@ -817,9 +817,9 @@ snapshot at construction time through `lib/settings.ts`.
   name and answers with the migration hint rather than "unknown section".
 - **Settings are not session state, and neither is the registry.** Four
   ownership shapes in the app home. `settings.jsonc` is
-  *human-edited preference*. `.layout.json` — which workspaces exist, their
-  names and icons, which folder each owns, the pane trees, and which folders
-  the note browser has open in each — is *machine-written state* whose bytes
+  *human-edited preference*. `.layout.json` — the order of the workspaces
+  in one client's strip, which folder each owns, the pane trees, and which
+  folders the note browser has open in each — is *machine-written state* whose bytes
   Bun owns (`bun/layout.ts`:
   temp-plus-rename like a note save, and a JSON-parse gate so the view
   cannot use the fixed-name write as arbitrary byte storage) but whose
@@ -828,8 +828,11 @@ snapshot at construction time through `lib/settings.ts`.
   is comes from the connection's handshake, never from the call, so the file
   is a map of client id to layout and a phone cannot inherit a desktop's
   three-pane split. `.workspaces.json` — the set of
-  registered roots — is machine-written AND Bun-shaped, because it is a
-  trust artifact (§2): the view never sees its bytes at all.
+  registered roots, and the name and icon each one shows — is machine-written AND Bun-shaped, because it is a
+  trust artifact (§2): the view never sees its bytes at all. Which workspaces
+  exist and what they are called is therefore the registry's, shared by every
+  client of that server (remote.md §5). A layout still saves each workspace's
+  name and icon, as the fallback for a root the registry has no label for.
   `.client/window.json` — where the window was last left — is machine-written
   and Bun-shaped for a duller reason (`bun/windowFrame.ts`): the window is not
   a thing the view has an opinion about, so no RPC entry exists for it and it
@@ -850,7 +853,10 @@ snapshot at construction time through `lib/settings.ts`.
   UNAVAILABLE one (unmounted volume) is held dormant — dropped from the
   session, carried verbatim through saves — and restored tabs only ever
   open paths their own folder's boot `noteList` returned (paths stay opaque
-  handles, §2; a tab can never cross into another workspace's folder). The
+  handles, §2; a tab can never cross into another workspace's folder). A
+  registered root the layout never had gains a workspace at the end of the
+  strip (`store.tsx` syncWithRegistry), so a client whose layout predates a
+  workspace still shows it. The
   open folders are pruned against that same boot list, on the same rule: an
   entry naming a folder no note is in any more would never match a row, so
   it restores closed rather than riding the file forever. They are also the

@@ -720,6 +720,7 @@ async function buildWindow(want: string, frame?: Rect, docs?: { page: string }):
       sessionStale: (p) => rpc?.send.sessionStale(p),
       presence: (p) => rpc?.send.presence(p),
       notesChanged: (p) => rpc?.send.notesChanged(p),
+      workspacesChanged: (p) => rpc?.send.workspacesChanged(p),
       openExternal: (p) => rpc?.send.openExternal(p),
       vaultChanged: (p) => rpc?.send.vaultChanged(p),
       menuCommand: (p) => rpc?.send.menuCommand(p),

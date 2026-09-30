@@ -39,6 +39,7 @@ function fakeBridge(attach: AttachResult = attachResult({})) {
     create: async () => "/ws/created",
     attach: async () => attach,
     detach: async () => true,
+    label: async () => {},
     pickFolder: async () => null,
     trash: async () => ({ id: "managed", error: null }),
     trashList: async () => [],

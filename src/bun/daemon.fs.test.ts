@@ -312,6 +312,32 @@ describe("every push is addressed", () => {
     expect(got(mac.seen, "vaultChanged").length).toBe(1);
   });
 
+  // Everyone but the caller: every client's strip lists every registered root
+  // under its label (remote.md §5), and the client that made the change
+  // already shows it. Driven through the daemon, since `others` is routing
+  // only the code holding the connections can do.
+  test("a workspace one client creates or renames reaches the others, labeled, and not the one that did it", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await joined(socketPath, "mac-1");
+    const phone = await joined(socketPath, "phone-1");
+
+    const { root } = await mac.conn.requests.workspaceCreate({ name: "Anypost" });
+    expect(await until(() => got(phone.seen, "workspacesChanged").length === 1)).toBe(true);
+    const listed = (await phone.conn.requests.workspaceList({})).workspaces.find((w) => w.root === root);
+    expect(listed).toMatchObject({ name: "Anypost", kind: "managed", available: true });
+
+    await mac.conn.requests.workspaceLabel({ root, name: "Anypost Ops", symbol: "star" });
+    expect(await until(() => got(phone.seen, "workspacesChanged").length === 2)).toBe(true);
+    const relabeled = (await phone.conn.requests.workspaceList({})).workspaces.find((w) => w.root === root);
+    expect(relabeled).toMatchObject({ name: "Anypost Ops", symbol: "star" });
+
+    // A label that changed nothing tells nobody.
+    await mac.conn.requests.workspaceLabel({ root, name: "Anypost Ops", symbol: "star" });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(got(phone.seen, "workspacesChanged").length).toBe(2);
+    expect(got(mac.seen, "workspacesChanged")).toEqual([]);
+  });
+
   // Addressed: a run event is keyed by a run id, and only the panel that
   // minted that id can use it. On any other client it is an event about a
   // block that is not on screen.

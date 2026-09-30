@@ -32,7 +32,7 @@ import { barFaceOf, type BarFace } from "./lib/nativeBridge";
 import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink, type ExternalOpenInfo, type FolderDeleted, type FolderRenamed, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
-import { configureWorkspaces, recordWorkspaceKinds } from "./workspace/channel";
+import { configureWorkspaces, dispatchWorkspacesChanged, recordWorkspaceKinds } from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureSpelling } from "./editor/spelling";
 import { configureCli } from "./lib/cli";
@@ -166,6 +166,9 @@ class FakeStore {
   // `attached` is the registry: the subset the app may see.
   roots = new Map<string, RootData>();
   attached: string[] = [];
+  // The registry's labels (bun/workspaces.ts labelRoot), keyed by root. They
+  // leave with the registry line, and createManaged and a restore set them.
+  labels = new Map<string, { name?: string; symbol?: string }>();
   private clock = 1_700_000_000_000;
 
   private tick(): number {
@@ -190,6 +193,7 @@ class FakeStore {
     const i = this.attached.indexOf(root);
     if (i < 0) return false;
     this.attached.splice(i, 1);
+    this.labels.delete(root);
     return true; // the data stays: detach never deletes
   }
 
@@ -206,6 +210,7 @@ class FakeStore {
     for (let n = 2; this.deletedWorkspaces.some((d) => d.id === id); n += 1) id = `${folder}-${n}`;
     this.roots.delete(root);
     this.attached = this.attached.filter((r) => r !== root);
+    this.labels.delete(root);
     this.deletedWorkspaces.unshift({ id, name, symbol, deletedAt: this.tick(), folder: root, data });
     return { id, error: null };
   }
@@ -235,6 +240,7 @@ class FakeStore {
     }
     this.roots.set(root, entry.data);
     this.attach(root);
+    this.labels.set(root, { name: entry.name, ...(entry.symbol ? { symbol: entry.symbol } : {}) });
     return { root, name: entry.name, symbol: entry.symbol, error: null };
   }
   deleteTrashedWorkspace(id: string): boolean {
@@ -253,7 +259,14 @@ class FakeStore {
             ? "managed"
             : "external",
       available: true,
+      ...this.labels.get(root),
     }));
+  }
+
+  label(root: string, name: string, symbol: string): void {
+    if (!this.attached.includes(root)) throw new Error(`not a registered workspace root: ${root}`);
+    if (root === DOCS) throw new Error("the built-in documentation cannot be renamed");
+    this.labels.set(root, { name, symbol });
   }
 
   // The real store's read-only gate (assertWritableRoot) in fake form. Every
@@ -270,6 +283,7 @@ class FakeStore {
     let root = `/harness/${base}`;
     for (let n = 2; this.roots.has(root); n += 1) root = `/harness/${base}-${n}`;
     this.attach(root);
+    this.labels.set(root, { name });
     return root;
   }
 
@@ -942,6 +956,7 @@ configureWorkspaces({
     return { root: path, kind: path === EXTERNAL ? "external" : "managed", error: null };
   },
   detach: async (root) => store.detach(root),
+  label: async (root, name, symbol) => store.label(root, name, symbol),
   pickFolder: async () => (FAKING_IOS ? null : EXTERNAL),
   trash: async (root, name, symbol) => store.trashRoot(root, name, symbol),
   trashList: async () => store.trashedWorkspaces(),
@@ -1499,6 +1514,10 @@ declare global {
       // spec makes a store.seed visible to the app's lists, and it is the same
       // refresh a real external write triggers.
       notesChanged: (root: string) => void;
+      // Simulate the workspacesChanged push: another client changed the
+      // registry. A spec edits `store` (attach, labels, detach) first, the way
+      // the other client's call would have, then sends this.
+      workspacesChanged: () => void;
       // The wire dropping (remote.md §7). This app's own Bun side pushes it in
       // the real thing, so there is no user action a spec could take to cause
       // it. Same reason externalOpen is here.
@@ -1560,6 +1579,7 @@ window.__harness = {
   runEnd: (id, exitCode) => dispatchRunEvent({ id, kind: "ended", exitCode }),
   externalOpen: (open) => dispatchExternalOpen(open),
   notesChanged: (root) => dispatchNotesChanged(root),
+  workspacesChanged: () => dispatchWorkspacesChanged(),
   runClaims: () => runClaims.map((ids) => [...ids]),
   holdRuns: (ids) => {
     runsStillRunning = [...ids];

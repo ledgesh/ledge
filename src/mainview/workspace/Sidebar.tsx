@@ -19,7 +19,7 @@ import { configureUi, uiHooks } from "@/commands/glue";
 import { jumpBadge, keyChip, tooltip } from "@/commands/format";
 import { workspaceSelectKey } from "@/commands/keys";
 import { targetAttrs } from "@/commands/target";
-import { deleteDeletedWorkspace, restoreDeletedWorkspace } from "./actions";
+import { deleteDeletedWorkspace, renameWorkspace, restoreDeletedWorkspace, setWorkspaceIcon } from "./actions";
 import {
   refreshTrashedWorkspaces,
   useTrashedWorkspaces,
@@ -272,7 +272,7 @@ function WorkspaceStrip({ stacked }: { stacked: boolean }) {
               onSelect={() => exec("workspace.open", { kind: "workspace", id: ws.id })}
               onBeginRename={() => setRenamingId(ws.id)}
               onEndRename={() => setRenamingId(null)}
-              onRename={(name) => dispatch({ type: "renameWorkspace", id: ws.id, name })}
+              onRename={(name) => renameWorkspace(ws, name, dispatch)}
               onRemove={() => exec("workspace.remove", { kind: "workspace", id: ws.id })}
               onDragStart={() => (draggingWs = ws.id)}
               onDragEnd={() => {
@@ -364,7 +364,10 @@ function WorkspaceStrip({ stacked }: { stacked: boolean }) {
         <IconPicker
           anchor={pickAnchor}
           current={state.workspaces.find((w) => w.id === pickingId)?.symbol ?? ""}
-          onPick={(symbol) => dispatch({ type: "setWorkspaceIcon", id: pickingId, symbol })}
+          onPick={(symbol) => {
+            const ws = state.workspaces.find((w) => w.id === pickingId);
+            if (ws) setWorkspaceIcon(ws, symbol, dispatch);
+          }}
           onClose={() => setPickingId(null)}
         />
       )}

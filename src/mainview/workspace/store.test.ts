@@ -2,7 +2,7 @@ import { test, expect, describe } from "bun:test";
 import { reducer, initialState, docsState, allDocIds, notesOf, openNotePaths, trashOf, type AppState, type Action } from "./store";
 import { firstLeaf, leafIds, findLeaf, countTabs, focusedTab, type SplitNode } from "./tree";
 import { DEFAULT_ICON } from "./icons";
-import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
+import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 
 // Every fresh test state starts with one workspace on this folder. Notes are
 // local to a workspace folder now, so test states are seeded per folder.
@@ -351,6 +351,73 @@ describe("workspaces", () => {
   test("selectWorkspace ignores an unknown id", () => {
     const s0 = initialState(FOLDER);
     expect(reducer(s0, { type: "selectWorkspace", id: "ghost" })).toBe(s0);
+  });
+});
+
+// The registry re-read (workspace/actions.ts syncWorkspaces): another client
+// created, removed or relabeled a workspace (remote.md §5).
+describe("syncWorkspaces", () => {
+  const info = (root: string, extra: Partial<WorkspaceRootInfo> = {}): WorkspaceRootInfo => ({
+    root,
+    kind: "managed",
+    available: true,
+    ...extra,
+  });
+  const sync = (roots: WorkspaceRootInfo[], notes: Record<string, NoteMeta[]> = {}): Action => ({
+    type: "syncWorkspaces",
+    roots,
+    notes,
+    trash: {},
+  });
+
+  test("a root no workspace shows is appended, unselected, with its lists", () => {
+    const n: NoteMeta = { path: "/ws/new/a.md", title: "A", mtimeMs: 1 };
+    const s = run(sync([info(FOLDER), info("/ws/new", { name: "Anypost" })], { "/ws/new": [n] }));
+    expect(s.workspaces.map((w) => [w.folder, w.name])).toEqual([
+      [FOLDER, "Scratch"],
+      ["/ws/new", "Anypost"],
+    ]);
+    expect(s.selectedId).toBe(s.workspaces[0]!.id);
+    expect(notesOf(s, "/ws/new")).toEqual([n]);
+    expect(focusedTab(s.workspaces[1]!)?.path).toBe("/ws/new/a.md");
+  });
+
+  test("a workspace whose root left the registry goes, and its neighbour is selected", () => {
+    const s0 = run(addWs(1), addWs(2), { type: "selectWorkspace", id: "" });
+    const mid = s0.workspaces[1]!;
+    const s1 = reducer({ ...s0, selectedId: mid.id }, sync([info(FOLDER), info("/ws/extra-2")]));
+    expect(s1.workspaces.map((w) => w.folder)).toEqual([FOLDER, "/ws/extra-2"]);
+    expect(selected(s1).folder).toBe("/ws/extra-2");
+    expect("/ws/extra-1" in s1.notes).toBe(false);
+  });
+
+  test("a label renames and re-icons; an unknown icon key is ignored", () => {
+    const s = run(sync([info(FOLDER, { name: "Home", symbol: "star" })]));
+    expect([selected(s).name, selected(s).symbol]).toEqual(["Home", "star"]);
+    const t = reducer(s, sync([info(FOLDER, { name: "Home", symbol: "no-such-icon" })]));
+    expect(selected(t).symbol).toBe("star");
+  });
+
+  test("a root without a label keeps the name this client had", () => {
+    expect(selected(run(sync([info(FOLDER)]))).name).toBe("Scratch");
+  });
+
+  test("nothing moved gives back the same state", () => {
+    const s = run();
+    expect(reducer(s, sync([info(FOLDER)]))).toBe(s);
+  });
+
+  // A server always has a folder (bun/workspaces.ts ensureDefault), so an
+  // empty list is a read that failed.
+  test("an empty registry, or one that would empty the strip, changes nothing", () => {
+    const s = run(addWs(1));
+    expect(reducer(s, sync([]))).toBe(s);
+    expect(reducer(s, sync([info("/elsewhere", { available: false })]))).toBe(s);
+  });
+
+  test("unavailable roots and the docs root gain no workspace", () => {
+    const s = run(sync([info(FOLDER), info("/ws/gone", { available: false }), info("/docs", { kind: "docs" })]));
+    expect(s.workspaces.map((w) => w.folder)).toEqual([FOLDER]);
   });
 });
 

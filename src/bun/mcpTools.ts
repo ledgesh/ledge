@@ -259,7 +259,7 @@ export const ledgeTools: McpTool[] = [
   {
     name: "list_workspaces",
     description:
-      "List the workspaces Ledge knows: each is a folder of Markdown notes. Returns the root path (the `workspace` argument other tools take), the kind (a Ledge-managed folder, an attached external one, or `docs` — Ledge's built-in documentation, readable like any workspace but refusing every write), and whether it is on disk right now.",
+      "List the workspaces Ledge knows: each is a folder of Markdown notes. Returns the root path (the `workspace` argument other tools take), the name and icon the app shows for it when one was set, the kind (a Ledge-managed folder, an attached external one, or `docs` — Ledge's built-in documentation, readable like any workspace but refusing every write), and whether it is on disk right now.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     handler: async () => {
       await loadWorkspaces();

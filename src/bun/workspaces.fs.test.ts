@@ -26,6 +26,7 @@ import {
   detachRoot,
   ensureDefault,
   expandHome,
+  labelRoot,
   listTrashedWorkspaces,
   listWorkspaceRoots,
   loadWorkspaces,
@@ -71,7 +72,7 @@ describe("createManaged", () => {
     expect((await stat(root)).isDirectory()).toBe(true);
     await loadWorkspaces(); // reload from disk: the registration survived
     expect(userRoots()).toEqual([root]);
-    expect(userList()).toEqual([{ root, kind: "managed", available: true }]);
+    expect(userList()).toEqual([{ root, kind: "managed", available: true, name: "Shipping Notes" }]);
   });
 
   test("the same name twice enumerates instead of sharing a folder", async () => {
@@ -226,6 +227,73 @@ describe("detachRoot", () => {
   });
 });
 
+describe("labelRoot", () => {
+  // The label is what every client's strip shows for a root (remote.md §5), so
+  // it lives in the registry beside the root rather than in any one client's
+  // layout.
+  test("stores the name and icon, and they survive a reload", async () => {
+    const root = await createManaged("Research");
+    expect(await labelRoot(root, "  Anypost ", "flask")).toBe(true);
+    await loadWorkspaces();
+    expect(userList()).toEqual([{ root, kind: "managed", available: true, name: "Anypost", symbol: "flask" }]);
+  });
+
+  test("an unchanged label is no write, so no client is told about one", async () => {
+    const root = await createManaged("Research");
+    expect(await labelRoot(root, "Research", "")).toBe(false);
+    expect(await labelRoot(root, "Research", "flask")).toBe(true);
+    expect(await labelRoot(root, "Research", "flask")).toBe(false);
+  });
+
+  test("caps both strings rather than refusing them: they are labels, not names on disk", async () => {
+    const root = await createManaged("Research");
+    await labelRoot(root, "n".repeat(500), "s".repeat(500));
+    const [info] = userList();
+    expect(info!.name).toHaveLength(200);
+    expect(info!.symbol).toHaveLength(64);
+  });
+
+  test("refuses an unregistered root and the docs root", async () => {
+    await expect(labelRoot(join(APP_HOME, "nope"), "x", "")).rejects.toThrow(/not a registered workspace root/);
+    await expect(labelRoot(DOCS_ROOT, "x", "")).rejects.toThrow(/cannot be renamed/);
+  });
+
+  test("leaves with the registry line: a detach drops it", async () => {
+    const ext = await externalDir();
+    await attachExternal(ext);
+    await labelRoot(ext, "Project", "code");
+    await detachRoot(ext);
+    await attachExternal(ext);
+    expect(userList()).toEqual([{ root: ext, kind: "external", available: true }]);
+  });
+
+  test("labels sit beside roots in the file, so a build that predates them still reads every root", async () => {
+    const root = await createManaged("Research");
+    await labelRoot(root, "Anypost", "flask");
+    const json = JSON.parse(await readFile(WORKSPACES_PATH, "utf8"));
+    expect(json.version).toBe(1);
+    expect(json.roots).toEqual([root]);
+    expect(json.labels).toEqual({ [root]: { name: "Anypost", symbol: "flask" } });
+  });
+
+  test("a file without labels loads unlabeled, and a malformed label costs only itself", async () => {
+    const a = await createManaged("A");
+    const b = await createManaged("B");
+    await writeFile(WORKSPACES_PATH, JSON.stringify({ version: 1, roots: [a, b], labels: { [a]: { name: 7, symbol: "code" }, [b]: "junk" } }));
+    await loadWorkspaces();
+    expect(userList()).toEqual([
+      { root: a, kind: "managed", available: true, symbol: "code" },
+      { root: b, kind: "managed", available: true },
+    ]);
+    await writeFile(WORKSPACES_PATH, JSON.stringify({ version: 1, roots: [a, b] }));
+    await loadWorkspaces();
+    expect(userList()).toEqual([
+      { root: a, kind: "managed", available: true },
+      { root: b, kind: "managed", available: true },
+    ]);
+  });
+});
+
 describe("the workspace trash", () => {
   test("trashRoot moves the folder, notes and all, into the trash and deregisters it", async () => {
     const root = await createManaged("Research");
@@ -285,7 +353,9 @@ describe("the workspace trash", () => {
     const { id } = (await trashRoot(root, "My Research", "flask")) as { id: string };
     expect(await restoreTrashedWorkspace(id)).toEqual({ root, name: "My Research", symbol: "flask" });
     expect(await readFile(join(root, "plan.md"), "utf8")).toBe("# Plan\n");
-    expect(userList()).toEqual([{ root, kind: "managed", available: true }]);
+    // The label comes back with the folder, so every client shows the name it
+    // was deleted under.
+    expect(userList()).toEqual([{ root, kind: "managed", available: true, name: "My Research", symbol: "flask" }]);
     expect(await readdir(WORKSPACE_TRASH)).toEqual([]);
   });
 
@@ -383,7 +453,7 @@ describe("loadWorkspaces healing", () => {
     const root = await createManaged("Scratch");
     await rm(root, { recursive: true });
     await loadWorkspaces();
-    expect(userList()).toEqual([{ root, kind: "managed", available: true }]);
+    expect(userList()).toEqual([{ root, kind: "managed", available: true, name: "Scratch" }]);
     expect((await stat(root)).isDirectory()).toBe(true);
   });
 });

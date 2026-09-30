@@ -27,6 +27,8 @@ interface WorkspaceHandlers {
   // null root comes with the refusal in `error`.
   attach: (path: string) => Promise<AttachResult>;
   detach: (root: string) => Promise<boolean>;
+  // Sets the name and icon every client shows for a root (remote.md §5).
+  label: (root: string, name: string, symbol: string) => Promise<void>;
   // This client's own folder dialog, for the field `attach` sends. Null where
   // the user cancelled, or where this client has none (lib/shell.ts
   // picksFolders says so before this is called).
@@ -127,6 +129,31 @@ export function pickFolderPath(): Promise<string | null> {
 // Deregisters only. The folder and every note in it stay on disk.
 export function detachWorkspaceFolder(root: string): Promise<boolean> {
   return bridge().detach(root);
+}
+
+// Stores a workspace's name and icon on the server, where every other client
+// reads them. Best-effort: the label already shows here, and a server that
+// predates the method refuses it by name, which costs the other screens the
+// label and nothing else.
+export function labelWorkspaceFolder(root: string, name: string, symbol: string): Promise<void> {
+  return bridge().label(root, name, symbol).catch((err) => {
+    console.warn("[workspace] could not store the label", root, err);
+  });
+}
+
+// Another client changed the registry (rpc-schema workspacesChanged).
+// boot.tsx feeds the push in and App answers with workspace/actions.ts
+// syncWorkspaces. A subscriber set, like notes/channel.ts onNotesChanged: the
+// view reacts to this push rather than calling it.
+const registrySubs = new Set<() => void>();
+
+export function onWorkspacesChanged(fn: () => void): () => void {
+  registrySubs.add(fn);
+  return () => registrySubs.delete(fn);
+}
+
+export function dispatchWorkspacesChanged(): void {
+  for (const fn of registrySubs) fn();
 }
 
 // Moves a managed workspace's folder into the trash. The mirror below

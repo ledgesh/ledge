@@ -329,6 +329,8 @@ Nothing appears there when you are the only one connected. A computer that runs 
 
 A note saved on one device appears on the other without a refresh. Everything else a server owns is shared the same way: the same workspaces, the same trash, the same tags and backlinks, the same vault.
 
+Every device shows the same workspaces under the same names and icons. A workspace created, renamed, given an icon, or deleted on one device changes on the others straight away. What each device keeps for itself is the arrangement: the order of the workspaces, the split panes, and the open tabs, so a phone does not inherit a desktop's three panes.
+
 The one thing two devices cannot share is a note's terminal.
 
 ## Sharing a server with others

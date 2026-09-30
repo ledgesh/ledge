@@ -184,11 +184,18 @@ export interface TagHit extends NoteMeta {
  * `available: false` means the folder is registered but missing on disk right
  * now (an unmounted volume). The view then keeps its saved layout dormant
  * rather than pruning it.
+ *
+ * `name` and `symbol` are the label every client's strip shows for the root
+ * (remote.md §5), absent until one is set (workspaceLabel). The view then falls
+ * back to the name its own layout had, or to the folder's name, and to the
+ * default icon. A server that predates labels never sends them.
  */
 export interface WorkspaceRootInfo {
   root: string;
   kind: "managed" | "external" | "docs";
   available: boolean;
+  name?: string;
+  symbol?: string;
 }
 
 /**
@@ -316,6 +323,14 @@ export type LedgeRPC = {
       // every note in it stay on disk, re-attachable later. Sent by Remove from
       // Ledge on an attached workspace. The view refuses to remove the last one.
       workspaceDetach: { params: { root: string }; response: { ok: boolean } };
+      // Set the name and icon every client shows for a root (remote.md §5).
+      // Sent on a rename or an icon pick, on the Undo of Remove from Ledge, and
+      // once at boot for a root the registry has no label for yet, carrying the
+      // one this client's saved layout had. `symbol` is an icon key the view
+      // has checked; the server caps both strings and never reads them as
+      // paths. Refused for the docs root. The other clients are pushed
+      // workspacesChanged when the label moved.
+      workspaceLabel: { params: { root: string; name: string; symbol: string }; response: { ok: boolean } };
       // Delete a managed workspace: Bun moves its folder into the app home's
       // .ledge-trash and deregisters it (architecture.md §3). `name` and
       // `symbol` are display strings stored with the entry, so the trash and a
@@ -1224,6 +1239,15 @@ export type LedgeRPC = {
       // stays as the belt for a watcher that misses, since an unmounted
       // volume's root is not watched until the next boot.
       notesChanged: { root: string };
+      // The workspace registry changed: a root was created, attached, removed,
+      // deleted or restored, or had its label set (workspaceLabel). Pushed to
+      // every client except the one whose call changed it, which already shows
+      // the change and would only race its own dispatch. The view re-reads
+      // workspaceList and brings its strip in line: a new root gains a
+      // workspace, a gone one loses its workspace, and labels follow the
+      // registry (workspace/actions.ts syncWorkspaces). No payload, since the
+      // re-read is one round trip and a delta that missed one would stay wrong.
+      workspacesChanged: {};
       // A CLI open request arrived while the app is running: the app-home
       // watcher saw the request file, and bun/openRequest.ts validated it. Same
       // payload as openRequestTake's answer. The view selects the workspace

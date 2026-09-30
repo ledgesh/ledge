@@ -29,9 +29,9 @@ import { LOCAL_HOST } from "../shared/frontmatter";
 import { configureStoreUi, flushAll, folderOf, onNoteEdited, paramsOf } from "@/notes/store";
 import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
 import { refreshWikilinks } from "@/editor/livePreview";
-import { refreshFolder } from "@/workspace/actions";
+import { refreshFolder, syncWorkspaces } from "@/workspace/actions";
 import { subscribeExpansion } from "@/notes/expansion";
-import { docsFolder, workspaceKind } from "@/workspace/channel";
+import { docsFolder, onWorkspacesChanged, workspaceKind } from "@/workspace/channel";
 import { allDocIds, docsLanding, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
 import { findTabBy, focusedDocId, tabPaths } from "@/workspace/tree";
@@ -376,6 +376,8 @@ function Shell() {
   activeDocRef.current = activeDocId;
   // The wikilink handlers below resolve against the store's current note
   // lists. The bridge registration is a stable closure, so a ref carries them.
+  // The registry re-read (workspace/actions.ts syncWorkspaces) reads it after
+  // its round trips for the same reason.
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -590,6 +592,13 @@ function Shell() {
       flushAll();
       flushLayout();
     };
+    // Which workspaces exist is the server's (remote.md §5), and a change
+    // another client made while this one was away sent a push that went
+    // nowhere, so each refresh re-reads the registry too. The manual's window
+    // shows one workspace and keeps no others.
+    const syncRegistry = () => {
+      if (!docsWindow()) void syncWorkspaces(() => stateRef.current, dispatch);
+    };
     // Coming back into the window re-reads the folders, so a note created or
     // deleted outside Ledge shows up. Every workspace's folder, not just the
     // selected one: switching workspaces does not leave the window, so a
@@ -599,6 +608,7 @@ function Shell() {
     // trash rides the same trip, because a note deleted or restored from a
     // shell should not leave a stale count.
     const refresh = () => {
+      syncRegistry();
       for (const folder of folders) void refreshFolder(folder, dispatch);
       // Open, unedited notes follow their files too: an agent may have
       // rewritten one while Ledge was in the background.
@@ -624,12 +634,15 @@ function Shell() {
     // like the focus refresh, so the whole sweep is one round trip (remote.md
     // §12) however many folders and tabs are open.
     const offRelink = onNotesRelink(refresh);
+    // Another client created, removed, renamed or re-iconed a workspace.
+    const offRegistry = onWorkspacesChanged(syncRegistry);
     return () => {
       window.removeEventListener("blur", flush);
       window.removeEventListener("pagehide", flush);
       window.removeEventListener("focus", refresh);
       offChanged();
       offRelink();
+      offRegistry();
     };
     // Keyed on the joined folder list, not the array identity: workspaces
     // re-render often and their folder set changes rarely.

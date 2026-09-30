@@ -73,6 +73,7 @@ import {
   ensureDefault,
   kindOf,
   listTrashedWorkspaces,
+  labelRoot,
   listWorkspaceRoots,
   loadWorkspaces,
   purgeTrashedWorkspaces,
@@ -123,6 +124,9 @@ export interface Audience {
   /** One client, by the id from its hello. The push is dropped when that client
    * is not connected, like any push with nobody attached. */
   to(client: string): ServerPush;
+  /** Every connected client but that one: the push for a change the client
+   * made itself and already shows (rpc-schema `workspacesChanged`). */
+  others(client: string): ServerPush;
   /** Whether that client is connected right now.
    *
    * Only run output needs the answer. Every other push describes state the next
@@ -731,6 +735,15 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
     syncWatchers(availableRoots(), (root) => push.all.notesChanged({ root }));
   }
 
+  // Every registry change `client` made re-syncs the watchers and tells the
+  // other clients, whose strips list every registered root (remote.md §5). Not
+  // `client` itself: it made the change, already shows it, and a re-read of its
+  // own would race the dispatch that put it there.
+  function registryMoved(client: string): void {
+    refreshWatchers();
+    push.others(client).workspacesChanged({});
+  }
+
   // Watch the app home for the CLI's open request (`ledge <title>` with the
   // app already running; bun/openRequest.ts). Its own watcher rather than one
   // of syncWatchers': roots and the app home have different lifecycles, and
@@ -937,33 +950,39 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
     }),
     workspaceCreate: async ({ name }) => {
       const root = await createManaged(name);
-      refreshWatchers();
+      registryMoved(client);
       return { root };
     },
     workspaceAttach: async ({ path }) => {
       const res = await attachExternal(path);
       if ("error" in res) return { root: null, kind: null, error: res.error };
-      refreshWatchers();
+      registryMoved(client);
       // Never "docs": attachExternal refuses the docs folder before the
       // idempotent-attach answer, so the cast below is safe.
       return { root: res.root, kind: kindOf(res.root) as "managed" | "external", error: null };
     },
     workspaceDetach: async ({ root }) => {
       const ok = await detachRoot(root);
-      refreshWatchers();
+      registryMoved(client);
       return { ok };
+    },
+    // No watcher to re-sync: a label changes no root. Only the other clients
+    // need telling, and only when something changed.
+    workspaceLabel: async ({ root, name, symbol }) => {
+      if (await labelRoot(root, name, symbol)) push.others(client).workspacesChanged({});
+      return { ok: true };
     },
     workspaceTrash: async ({ root, name, symbol }) => {
       const res = await trashRoot(root, name, symbol);
       if ("error" in res) return { id: null, error: res.error };
-      refreshWatchers();
+      registryMoved(client);
       return { id: res.id, error: null };
     },
     workspaceTrashList: async () => ({ items: await listTrashedWorkspaces() }),
     workspaceTrashRestore: async ({ id }) => {
       const res = await restoreTrashedWorkspace(id);
       if ("error" in res) return { root: null, name: "", symbol: "", error: res.error };
-      refreshWatchers();
+      registryMoved(client);
       return { ...res, error: null };
     },
     workspaceTrashDelete: async ({ id }) => ({ removed: await deleteTrashedWorkspace(id) }),

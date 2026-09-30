@@ -25,7 +25,7 @@ import {
 } from "./tree";
 import { DEFAULT_ICON, isIconKey } from "./icons";
 import { WELCOME_TITLE } from "./seeds";
-import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
+import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 
 export interface AppState {
   workspaces: Workspace[];
@@ -77,6 +77,78 @@ export function initialState(folder: string, notes: NoteMeta[] = [], trash: Tras
     notes: { [folder]: notes },
     trash: { [folder]: trash },
   };
+}
+
+// Bring the workspaces in line with the server's registry, by the table in
+// remote.md §5: a new root is appended on its newest note, a gone root's
+// workspace closes, and labels win over this client's names. An empty `roots`
+// is a failed read (a server always has a folder), and changes nothing. The
+// same state comes back when nothing moved.
+export function syncWithRegistry(
+  state: AppState,
+  roots: WorkspaceRootInfo[],
+  notes: Record<string, NoteMeta[]>,
+  trash: Record<string, TrashMeta[]>,
+): AppState {
+  if (roots.length === 0) return state;
+  const byRoot = new Map(roots.map((r) => [r.root, r]));
+  let changed = false;
+
+  const workspaces: Workspace[] = [];
+  for (const ws of state.workspaces) {
+    const info = byRoot.get(ws.folder);
+    if (!info) {
+      changed = true;
+      continue;
+    }
+    const name = info.name ?? ws.name;
+    const symbol = info.symbol && isIconKey(info.symbol) ? info.symbol : ws.symbol;
+    if (name !== ws.name || symbol !== ws.symbol) {
+      changed = true;
+      workspaces.push({ ...ws, name, symbol });
+    } else {
+      workspaces.push(ws);
+    }
+  }
+  // The strip never empties. Every workspace here gone from the registry at
+  // once is a registry this client cannot make sense of, not a reason to show
+  // nothing.
+  if (workspaces.length === 0) return state;
+
+  const nextNotes = { ...state.notes };
+  const nextTrash = { ...state.trash };
+  for (const ws of state.workspaces) {
+    if (byRoot.has(ws.folder)) continue;
+    delete nextNotes[ws.folder];
+    delete nextTrash[ws.folder];
+  }
+  const shown = new Set(state.workspaces.map((w) => w.folder));
+  for (const info of roots) {
+    if (!info.available || info.kind === "docs" || shown.has(info.root)) continue;
+    const list = notes[info.root] ?? [];
+    const newest = list[0];
+    const tab = newest ? makeNoteTab(newest.path, newest.title) : makeTab("scratch");
+    const symbol = info.symbol && isIconKey(info.symbol) ? info.symbol : DEFAULT_ICON;
+    workspaces.push(makeWorkspace(info.name ?? folderName(info.root), info.root, tab, symbol));
+    nextNotes[info.root] = list;
+    nextTrash[info.root] = trash[info.root] ?? [];
+    changed = true;
+  }
+  if (!changed) return state;
+
+  // The selected workspace went: select its neighbour, closeWorkspace's rule.
+  let selectedId = state.selectedId;
+  if (!workspaces.some((w) => w.id === selectedId)) {
+    const idx = Math.max(0, state.workspaces.findIndex((w) => w.id === selectedId));
+    selectedId = workspaces[Math.min(idx, workspaces.length - 1)]!.id;
+  }
+  return { ...state, workspaces, selectedId, notes: nextNotes, trash: nextTrash };
+}
+
+/** The name a workspace takes when the registry has none for its folder: the
+ * folder's last path segment, the name attaching it gives. */
+export function folderName(folder: string): string {
+  return folder.split("/").pop() || folder;
 }
 
 /**
@@ -133,6 +205,15 @@ export type Action =
   // `symbol` is the icon a workspace restored from the trash had; an unknown
   // key falls back to the default.
   | { type: "addWorkspace"; name: string; folder: string; note?: NoteMeta; symbol?: string }
+  // The registry re-read (workspace/actions.ts syncWorkspaces): see
+  // syncWithRegistry. `notes` and `trash` carry the lists of roots no
+  // workspace showed yet.
+  | {
+      type: "syncWorkspaces";
+      roots: WorkspaceRootInfo[];
+      notes: Record<string, NoteMeta[]>;
+      trash: Record<string, TrashMeta[]>;
+    }
   | { type: "closeWorkspace"; id: string }
   // A removed workspace came back through Undo, rebuilt from its snapshot
   // (workspace/persist.ts reviveWorkspace). It returns to its strip position
@@ -268,6 +349,9 @@ export function reducer(state: AppState, action: Action): AppState {
         trash: state.trash[action.folder] ? state.trash : { ...state.trash, [action.folder]: [] },
       };
     }
+
+    case "syncWorkspaces":
+      return syncWithRegistry(state, action.roots, action.notes, action.trash);
 
     case "reviveWorkspace": {
       const existing = state.workspaces.find((w) => w.folder === action.workspace.folder);

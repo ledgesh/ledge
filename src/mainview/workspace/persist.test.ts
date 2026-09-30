@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { NoteMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 import { initialState, reducer, type AppState } from "./store";
 import { findLeaf, firstLeaf, tabPaths, type LeafNode, type SplitNode } from "./tree";
-import { restoreLayout, restoredState, reviveWorkspace, serializeLayout, snapshotWorkspace } from "./persist";
+import { layoutLabels, restoreLayout, restoredState, reviveWorkspace, serializeLayout, snapshotWorkspace } from "./persist";
 import { DEFAULT_ICON } from "./icons";
 import { expandFolder, expandedIn, resetExpansion } from "../notes/expansion";
 
@@ -455,10 +455,11 @@ describe("self-healing", () => {
     for (const text of [null, "{not json", '"a string"', JSON.stringify({ version: 3, workspaces: [] })]) {
       expect(restoreLayout(text, ROOTS, NOTES_BY, {})).toBeNull();
       // restoredState turns that into initialState's single-note boot on the
-      // first available folder.
+      // first available folder, selected, and every other registered root
+      // follows it (store.tsx syncWithRegistry).
       const s = restoredState(text, ROOTS, NOTES_BY, {});
-      expect(s.workspaces.length).toBe(1);
-      expect(s.workspaces[0].folder).toBe(FOLDER);
+      expect(s.workspaces.map((w) => w.folder)).toEqual([FOLDER, FOLDER2]);
+      expect(s.selectedId).toBe(s.workspaces[0]!.id);
       expect(firstLeaf(s.workspaces[0].root).tabs[0].path).toBe("/r/alpha.md");
     }
   });
@@ -597,5 +598,81 @@ describe("self-healing", () => {
     const after = restoreLayout(text, ROOTS, NOTES_BY, {})!;
     const ws = after.workspaces[0];
     expect(findLeaf(ws.root, ws.focusedPaneId)).not.toBeNull();
+  });
+});
+
+// Which workspaces exist, and what they are called, is the server's registry
+// (remote.md §5). The layout keeps only how this client arranged them.
+describe("the registry at boot", () => {
+  const leaf = (tabs: string[]) => ({ kind: "leaf", tabs, activeIndex: 0 });
+  const onlyFirst = JSON.stringify({
+    version: 2,
+    selectedIndex: 0,
+    workspaces: [{ name: "Mine", symbol: "code", folder: FOLDER, expanded: [], root: leaf(["/r/alpha.md"]) }],
+  });
+
+  // The phone that connected once, when the server had one workspace, and
+  // came back after the Mac made two more.
+  test("a registered root the layout never had gains a workspace after the restored ones", () => {
+    const s = restoredState(onlyFirst, ROOTS, NOTES_BY, {});
+    expect(s.workspaces.map((w) => w.folder)).toEqual([FOLDER, FOLDER2]);
+    expect(s.workspaces[1]!.name).toBe("r2");
+    expect(s.workspaces[1]!.symbol).toBe(DEFAULT_ICON);
+    expect(firstLeaf(s.workspaces[1]!.root).tabs[0]!.path).toBeNull();
+    // The restored selection stands: a new workspace is not selected for you.
+    expect(s.selectedId).toBe(s.workspaces[0]!.id);
+    expect(s.notes[FOLDER2]).toEqual([]);
+  });
+
+  test("a new workspace opens on its newest note when it has one", () => {
+    const s = restoredState(onlyFirst, ROOTS, { ...NOTES_BY, [FOLDER2]: FILED2 }, {});
+    expect(tabPaths(s.workspaces[1]!.root)).toEqual(["/r2/projects/old.md"]);
+  });
+
+  test("the registry's label wins over the one the layout saved", () => {
+    const roots = [{ ...root(FOLDER), name: "Anypost", symbol: "star" }, { ...root(FOLDER2), name: "Ledge" }];
+    const s = restoredState(onlyFirst, roots, NOTES_BY, {});
+    expect(s.workspaces.map((w) => [w.name, w.symbol])).toEqual([
+      ["Anypost", "star"],
+      ["Ledge", DEFAULT_ICON],
+    ]);
+  });
+
+  test("an unavailable root and the docs root gain nothing", () => {
+    const roots = [root(FOLDER), root(FOLDER2, false), { root: "/docs", kind: "docs" as const, available: true }];
+    const s = restoredState(onlyFirst, roots, NOTES_BY, {});
+    expect(s.workspaces.map((w) => w.folder)).toEqual([FOLDER]);
+  });
+
+  describe("layoutLabels", () => {
+    const text = JSON.stringify({
+      version: 2,
+      selectedIndex: 0,
+      workspaces: [
+        { name: "Anypost", symbol: "star", folder: FOLDER, expanded: [], root: leaf([]) },
+        { name: "r2", symbol: DEFAULT_ICON, folder: FOLDER2, expanded: [], root: leaf([]) },
+      ],
+    });
+
+    test("offers the layout's name and icon for a root the registry has no label for", () => {
+      expect(layoutLabels(text, ROOTS)).toEqual([{ folder: FOLDER, name: "Anypost", symbol: "star" }]);
+    });
+
+    // The phone that booted first saved the folder's name. Sending it would
+    // overwrite "Anypost" before the Mac, which has it, ever sends it.
+    test("skips a workspace still showing its folder's name and the default icon", () => {
+      expect(layoutLabels(text, ROOTS).map((l) => l.folder)).not.toContain(FOLDER2);
+    });
+
+    test("never overwrites a label the server has, name or icon", () => {
+      expect(layoutLabels(text, [{ ...root(FOLDER), name: "Other" }, root(FOLDER2)])).toEqual([]);
+      expect(layoutLabels(text, [{ ...root(FOLDER), symbol: "code" }, root(FOLDER2)])).toEqual([]);
+    });
+
+    test("offers nothing for no layout, a broken one, or an unregistered folder", () => {
+      expect(layoutLabels(null, ROOTS)).toEqual([]);
+      expect(layoutLabels("{not json", ROOTS)).toEqual([]);
+      expect(layoutLabels(text, [root(FOLDER2)])).toEqual([]);
+    });
   });
 });

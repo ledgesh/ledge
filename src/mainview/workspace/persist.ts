@@ -36,7 +36,7 @@ import {
 } from "./tree";
 import { DEFAULT_ICON, isIconKey } from "./icons";
 import type { AppState } from "./store";
-import { initialState } from "./store";
+import { folderName, initialState, syncWithRegistry } from "./store";
 import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 import { expandedIn, seedExpansion } from "../notes/expansion";
 import { folderList } from "../notes/folders";
@@ -393,25 +393,67 @@ export function reviveWorkspace(snap: WorkspaceSnapshot, folder: string, notes: 
 }
 
 // The boot state: the saved session if it restores, else a fresh start on the
-// first available workspace folder. boot.tsx and the harness both come through
-// here, so the fallback rule lives here and not at every boot site. With no
-// available folder at all (Bun unreachable, or a registry healed to empty
-// before ensureDefault ran), the state has no folder: it renders but cannot
-// save, the same degradation the old boot had with no note list.
+// first available folder, then a workspace for every registered root the
+// layout lacks (store.tsx syncWithRegistry, remote.md §5). With no available
+// folder at all (Bun unreachable), the state has no folder: it renders but
+// cannot save. boot.tsx and the harness both come through here.
 export function restoredState(
   text: string | null,
   roots: WorkspaceRootInfo[],
   notesByFolder: Record<string, NoteMeta[]>,
   trashByFolder: Record<string, TrashMeta[]>,
 ): AppState {
-  const restored = restoreLayout(text, roots, notesByFolder, trashByFolder);
-  if (restored) return restored;
+  return syncWithRegistry(
+    restoreLayout(text, roots, notesByFolder, trashByFolder) ?? freshState(roots, notesByFolder, trashByFolder),
+    roots,
+    notesByFolder,
+    trashByFolder,
+  );
+}
+
+function freshState(
+  roots: WorkspaceRootInfo[],
+  notesByFolder: Record<string, NoteMeta[]>,
+  trashByFolder: Record<string, TrashMeta[]>,
+): AppState {
   // Never the docs root: a fresh start has to land somewhere a first note can
   // save, and the documentation folder is read-only. ensureDefault guarantees
   // a real folder exists whenever Bun was reachable at all.
   const first = roots.find((r) => r.available && r.kind !== "docs");
   const folder = first?.root ?? "";
   return initialState(folder, notesByFolder[folder] ?? [], trashByFolder[folder] ?? []);
+}
+
+// The labels this client's layout can give roots the server has no label for
+// at all, which boot.tsx sends (remote.md §5). An entry still showing the
+// folder's name and the default icon is skipped: sending it would overwrite a
+// name another client's layout has and has yet to send.
+export function layoutLabels(
+  text: string | null,
+  roots: WorkspaceRootInfo[],
+): Array<{ folder: string; name: string; symbol: string }> {
+  if (text === null) return [];
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!isRecord(json) || !Array.isArray(json.workspaces)) return [];
+  const unlabeled = new Set(
+    roots.filter((r) => r.kind !== "docs" && r.name === undefined && r.symbol === undefined).map((r) => r.root),
+  );
+  const out: Array<{ folder: string; name: string; symbol: string }> = [];
+  for (const raw of json.workspaces) {
+    if (!isRecord(raw) || typeof raw.folder !== "string" || !unlabeled.has(raw.folder)) continue;
+    unlabeled.delete(raw.folder);
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    const symbol = typeof raw.symbol === "string" && isIconKey(raw.symbol) ? raw.symbol : DEFAULT_ICON;
+    if (!name) continue;
+    if (name === folderName(raw.folder) && symbol === DEFAULT_ICON) continue;
+    out.push({ folder: raw.folder, name, symbol });
+  }
+  return out;
 }
 
 // --- the save side ----------------------------------------------------------

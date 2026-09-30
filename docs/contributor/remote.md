@@ -878,6 +878,7 @@ splits again, by machine:
 | ----- | ----- | ----- |
 | Notes, assets, `.ledge-trash` | server | unchanged |
 | Workspace registry (`.workspaces.json`) | server | the trust artifact for that machine |
+| Which workspaces exist, their names and icons | server | the registry's labels; see below |
 | Deleted workspaces (`~/.ledge/.ledge-trash`) | server | the folders are that machine's; `architecture.md` §3 |
 | Vault and locked notes (`.vault.json`) | server | §9 |
 | Profiles (`~/.config/ledge/profiles/`) | server | never transmitted, §10 |
@@ -895,7 +896,7 @@ splits again, by machine:
 | Window frame (`window.json`) | **client** | amends `architecture.md` §6 |
 | Clipboard, rich paste, pasted image bytes, link opening | **client** | §10 |
 | Whether the connection is up | **client** | §7, `CLIENT_PUSHES` |
-| Pane and tab layout (`.layout.json`) | server, keyed by client | see below |
+| Pane and tab layout, and the strip's order (`.layout.json`) | server, keyed by client | see below |
 
 **Settings split along the machine boundary.** `settings.jsonc` stays one
 file on the server and keeps the knobs that describe that machine. The
@@ -914,6 +915,40 @@ atomic write) and `workspace/persist.ts` still owns each value's shape. The
 key is per CLIENT and not per machine, which is what lets one Mac keep a
 different arrangement on every server it reaches: §8a mints a client id per
 connection, so selecting a server again restores what was left on it.
+
+**Which workspaces exist is the server's, and how they are arranged is the
+client's.** A workspace is a registered root, so the set of them is the
+registry, and every client of one server shows the same strip. The name and
+icon a workspace shows are labels in `.workspaces.json` beside its root
+(`bun/workspaces.ts` labelRoot), so a rename on the Mac renames the row on the
+phone. A layout keeps the rest: the strip's order, the panes, the open tabs,
+the open folders. The line runs there because the two failures differ. A phone
+that inherits a desktop's three-pane split is cramped, and a phone that cannot
+see a workspace the Mac made cannot reach those notes at all.
+
+| Event | What the other clients do |
+| --- | --- |
+| A root is created, attached, removed, deleted, restored, or relabeled | The server pushes `workspacesChanged` to every client but the one that did it, and each re-reads `workspaceList` |
+| The push was lost (the wire was down, the phone was suspended) | The focus and relink refresh re-reads `workspaceList` too, so the next one finds the change |
+| A root appears that the layout never had | A workspace for it is appended to the strip, unselected, on its newest note (`store.tsx` syncWithRegistry). The boot restore does the same, so a first connection opens on every workspace |
+| A root leaves the registry | Its workspace closes, and its neighbour takes the selection if it had it |
+| A root has a label | The workspace takes that name and icon |
+| A root has no label | The workspace keeps the name this client's layout had, or a new one takes the folder's name |
+
+The client that made the change is left out of the push because it already
+shows the change, and re-reading would race its own dispatch: an Undo that
+puts a workspace back at its old index would find the re-read had already
+appended it at the end.
+
+Labels arrived after layouts did, so a registry can have none while every
+client's layout names its workspaces. A client therefore sends its layout's
+name and icon at boot for each root the registry has no label for at all
+(`persist.ts` layoutLabels). A layout entry still showing the folder's name
+and the default icon is skipped, because it is what a client that never named
+the workspace saved, and sending it would overwrite the name that the client
+which did name it has yet to send. The labels sit beside `roots` in the file
+rather than in it, so a build that predates them still reads every root, and
+drops only the labels on its next save.
 
 **The id rides the handshake, not the call.** Identity is a property of the
 connection: a client cannot forget to send it, no handler needs a parameter it

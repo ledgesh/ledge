@@ -28,7 +28,13 @@ import {
 } from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
-import { configureWorkspaces, recordDailyRoot, recordWorkspaceKinds } from "./workspace/channel";
+import {
+  configureWorkspaces,
+  dispatchWorkspacesChanged,
+  labelWorkspaceFolder,
+  recordDailyRoot,
+  recordWorkspaceKinds,
+} from "./workspace/channel";
 import { configureClipboard } from "./lib/clipboard";
 import { configureSpelling } from "./editor/spelling";
 import { configureMenu, dispatchNativeCommand } from "./lib/menu";
@@ -44,7 +50,7 @@ import { holdSaves } from "./notes/store";
 import { resolveStrandedNotes } from "./workspace/editorPool";
 import { applyAppearance } from "./lib/theme";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/settings";
-import { configureLayout, restoredState } from "./workspace/persist";
+import { configureLayout, layoutLabels, restoredState } from "./workspace/persist";
 import { docsState } from "./workspace/store";
 // Imported here rather than in an entry point, because this is the file that
 // renders. A shell that forgot the import would build fine and open an
@@ -79,6 +85,7 @@ export const viewPush: ViewPush = {
   // remote.md §7).
   presence: ({ others }) => recordPresence(others),
   notesChanged: ({ root }) => dispatchNotesChanged(root),
+  workspacesChanged: () => dispatchWorkspacesChanged(),
   openExternal: (open) => dispatchExternalOpen(open),
   // The vault moved without the view driving it (idle auto-relock), or this is
   // the echo of a transition it did drive. Either way the mirrored state
@@ -296,6 +303,9 @@ export function bootView(requests: RequestClient): Promise<void> {
     create: (name) => requests.workspaceCreate({ name }).then((r) => r.root),
     attach: (path) => requests.workspaceAttach({ path }),
     detach: (root) => requests.workspaceDetach({ root }).then((r) => r.ok),
+    label: async (root, name, symbol) => {
+      await requests.workspaceLabel({ root, name, symbol });
+    },
     pickFolder: () => requests.folderPick({}).then((r) => r.path),
     trash: (root, name, symbol) => requests.workspaceTrash({ root, name, symbol }),
     trashList: () => requests.workspaceTrashList({}).then((r) => r.items),
@@ -507,4 +517,9 @@ async function boot(requests: RequestClient): Promise<void> {
       />
     </StrictMode>,
   );
+  // Labels the registry has none for yet, from this client's own layout
+  // (workspace/persist.ts layoutLabels), so the names this client always showed
+  // reach the other clients. After the render: the strip here shows them
+  // already. The manual's window read no layout.
+  if (!docsRoot) for (const l of layoutLabels(layout, roots)) void labelWorkspaceFolder(l.folder, l.name, l.symbol);
 }

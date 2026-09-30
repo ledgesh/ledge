@@ -61,6 +61,19 @@ describe("audienceOf", () => {
     expect(sent).toEqual(["phone:terminalExit"]);
   });
 
+  // A registry change is pushed to everyone but the client that made it,
+  // which already shows it (rpc-schema workspacesChanged).
+  test("others reaches every client but the one named", () => {
+    const sent: string[] = [];
+    const clients = new Map([
+      ["mac", recorder("mac", sent)],
+      ["phone", recorder("phone", sent)],
+      ["ipad", recorder("ipad", sent)],
+    ]);
+    audienceOf(clients, (held) => held).others("mac").workspacesChanged({});
+    expect(sent).toEqual(["phone:workspacesChanged", "ipad:workspacesChanged"]);
+  });
+
   // A drawer's bytes addressed at a window that closed have nowhere to go.
   // That is not a failure: the next window boots and re-reads the state those
   // bytes described.

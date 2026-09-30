@@ -182,7 +182,16 @@ describe("the schema's shape against the protocol version", () => {
   // the run on its own clock, as every build did before. A new client against
   // an old server finds it absent and does the same. Nothing was retyped,
   // made required, or narrowed. The pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "6bc63665c2e00b68" };
+  // Then workspaces the server names (remote.md §5): optional `name` and
+  // `symbol` on WorkspaceRootInfo, workspaceLabel, one new method, and
+  // workspacesChanged, one new push. An old client never reads the label and
+  // keeps the names its own layout had. A new client against an old server
+  // finds none, falls back to those same names, and has its workspaceLabel
+  // refused by name at the method check, which costs the label on the other
+  // screens and nothing else. The push is sessionStale's case: an old client
+  // drops the name and an old server never sends it. Nothing was retyped,
+  // made required, or narrowed. The pin moves and the version does not.
+  const PINNED = { protocol: 5, shape: "9e2d97a4d7203f74" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

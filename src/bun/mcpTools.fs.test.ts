@@ -46,15 +46,17 @@ beforeEach(async () => {
 });
 
 describe("list_workspaces", () => {
-  test("reflects the registry, kinds and availability included — the built-in docs root leads", async () => {
+  test("reflects the registry, kinds, availability and labels included — the built-in docs root leads", async () => {
     const out = await call("list_workspaces");
     expect(out).toEqual([
       // loadWorkspaces registers the docs root at every load, ahead of the
       // user's roots (bun/workspaces.ts). Agents can read those pages, and
       // `kind` flags them; every write to the root is refused.
       { root: resolve(DOCS_ROOT), kind: "docs", available: true },
-      { root: ROOT, kind: "managed", available: true },
-      { root: OTHER, kind: "managed", available: true },
+      // A created root carries the name it was created under, the label
+      // every client's strip shows (remote.md §5).
+      { root: ROOT, kind: "managed", available: true, name: "Notes" },
+      { root: OTHER, kind: "managed", available: true, name: "Other" },
     ]);
   });
 
