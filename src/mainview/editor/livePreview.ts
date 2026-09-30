@@ -741,6 +741,9 @@ const hotspotPlugin = ViewPlugin.fromClass(
   class {
     layer: HTMLDivElement;
     onScroll: () => void;
+    // What each hotspot element does, by its index in the layer. write()
+    // swaps these rather than the elements' listeners.
+    acts: (() => void)[] = [];
 
     constructor(readonly view: EditorView) {
       this.layer = document.createElement("div");
@@ -862,24 +865,33 @@ const hotspotPlugin = ViewPlugin.fromClass(
       s.left = `${m.rect.left}px`;
       s.width = `${m.rect.width}px`;
       s.height = `${m.rect.height}px`;
-      this.layer.textContent = "";
-      for (const spot of m.spots) {
+      // The elements are reused across measures, not rebuilt: a measure runs
+      // on every selection change and scroll, and a rebuilt element is a
+      // detached one to anything that found it a moment before (a tap in
+      // flight, a test's locator).
+      this.acts = m.spots.map((spot) => spot.act);
+      const els = this.layer.children;
+      while (els.length > m.spots.length) this.layer.lastElementChild!.remove();
+      for (let i = els.length; i < m.spots.length; i++) {
         const el = document.createElement("div");
         el.className = "ledge-hotspot";
-        el.style.left = `${spot.left}px`;
-        el.style.top = `${spot.top}px`;
-        el.style.width = `${spot.width}px`;
-        el.style.height = `${spot.height}px`;
-        el.title = spot.title;
         el.addEventListener("mousedown", (e) => {
           if (e.button !== 0) return;
           // Keep the editor's focus and caret where they are. The hotspot
           // acts on the click without editing.
           e.preventDefault();
-          spot.act();
+          this.acts[i]?.();
         });
         this.layer.appendChild(el);
       }
+      m.spots.forEach((spot, i) => {
+        const el = els[i] as HTMLElement;
+        el.style.left = `${spot.left}px`;
+        el.style.top = `${spot.top}px`;
+        el.style.width = `${spot.width}px`;
+        el.style.height = `${spot.height}px`;
+        el.title = spot.title;
+      });
     }
 
     destroy() {
