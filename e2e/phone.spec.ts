@@ -1717,11 +1717,6 @@ test.describe("making a code block without typing a backtick", () => {
 // is absent: its verb is in the palette and note-scoped, which the ▶'s is not
 // (interactions.md §1a).
 test.describe("running a block by finger", () => {
-  const palette = async (page: Page, query: string) => {
-    await page.getByRole("button", { name: /Go to Note/ }).tap();
-    await page.keyboard.type(`>${query}`);
-  };
-
   test.beforeEach(async ({ page }) => {
     await page.goto("/harness.html?shell=ios");
     await expect(page.getByRole("button", { name: /Toggle Sidebar/ })).toBeVisible();
@@ -1797,26 +1792,69 @@ test.describe("running a block by finger", () => {
     expect(group.x + group.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   });
 
-  test("the profile chip is not here, and Edit Note Profile… is", async ({ page }) => {
+  test("the profile chip is lit at rest, 44 points, and one tap opens the profile", async ({
+    page,
+  }) => {
     await page.keyboard.press("Meta+n");
     await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
     await page.keyboard.press("Meta+a");
     await page.keyboard.insertText("---\nprofile: petstore\n---\n# Petstore calls\n");
     await expect(page.locator(".ledge-fm-profile")).toBeVisible();
 
-    // Gone, not faded: an invisible 16-point button still takes every tap that
-    // lands on it, and this one sits in the middle of editable text.
-    await expect(page.locator('.ledge-ctl-group[data-block="fm"]')).toBeHidden();
+    // The caret is below the block and nothing hovers, which on a pointer
+    // client leaves the chip unlit. The palette entry is the only other path
+    // here, and nothing in the note points at it (interactions.md §1a).
+    const chip = page.locator('.ledge-ctl-group[data-block="fm"] .ledge-btn');
+    await expect(chip).toBeVisible();
+    const box = (await chip.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    // The target starts where the name ends, so a tap on the name still
+    // places the caret in it.
+    const name = (await page.locator(".ledge-fm-profile").boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(name.x + name.width - 1);
 
-    // Both of the chip's desktop paths are a pointer's (the chip itself, and
-    // ⌘-clicking the name), so the palette is the whole of this verb here.
-    // Nothing is left behind: the command is note-scoped, so it needs nothing
-    // pointed at first (interactions.md §1a).
-    await palette(page, "edit note profile");
-    const overlay = page.locator("div.fixed.inset-0.z-50");
-    await expect(overlay.getByText("Edit Note Profile…", { exact: true })).toHaveCount(1);
-    await page.keyboard.press("Enter");
+    await chip.tap();
     await expect(page.getByRole("dialog", { name: "Profile petstore" })).toBeVisible();
+  });
+
+  test("a frontmatter tag opens on a tap, and edits once the caret is beside it", async ({
+    page,
+  }) => {
+    await page.keyboard.press("Meta+n");
+    await expect(page.locator(".cm-line").first()).toHaveText("# Untitled");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.insertText("---\ntags: [roadmap, ops]\n---\n# Tagged\n");
+
+    // ⌘-click is the desktop's only way to follow one, and a finger has no ⌘.
+    // A tag the caret is not in takes the rendered #tag's hotspot instead
+    // (editor/frontmatter.ts tappableTag), so the tap never reaches the text.
+    const hotspot = page.locator('.ledge-hotspot[title="Click to show tagged notes"]');
+    await expect(hotspot).toHaveCount(2);
+
+    // With the caret touching a tag, that tag is text again: its hotspot goes
+    // and the other stays. The caret lands just inside the `]`, on `ops`.
+    await page.keyboard.press("Meta+ArrowUp");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("End");
+    await page.keyboard.press("ArrowLeft");
+    await expect(hotspot).toHaveCount(1);
+
+    await hotspot.tap();
+    await expect(drawer(page).filter({ hasText: "#roadmap" })).toBeVisible();
+  });
+
+  test("a grayed ▶ answers a tap with its reason", async ({ page }) => {
+    await noteWithBlock(page);
+    await page.evaluate(() => window.__harness.linkState("lost", "Lost the connection: host is down."));
+    const run = page.locator('[data-act="run"]');
+    await expect(run).toHaveAttribute("aria-disabled", "true");
+    // The reason was a tooltip, which a finger cannot raise, and a `disabled`
+    // button swallowed the tap. It reads in the notice strip now, as the chord's
+    // refusal does (blocks.ts setBusy).
+    await run.tap({ force: true });
+    await expect(page.getByText("so there is nowhere to run this", { exact: false })).toBeVisible();
+    expect((await page.evaluate(() => window.__harness.inlineRuns())).length).toBe(0);
   });
 });
 

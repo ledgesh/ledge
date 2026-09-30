@@ -85,6 +85,8 @@ import type { NoteMeta, TrashMeta } from "./channel";
 // the strip expires: it sits in the Trash section below and restores from
 // there, so the strip is a hint rather than a time limit on undoing.
 const UNDO_MS = 8000;
+/** How long a notice stays up, here and in App's shut-sidebar strip. */
+export const NOTICE_MS = UNDO_MS;
 
 // `stacked`: the sidebar is one scrolling column (workspace/Sidebar.tsx), so
 // the browser takes its natural height and its list scrolls with the column.
@@ -199,7 +201,7 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
   // temporary strips, so one constant covers them.
   useEffect(() => {
     if (!notice) return;
-    const t = setTimeout(() => setNotice(null), UNDO_MS);
+    const t = setTimeout(() => setNotice(null), NOTICE_MS);
     return () => clearTimeout(t);
   }, [notice]);
 

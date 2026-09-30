@@ -170,9 +170,9 @@ test("a block will not start a run at a machine that is not there", async ({ pag
   // Grayed with the reason in the tooltip, which is the repo's grammar for a
   // control that is refusing (interactions.md §4d, "Grayed, not absent"). The
   // reason names the machine (blocks.ts runOffline).
-  await expect(page.locator('[data-act="run"][disabled]')).toHaveCount(1);
-  await expect(page.locator('[data-act="run"][disabled]')).toHaveAttribute("title", /Not connected to/);
-  await expect(page.locator('[data-act="term"][disabled]')).toHaveCount(1);
+  await expect(page.locator('[data-act="run"][aria-disabled="true"]')).toHaveCount(1);
+  await expect(page.locator('[data-act="run"][aria-disabled="true"]')).toHaveAttribute("title", /Not connected to/);
+  await expect(page.locator('[data-act="term"][aria-disabled="true"]')).toHaveCount(1);
 
   // And the chord answers with a notice rather than doing nothing. A run is
   // sent with a `void` request and then listened for, so a run asked for at a
@@ -186,14 +186,14 @@ test("a block will not start a run at a machine that is not there", async ({ pag
 test("the run buttons come back with the wire", async ({ page }) => {
   await writeBlock(page);
   await drop(page);
-  await expect(page.locator('[data-act="run"][disabled]')).toHaveCount(1);
+  await expect(page.locator('[data-act="run"][aria-disabled="true"]')).toHaveCount(1);
 
   await reconnect(page);
 
   // The connection moving is invisible to the editor's own update cycle, so
   // the control layer has to be told (blocks.ts subscribeConnections). Without
   // that subscription this passes on the way down and never comes back up.
-  await expect(page.locator('[data-act="run"]:not([disabled])')).toHaveCount(1);
+  await expect(page.locator('[data-act="run"]:not([aria-disabled="true"])')).toHaveCount(1);
   await page.keyboard.press("Meta+Enter");
   await expect(page.locator(".ledge-status")).toHaveText("Running");
 });
@@ -209,7 +209,7 @@ test("a wire still being re-dialled does not gate anything", async ({ page }) =>
   // here does run, seconds late. Only "lost" gates the buttons (blocks.ts
   // linkDown), and "lost" also marks the panel unknown if the ladder runs out
   // (interactions.md §4d).
-  await expect(page.locator('[data-act="run"]:not([disabled])')).toHaveCount(1);
+  await expect(page.locator('[data-act="run"]:not([aria-disabled="true"])')).toHaveCount(1);
   await page.keyboard.press("Meta+Enter");
   await expect(page.locator(".ledge-status")).toHaveText("Running");
 

@@ -793,8 +793,8 @@ body {
 }
 /* A run button whose shell is mid-job. Dimmed rather than hidden, so the control
    stays where it was and reads as "not now" instead of vanishing under the
-   pointer. `disabled` already swallows the click. */
-.ledge-btn:disabled {
+   pointer. A press shows why in the notice strip (blocks.ts setBusy). */
+.ledge-btn[aria-disabled="true"] {
   opacity: 0.3;
   cursor: default;
 }
@@ -807,7 +807,7 @@ body {
    Hand-written CSS, which is why Tailwind's hoverOnlyWhenSupported never
    covered it: the tab strip's first-tap defect, one layer down. */
 @media (hover: hover) {
-  .ledge-btn:disabled:hover {
+  .ledge-btn[aria-disabled="true"]:hover {
     background: transparent;
   }
   .ledge-btn:hover {
@@ -875,17 +875,22 @@ body {
   .cm-line.ledge-code-top {
     padding-top: 30px;
   }
-  /* The profile chip is the one control here that goes the other way: absent,
-     with the palette carrying the verb (interactions.md §1a). It is a pointer
-     accelerator for ⌘-clicking the profile name, a chord a phone has not got
-     either, and `profile.open` (Edit Note Profile…) is note-scoped, so the
-     palette entry is as direct as the chip.
-
-     Nothing like that is true of the ▶, which acts on one block and would cost
-     a caret placement first. `display: none` and not a fade, because an
-     invisible 16-point button still takes every tap that lands on it. */
+  /* The profile chip, lit and 44 points like the ▶ (interactions.md §1a). The
+     compact rules above out-rank the generic ones here, so the size is restated.
+     The group is 48 tall and blocks.ts centres FM_CHIP_H (20) on the line, so
+     the lift is (48 - 20) / 2. The -6 cancels blocks.ts's gap after the name,
+     which a 44-point target does not need. */
   .ledge-ctl-group.ledge-fm-chip {
-    display: none;
+    margin-top: -14px;
+    margin-left: -6px;
+  }
+  .ledge-ctl-group.ledge-fm-chip .ledge-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .ledge-ctl-group.ledge-fm-chip .ledge-btn svg {
+    width: 16px;
+    height: 16px;
   }
   /* The output panel's pair, for the same reason and one worse: the ✕ interrupts
      a running command (blocks.ts cancels on dismiss), so a miss onto it is the

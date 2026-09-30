@@ -20,6 +20,7 @@ import {
 } from "@/terminal/channel";
 import { Sidebar } from "@/workspace/Sidebar";
 import { LinkNotice } from "@/workspace/LinkNotice";
+import { NOTICE_MS } from "@/notes/NoteBrowser";
 import { BacklinksPanel } from "@/workspace/BacklinksPanel";
 import { OutlinePanel } from "@/workspace/OutlinePanel";
 import { TagsPanel } from "@/workspace/TagsPanel";
@@ -176,6 +177,20 @@ function Shell() {
   // note behind it.
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const closeRightPanel = useCallback(() => setRightPanel(null), []);
+
+  // The notice strip is the note browser's, and a shut sidebar has no browser
+  // mounted, which is where a phone always is. A notice sent then shows in a
+  // strip under the header instead, on the browser's own timeout.
+  const [shutNotice, setShutNotice] = useState<string | null>(null);
+  const notify = useCallback((message: string) => {
+    if (sidebarOpenRef.current) uiHooks.showNotice?.(message);
+    else setShutNotice(message);
+  }, []);
+  useEffect(() => {
+    if (!shutNotice) return;
+    const t = setTimeout(() => setShutNotice(null), NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [shutNotice]);
 
   // Opens the Tags face drilled into one tag. Shared by the ui hook (panel and
   // overlay rows, via tag.open) and by the editor bridge (clicked #tags).
@@ -453,7 +468,7 @@ function Shell() {
       openProfileEditor: setProfileEditing,
       // The editor's refusal notices (a prompt fence in a locked note) land
       // on the browser's notice strip like every other neutral outcome.
-      notice: (message) => uiHooks.showNotice?.(message),
+      notice: notify,
       // Wikilinks resolve against the note's own workspace list, scoped the
       // way the browser and the overlays scope theirs. Both handlers stay
       // view-side: the resolved path is one Bun handed the store, and openNote
@@ -494,8 +509,8 @@ function Shell() {
     // The autosave outcome a user has to be told about: a save that displaced
     // another writer's version of the note into the trash. Same strip and the
     // same neutral tone as the bridge's notices above.
-    configureStoreUi({ notice: (message) => uiHooks.showNotice?.(message) });
-  }, [exec, runInTerminal, dispatch, showTag]);
+    configureStoreUi({ notice: notify });
+  }, [exec, runInTerminal, dispatch, showTag, notify]);
 
   // The update's notices (lib/updates.ts): the answer to this window's Check for
   // Updates…, and a finished download in every window. Same strip as above, with
@@ -842,6 +857,11 @@ function Shell() {
           (LinkNotice.tsx). Two of them at once would be the same sentence
           twice. */}
       {!sidebarOpen && <LinkNotice />}
+      {!sidebarOpen && shutNotice && (
+        <p role="status" className="shrink-0 border-b bg-muted/60 px-3 py-1 text-xs leading-snug text-muted-foreground">
+          {shutNotice}
+        </p>
+      )}
 
       <div ref={stackRef} className="flex min-h-0 flex-1 flex-col">
         {/* `relative` only where a drawer needs something to be absolute

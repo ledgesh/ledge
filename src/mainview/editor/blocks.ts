@@ -606,9 +606,10 @@ const BLOCK_NORUN = "This block is marked norun: it is here to read or copy, not
 const runOffline = (): string =>
   `Not connected to ${activeConnection().name}, so there is nowhere to run this.`;
 
-// Gray out a run button while its shell cannot take a block. The native
-// `disabled` stops the mousedown, so the click cannot queue anything and there
-// is no second code path to keep in step with the CSS.
+// Gray out a run button while its shell cannot take a block. `aria-disabled`
+// rather than `disabled`, because a disabled button swallows the tap, and a
+// phone has no hover to show the reason in the tooltip. iconButton answers a
+// press on a grayed button with that reason in the notice strip instead.
 //
 // `hostHint` names the target machine where no picker will interrupt: a
 // single-host note runs on that host silently, so the tooltip is the one place
@@ -624,7 +625,9 @@ function setBusy(
   asks: boolean,
 ): void {
   if (!btn) return;
-  btn.disabled = busy;
+  btn.setAttribute("aria-disabled", String(busy));
+  if (busy) btn.dataset.why = why;
+  else delete btn.dataset.why;
   const hints = [hostHint, asks ? "asks first" : null].filter(Boolean);
   btn.title = busy ? why : hints.length ? `${tooltip(id)}: ${hints.join(", ")}` : tooltip(id);
 }
@@ -635,7 +638,15 @@ function iconButton(markup: string, title: string, onDown: (e: MouseEvent) => vo
   b.title = title;
   b.innerHTML = markup;
   // mousedown, not click: run before the editor moves the selection or steals focus.
-  b.addEventListener("mousedown", onDown);
+  b.addEventListener("mousedown", (e) => {
+    // A grayed button (setBusy) says why instead of acting.
+    if (b.dataset.why) {
+      e.preventDefault();
+      notifyUser(b.dataset.why);
+      return;
+    }
+    onDown(e);
+  });
   return b;
 }
 

@@ -51,6 +51,7 @@ import { editProfile, isSessionStale, onSessionStaleChange, openTag, restartShel
 import { modClick } from "../commands/format";
 import { modHeld } from "../commands/keymap";
 import { titleOf } from "../commands/keys";
+import { isTouchPointer } from "../lib/viewport";
 import { textPosAtCoords } from "./clickPos";
 import { sessionIdFacet } from "./session";
 
@@ -189,6 +190,13 @@ function FM_TAG(): Decoration {
     attributes: { title: `${modClick()} to show tagged notes` },
   }));
 }
+// A finger has no ⌘, so on touch a tag the selection is not touching takes
+// the rendered #tag's grammar instead: `data-tag` puts it in livePreview.ts's
+// hotspot layer, where a tap opens the Tags panel without raising the
+// keyboard. A tap beside the tag puts the caret there, and then it edits.
+function tappableTag(tag: string): Decoration {
+  return Decoration.mark({ class: "ledge-fm-tag", attributes: { "data-tag": tag } });
+}
 // The line the parser refused, accented down its left edge (index.css). On a
 // narrow window the accent is what ties the message below to its own line.
 const PROBLEM = Decoration.line({ class: "ledge-fm ledge-fm-bad" });
@@ -302,6 +310,7 @@ function build(state: EditorState): DecorationSet {
     else byLine.set(p.line, [p.message]);
   }
   const ranges: Range<Decoration>[] = [];
+  const touch = isTouchPointer();
   for (let n = span.first; n <= span.last; n += 1) {
     const line = state.doc.line(n);
     const bad = byLine.get(n);
@@ -312,7 +321,10 @@ function build(state: EditorState): DecorationSet {
       const p = profileValueSpan(line.text);
       if (p) ranges.push(PROFILE().range(line.from + p.from, line.from + p.to));
       for (const t of tagsValueSpans(line.text)) {
-        ranges.push(FM_TAG().range(line.from + t.from, line.from + t.to));
+        const from = line.from + t.from;
+        const to = line.from + t.to;
+        const touched = state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+        ranges.push((touch && !touched ? tappableTag(t.tag) : FM_TAG()).range(from, to));
       }
       // side: 1 pins the widget after everything else at the line's end, so
       // the caret at end-of-line still sits before it and typing continues
@@ -343,8 +355,13 @@ const staleChanged = StateEffect.define<null>();
 
 const field = StateField.define<DecorationSet>({
   create: (state) => build(state),
+  // A caret move on touch changes which tags are tappable (tappableTag).
   update: (deco, tr) =>
-    tr.docChanged || tr.effects.some((e) => e.is(staleChanged)) ? build(tr.state) : deco,
+    tr.docChanged ||
+    tr.effects.some((e) => e.is(staleChanged)) ||
+    (tr.selection && isTouchPointer())
+      ? build(tr.state)
+      : deco,
   provide: (f) => EditorView.decorations.from(f),
 });
 

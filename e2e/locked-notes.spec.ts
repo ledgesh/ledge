@@ -79,10 +79,10 @@ test("a prompt fence in a locked note grays its run buttons with the reason; the
   // reason as its tooltip (the busy-button grammar, locking.md §7). The sh
   // block's pair stays live.
   await expect(page.locator('[data-act="run"]')).toHaveCount(2);
-  await expect(page.locator('[data-act="run"][disabled]')).toHaveCount(1);
-  await expect(page.locator('[data-act="term"][disabled]')).toHaveCount(1);
-  await expect(page.locator('[data-act="run"]:not([disabled])')).toHaveCount(1);
-  await expect(page.locator('[data-act="run"][disabled]')).toHaveAttribute(
+  await expect(page.locator('[data-act="run"][aria-disabled="true"]')).toHaveCount(1);
+  await expect(page.locator('[data-act="term"][aria-disabled="true"]')).toHaveCount(1);
+  await expect(page.locator('[data-act="run"]:not([aria-disabled="true"])')).toHaveCount(1);
+  await expect(page.locator('[data-act="run"][aria-disabled="true"]')).toHaveAttribute(
     "title",
     /Prompt blocks can't be run in locked notes/,
   );

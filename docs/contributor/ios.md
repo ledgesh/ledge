@@ -1807,10 +1807,10 @@ and it floats over nothing. It is transparent on touch rather than removed,
 because its 2px padding and 1px border are what put the glyph column 13px inside
 the card, where `editor/blocks.ts` puts the output panel's pair to line up.
 
-The profile chip is the one control in that layer that went the other way:
-absent, `display: none`, because Edit Note Profile… is note-scoped and its
-palette entry needs nothing pointed at first — which is not true of the ▶, and
-is the whole of why one is lit and the other is gone.
+The profile chip first went the other way: absent, `display: none`, because
+Edit Note Profile… is note-scoped and its palette entry needs nothing pointed at
+first. On a device nobody found that entry, so the chip is lit and 44 points
+like the ▶ (interactions.md §1a).
 
 `.ledge-btn:hover` moved behind `@media (hover: hover)` in the same pass. It is
 hand-written CSS, so Tailwind's `hoverOnlyWhenSupported` never covered it, and
