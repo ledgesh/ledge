@@ -7,7 +7,7 @@
 
 <h1 align="center">Ledge</h1>
 
-<p align="center">The notebook that runs code.<br>Markdown notes for developers and DevOps, on macOS, Linux, Windows, iPhone, and Android.</p>
+<p align="center">Runnable Markdown notes.<br>For developers and DevOps, on macOS, Linux, Windows, iPhone, and Android.</p>
 
 <p align="center">
   <a href="https://ledge.sh">Website</a> ·
@@ -24,7 +24,7 @@
   <img src="assets/readme/hero.gif" width="840" alt="A Ledge note whose shell, Python, and prompt blocks run in place, output streaming in beneath them">
 </p>
 
-Ledge is a Markdown notebook that runs the code in your notes. Press ⌘↩
+Ledge runs the code in your Markdown notes. Press ⌘↩
 (Ctrl+Enter on Linux and Windows) on a fenced block and its output streams in beneath it:
 shell commands, Python, Node, Ruby, PHP, and TypeScript out of the box, SQL
 and Redis against the database the note points at, and `prompt` blocks that
