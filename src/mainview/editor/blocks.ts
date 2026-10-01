@@ -558,11 +558,9 @@ class OutputWidget extends WidgetType {
     return it.wrap;
   }
 
-  // CodeMirror removed this widget (run dismissed, block deleted, note reloaded):
-  // drop the pooled terminal so it does not leak. Idempotent.
-  destroy() {
-    releaseInlineTerm(this.run.id);
-  }
+  // No destroy(): CodeMirror also removes a widget that scrolls out of the
+  // drawn viewport, and releasing there threw the output away. The terminal
+  // is released when its run leaves runsField (terminalLifetime below).
   // Let the browser own events inside the panel: xterm manages its own selection
   // and focus, and CodeMirror would otherwise treat a mousedown here as a click
   // into the document. The panel is contenteditable=false.
@@ -1205,6 +1203,29 @@ const decorationsField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+// The pooled terminals live as long as their runs: one is released when its
+// run is dismissed or replaced, or when the editor is destroyed. The ids are
+// kept here rather than read at destroy, because setState swaps the state
+// before the plugins go.
+const terminalLifetime = ViewPlugin.fromClass(
+  class {
+    ids: Set<string>;
+    constructor(view: EditorView) {
+      this.ids = new Set(view.state.field(runsField).map((r) => r.id));
+    }
+    update(u: ViewUpdate) {
+      const runs = u.state.field(runsField);
+      if (runs === u.startState.field(runsField)) return;
+      const now = new Set(runs.map((r) => r.id));
+      for (const id of this.ids) if (!now.has(id)) releaseInlineTerm(id);
+      this.ids = now;
+    }
+    destroy() {
+      for (const id of this.ids) releaseInlineTerm(id);
+    }
+  },
+);
+
 // --- Native -> web ---------------------------------------------------------
 
 export function handleRunEvent(
@@ -1328,6 +1349,7 @@ export function ledgeBlocks(): Extension {
   return [
     runsField,
     decorationsField,
+    terminalLifetime,
     overlayPlugin,
     // The chords, gated by the same client facts as the buttons above
     // (lib/shell.ts). A client that does not run blocks must not run one from a

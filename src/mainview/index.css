@@ -1165,6 +1165,10 @@ body {
 }
 .ledge-term-host {
   width: 100%;
+  /* xterm's screen has a fixed pixel width, and without containment it holds
+     the editor's content at the old width when the window narrows, so every
+     line wraps wide and is cut off at the window's edge until the next fit. */
+  contain: inline-size;
   /* The grid is always 24 rows tall and the live panel shows the rows the
      output has reached: editor/inlineTerm.ts sets the height (clip) and this
      hides the rest. */
