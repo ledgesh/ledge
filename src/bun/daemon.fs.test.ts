@@ -11,12 +11,14 @@
 // real ~/.ledge.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDaemon, connectToDaemon, IDLE_EXIT_NEVER, type Daemon } from "./daemon";
 import { closeWatchers } from "./watch";
 import { resetVaultForTests, VAULT_PATH } from "./vault";
+import { SETTINGS_PATH } from "./settings";
+import { staleSettingsNotice } from "../shared/settings";
 import { clientConnection } from "../shared/transport";
 import { BUILD_VERSION } from "../shared/version";
 import { PUSH_MESSAGES, type ServerPush } from "../shared/wire";
@@ -60,7 +62,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
-async function daemonIn(opts: { idleMs?: number; holdMs?: number } = {}) {
+async function daemonIn(opts: { idleMs?: number; holdMs?: number; retirePollMs?: number } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "ledge-daemon-unit-"));
   dirs.push(dir);
   const socketPath = join(dir, "server.sock");
@@ -70,6 +72,7 @@ async function daemonIn(opts: { idleMs?: number; holdMs?: number } = {}) {
     pidPath,
     idleMs: opts.idleMs ?? 60_000,
     ...(opts.holdMs === undefined ? {} : { holdMs: opts.holdMs }),
+    ...(opts.retirePollMs === undefined ? {} : { retirePollMs: opts.retirePollMs }),
     build: BUILD_VERSION,
   });
   started.push(d);
@@ -737,6 +740,58 @@ describe("a daemon nobody is using", () => {
     expect(existsSync(pidPath)).toBe(true);
     d.stop();
     await d.done;
+  });
+});
+
+// Settings apply when the server starts (architecture.md §6), and a daemon
+// outlives the app that quit to apply them. The file is touched rather than
+// rewritten: the mtime is what the daemon compares, and the contents stay as
+// the scratch home had them for the tests after these.
+describe("a daemon whose settings changed", () => {
+  const touchSettings = () => {
+    const later = new Date(Date.now() + 5_000);
+    utimesSync(SETTINGS_PATH, later, later);
+  };
+
+  test("says so to a client, and how it will pick them up", async () => {
+    const { socketPath } = await daemonIn({ idleMs: 60_000 });
+    const mac = await connect(socketPath, "mac-1");
+    await mac.ready;
+    expect((await mac.requests.settingsGet({})).stale).toBeUndefined();
+    touchSettings();
+    expect((await mac.requests.settingsGet({})).stale).toBe(staleSettingsNotice(true));
+    mac.close();
+  });
+
+  test("exits as soon as its last client goes, not a minute later", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 60_000, retirePollMs: 50 });
+    const mac = await connect(socketPath, "mac-1");
+    await mac.ready;
+    touchSettings();
+    mac.close();
+    const raced = await Promise.race([d.done.then(() => "exited"), new Promise((r) => setTimeout(() => r("still up"), 1_000))]);
+    expect(raced).toBe("exited");
+  });
+
+  test("waits out the ordinary window when nothing changed", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: 60_000, retirePollMs: 50 });
+    const mac = await connect(socketPath, "mac-1");
+    await mac.ready;
+    mac.close();
+    const raced = await Promise.race([d.done.then(() => "exited"), new Promise((r) => setTimeout(() => r("still up"), 400))]);
+    expect(raced).toBe("still up");
+  });
+
+  // A supervisor's daemon never idles out, so the notice asks for a restart.
+  test("stays up when it was started to stay, and asks to be restarted", async () => {
+    const { d, socketPath } = await daemonIn({ idleMs: IDLE_EXIT_NEVER, retirePollMs: 50 });
+    const mac = await connect(socketPath, "mac-1");
+    await mac.ready;
+    touchSettings();
+    expect((await mac.requests.settingsGet({})).stale).toBe(staleSettingsNotice(false));
+    mac.close();
+    const raced = await Promise.race([d.done.then(() => "exited"), new Promise((r) => setTimeout(() => r("still up"), 400))]);
+    expect(raced).toBe("still up");
   });
 });
 

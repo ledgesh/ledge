@@ -906,6 +906,17 @@ snapshot at construction time through `lib/settings.ts`.
   respawn or leave stale shells) — a standing tax on every future setting,
   paid to save one relaunch. Revisit only if editing settings becomes a
   frequent act, which for this set it is not.
+- **The server's launch is the daemon's, so the daemon notices an edit.**
+  The server half is read when the daemon starts, and the daemon outlives
+  the app that quit to apply an edit (remote.md §7). It records
+  `settings.jsonc`'s mtime at boot (`settingsStamp`). When its last client
+  leaves and the mtime has moved, an autostarted daemon skips the idle
+  minute and exits once nothing is running, so the relaunch dials a fresh
+  one. While other clients keep it up, `settingsGet` carries `stale`, the
+  notice the view shows once at boot; a supervised daemon's notice asks for
+  a restart instead. The daemon does not restart at connect time: the
+  connecting window's first dial would fail its boot, and a window that had
+  already taken the old snapshot would keep it.
 
 ## 6a. Per-note params (frontmatter) & profiles
 

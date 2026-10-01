@@ -1628,7 +1628,10 @@ server, the longest it will grant. Both ends apply `sessionHold` to the pair,
 because the two hellos cross rather than answering each other, so no grant can
 travel back inside the handshake that asked. When the last client goes, the
 daemon arms its idle timer for the furthest deadline any departed connection was
-granted, or `IDLE_EXIT_MS` if that is further out.
+granted, or `IDLE_EXIT_MS` if that is further out. A daemon whose
+`settings.jsonc` changed since it read the file uses `RETIRE_POLL_MS` in place
+of `IDLE_EXIT_MS`, so the client that quit to apply the edit finds a fresh
+server when it comes back (architecture.md §6). Holds still apply to it.
 
 Three rules make it a policy rather than a lever:
 

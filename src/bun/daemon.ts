@@ -95,7 +95,8 @@ export interface DaemonOpts {
   /** The ceiling on a client's session hold; `HOLD_MAX_MS` by default. */
   holdMs?: number;
   /** How often `retireWhenIdle` asks whether the run it is waiting on has
-   * ended; `RETIRE_POLL_MS` by default. */
+   * ended, and how long an idle daemon whose settings changed waits before
+   * exiting; `RETIRE_POLL_MS` by default. */
   retirePollMs?: number;
   build?: string;
   /** Run before an idle exit, after the timer has fired and found nothing to
@@ -179,7 +180,7 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   // log and apply the write a second time (wire.ts `Hello.instance`).
   const instance = crypto.randomUUID();
 
-  const server = await createServer({ push });
+  const server = await createServer({ push, exitsWhenIdle: idleMs > 0 });
 
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   // The latest moment any departed client asked to still find its sessions
@@ -324,6 +325,8 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
   // True while `beforeIdleExit` runs. `armIdleExit` stays quiet meanwhile,
   // and the exit path re-checks the clients once the hook returns.
   let leaving = false;
+  // Said once, not on every re-arm while a run keeps the daemon up.
+  let toldStale = false;
   function armIdleExit(): void {
     if (stopped || idleTimer || leaving || idleMs <= 0) return;
     // A hold applies only where there is something to hold. A client that asked
@@ -331,15 +334,24 @@ export async function startDaemon(opts: DaemonOpts = {}): Promise<Daemon> {
     // kept for it is the daemon nobody asked for that this timer exists to end
     // (`IDLE_EXIT_MS`, remote.md §7).
     const held = server.sessionsOpen() ? heldUntil - Date.now() : 0;
+    // A daemon whose settings.jsonc changed skips the ordinary window. A client
+    // that quits to apply its edit and opens again within the minute would
+    // otherwise find this process and its old snapshot (architecture.md §6).
+    const stale = server.settingsChanged();
+    const base = stale ? retirePollMs : idleMs;
     // The longer of the two, never the shorter: a hold is a deadline a client
     // asked to be given, and one that lands inside the ordinary window is
     // already satisfied by it.
-    const wait = Math.max(idleMs, held);
+    const wait = Math.max(base, held);
     // The wait logs as seconds once it is long enough to round without
     // misleading. Every hold in production is minutes; the shorter ones come
     // from tests.
-    if (wait !== idleMs) {
+    if (wait !== base) {
       console.error(`[daemon] holding sessions for ${wait >= 10_000 ? `${Math.round(wait / 1000)}s` : `${wait}ms`}`);
+    }
+    if (stale && !toldStale) {
+      toldStale = true;
+      console.error("[daemon] settings.jsonc changed since this daemon read it; exiting once idle");
     }
     idleTimer = setTimeout(async () => {
       idleTimer = null;

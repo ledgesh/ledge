@@ -377,6 +377,7 @@ async function boot(requests: RequestClient): Promise<void> {
   const notesByFolder: Record<string, NoteMeta[]> = {};
   const trashByFolder: Record<string, TrashMeta[]> = {};
   let settings: Settings = DEFAULT_SETTINGS;
+  let staleSettings: string | null = null;
   let layout: string | null = null;
   // Which window this view is in (remote.md §8a). Asked with the registry
   // rather than after it, because the answer decides which folders are worth
@@ -416,7 +417,10 @@ async function boot(requests: RequestClient): Promise<void> {
       .filter((w) => w.available && (!role.docs || w.kind === "docs"))
       .map((w) => w.root);
     [settings, layout, connections] = await Promise.all([
-      requests.settingsGet({}).then((r) => r.settings),
+      requests.settingsGet({}).then((r) => {
+        staleSettings = r.stale ?? null;
+        return r.settings;
+      }),
       requests.layoutGet({}).then((r) => r.text),
       requests.connectionList({}),
       ...available.map(async (folder) => {
@@ -463,7 +467,7 @@ async function boot(requests: RequestClient): Promise<void> {
     writeProfile: async (name, text) => {
       await requests.profileWrite({ name, text });
     },
-  });
+  }, staleSettings);
   // Straight after the settings snapshot lands and before the first render. A
   // theme setting can override what index.html stamped, and every editor and
   // terminal built below reads the resolved appearance (lib/theme.ts).

@@ -90,7 +90,8 @@ import { OPEN_REQUEST_PATH, takeOpenRequest } from "./openRequest";
 import { syncWatchers } from "./watch";
 import { readAsset, writePastedImage } from "./assets";
 import { bundledBun, interpretersFor, runnerFor } from "./runner";
-import { loadSettings, readSettingsFile, writeSettingsFile } from "./settings";
+import { loadSettings, readSettingsFile, settingsStamp, writeSettingsFile } from "./settings";
+import { staleSettingsNotice } from "../shared/settings";
 import {
   isExecutableFile,
   resolveShellArgs,
@@ -272,6 +273,10 @@ export interface LedgeServer {
    * wants the shell's cwd and exported variables; a client that is not gains
    * nothing from them. */
   sessionsOpen(): boolean;
+  /** Whether settings.jsonc changed after this process read it. The daemon
+   * asks when its last client goes, and exits early so the next client gets a
+   * server that read the new file (architecture.md §6). */
+  settingsChanged(): boolean;
   /** The last connection from `device` ended without asking for a hold, so
    * its unlock ends too (locking.md §3a). The daemon calls this, because
    * only the holder of the connections knows when a device's last one went.
@@ -400,15 +405,22 @@ const fromB64 = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
  * load registered, before the first noteList can arrive. `loadVault` lands the
  * salt, so vaultState answers "locked" vs "none" from the first call.
  */
-export async function createServer(deps: { push: Audience }): Promise<LedgeServer> {
+export async function createServer(deps: { push: Audience; exitsWhenIdle?: boolean }): Promise<LedgeServer> {
   const { push } = deps;
 
   // loadSettings parses settings.jsonc once, and this value serves for the
   // life of the process. Everything below reads it: the shell, the block
   // interpreters, the daily workspace, the trash TTL at the bottom, and the
-  // view's snapshot via settingsGet. Editing settings.jsonc takes effect at
-  // the next launch (architecture.md §6).
+  // view's snapshot via settingsGet. Editing settings.jsonc takes effect when
+  // this server next starts (architecture.md §6).
+  //
+  // The stamp is taken before the read, or after it when the read seeded the
+  // file. An edit landing mid-read then costs a needless restart, never a
+  // stale snapshot.
+  const stampBefore = settingsStamp();
   const settings = await loadSettings();
+  const settingsLoadedAt = stampBefore ?? settingsStamp();
+  const settingsChanged = (): boolean => settingsStamp() !== settingsLoadedAt;
   // Started now and awaited where shellEnv is built, so the login shell runs
   // while the loads below do (bun/loginEnv.ts).
   const loginEnv = resolveLoginEnv(settings.shell.path, process.env);
@@ -1418,7 +1430,9 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
     // half over the top before the view sees it (remote.md §5). A server has
     // no screen and nothing to say about font sizes, so the sections it does
     // not own are the defaults here.
-    settingsGet: () => ({ settings }),
+    // `stale` tells the view the file changed after this snapshot was taken,
+    // and what restarts the server with it (architecture.md §6).
+    settingsGet: () => (settingsChanged() ? { settings, stale: staleSettingsNotice(deps.exitsWhenIdle === true) } : { settings }),
     // Session layout, raw bytes both ways. The view owns the shape and the
     // self-healing; the server owns the file, the atomic write, and which
     // client's arrangement this is (bun/layout.ts). The client id comes from
@@ -1620,6 +1634,7 @@ export async function createServer(deps: { push: Audience }): Promise<LedgeServe
     // than by isBusy. A zsh sitting at a prompt is what a hold is for, and it
     // is what `running` above ignores.
     sessionsOpen: () => inlinePool.sessionsOpen() || terms.size > 0,
+    settingsChanged,
     relock(device) {
       if (!vaultOpenFor(device)) return;
       lockVaultFor(device);

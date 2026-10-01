@@ -685,3 +685,13 @@ function num(
   problems.push(`"${label}" must be a number between ${min} and ${max}`);
   return fallback;
 }
+
+// The view's notice when settings.jsonc changed after this server read it. An
+// autostarted daemon restarts on its own once no client is connected
+// (bun/daemon.ts); one a person or a supervisor started stays until stopped.
+export function staleSettingsNotice(exitsWhenIdle: boolean): string {
+  const how = exitsWhenIdle
+    ? "It applies once nothing is connected to this server: quit Ledge here and on any other device using it, then open it again."
+    : "Restart the server to apply it.";
+  return `The server's settings changed after it started, so the change is not applied yet. ${how}`;
+}

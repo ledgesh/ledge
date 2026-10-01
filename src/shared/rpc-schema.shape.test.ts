@@ -191,7 +191,10 @@ describe("the schema's shape against the protocol version", () => {
   // screens and nothing else. The push is sessionStale's case: an old client
   // drops the name and an old server never sends it. Nothing was retyped,
   // made required, or narrowed. The pin moves and the version does not.
-  const PINNED = { protocol: 5, shape: "9e2d97a4d7203f74" };
+  // Then settingsGet's response gained an optional `stale`, the notice for a
+  // settings file that changed after the server read it. An old client never
+  // reads it, and an old server never sends it, which shows no notice.
+  const PINNED = { protocol: 5, shape: "6e4a9f2e4f831523" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

@@ -46,6 +46,7 @@ import {
   clientSettingsTemplate,
   DEFAULT_SETTINGS,
   settingsTemplate,
+  staleSettingsNotice,
   THEMES,
   type SettingsHome,
   type Theme,
@@ -1198,6 +1199,9 @@ configureSettings(
       profiles.set(name, text);
     },
   },
+  // `?staleSettings=1` stands in for a server whose settings.jsonc changed
+  // after it read it (rpc-schema `settingsGet`).
+  new URLSearchParams(window.location.search).has("staleSettings") ? staleSettingsNotice(true) : null,
 );
 // The connection list, in memory. Two entries so the picker has something to
 // switch between, and on the Mac one of them refuses to open: falling back to

@@ -260,6 +260,8 @@ Settings (⌘,) has a tab for each column, Server and This app, and each tab is 
 
 A computer that runs the app is a server too. The app starts one of its own, so with no server added both columns are on this computer, and the Server tab edits this computer's file. Add a server and the left column moves there with your notes: the Server tab edits that machine's file, and so does "Edit Note Profile…".
 
+Server settings apply when the server starts. A server the app or a phone started restarts with the new file once nothing is connected to it, so quitting Ledge and opening it again applies a change. While another device is still connected, the server keeps the settings it started with, and Ledge says so when it opens. A server you started yourself, or one a service manager runs, applies them when you restart it.
+
 Profile values never cross the connection. A note names a profile and the server reads the file at spawn, so the secrets exist only where the commands run ([[Profiles and Secrets]]).
 
 Unlocking a locked note sends the passphrase to the server, which is the only machine that can use it ([[Note Locking]]). The vault and its idle relock timer stay there.

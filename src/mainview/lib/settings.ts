@@ -25,16 +25,25 @@ interface SettingsHandlers {
 // whole Settings before the boot snapshot arrives.
 let current: Settings = DEFAULT_SETTINGS;
 let handlers: SettingsHandlers | null = null;
+let stale: string | null = null;
 
 // Filled, because the snapshot may come from an older server (shared/settings.ts
-// withDefaults).
-export function configureSettings(snapshot: Settings, h: SettingsHandlers): void {
+// withDefaults). `staleNotice` is the server's word that its settings file
+// changed after it read it (rpc-schema `settingsGet`).
+export function configureSettings(snapshot: Settings, h: SettingsHandlers, staleNotice: string | null = null): void {
   current = withDefaults(snapshot);
   handlers = h;
+  stale = staleNotice;
 }
 
 export function settings(): Settings {
   return current;
+}
+
+// The notice App.tsx shows once at boot when the snapshot is out of date, or
+// null when it is not.
+export function staleSettingsNotice(): string | null {
+  return stale;
 }
 
 export function readSettingsFile(home: SettingsHome): Promise<string> {

@@ -139,8 +139,8 @@ export async function clientOverlay(base: RequestHandlers, native: ClientNative)
     ...base,
     ...clientSeams(native, base),
     settingsGet: async () => {
-      const { settings } = await base.settingsGet({});
-      return { settings: mergeSettings(settings, mine) };
+      const theirs = await base.settingsGet({});
+      return { ...theirs, settings: mergeSettings(theirs.settings, mine) };
     },
     // The dialog's two tabs. "client" is answered here; anything else is the
     // server's file and goes to whichever server this client is talking to.

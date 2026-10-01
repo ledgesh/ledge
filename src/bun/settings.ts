@@ -7,11 +7,13 @@
 // This module is the only thing that writes the file. bun/clientSettings.ts
 // also reads it, to seed its own file from an older install's client sections.
 // Settings are global rather than per-workspace: a shell path or an interpreter
-// map is a fact about a machine, not about a folder. The app reads the file at
-// launch, so an edit applies at the next launch, never live; restart-applies is
-// the policy, not a limitation to fix (architecture.md §6). The MCP server is a
-// separate process and reads per tool call (bun/mcpTools.ts).
+// map is a fact about a machine, not about a folder. The server reads the file
+// when it starts, so an edit applies at its next start, never live;
+// restart-applies is the policy, not a limitation to fix (architecture.md §6).
+// The MCP server is a separate process and reads per tool call
+// (bun/mcpTools.ts).
 import { join } from "node:path";
+import { statSync } from "node:fs";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { DEFAULT_SETTINGS, parseSettings, settingsTemplate, type Settings } from "../shared/settings";
 import { stripJsonc } from "../shared/jsonc";
@@ -92,6 +94,17 @@ function warnAboutShell(path: string): void {
   }
   const caveat = shellCaveat(path);
   if (caveat) console.warn(`[settings] ${caveat}`);
+}
+
+// The file's modification time in ms, or null when there is no file. A daemon
+// takes it at boot and compares later to learn that its snapshot is out of
+// date (bun/daemon.ts, architecture.md §6).
+export function settingsStamp(): number | null {
+  try {
+    return statSync(SETTINGS_PATH).mtimeMs;
+  } catch {
+    return null;
+  }
 }
 
 // The file's text, migrating a legacy settings.json into place when that is

@@ -849,9 +849,11 @@ export type LedgeRPC = {
       // boot. Bun owns the files, the parsing, and the fallbacks. The view sees
       // one complete, valid Settings and never learns there were two of them:
       // the client shell merges its own half in on the way past
-      // (bun/clientSeams.ts, remote.md §5). Settings apply at launch, and there
-      // is no settingsChanged message (architecture.md, "Settings").
-      settingsGet: { params: {}; response: { settings: Settings } };
+      // (bun/clientSeams.ts, remote.md §5). Settings apply when the server
+      // starts, and there is no settingsChanged message (architecture.md,
+      // "Settings"). `stale` is set when the file changed after the server read
+      // it: the notice the view shows, naming what restarts the server.
+      settingsGet: { params: {}; response: { settings: Settings; stale?: string } };
       // The settings editor's load and save (the ⌘, dialog), mirroring
       // profileRead/profileWrite. The view cannot name the file, since Bun
       // knows where each settings.jsonc lives, and the text that rides is raw

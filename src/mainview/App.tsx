@@ -6,6 +6,7 @@ import { useSinglePane } from "@/lib/viewport";
 import { hasTerminal } from "@/lib/shell";
 import { docsWindow, onDocsShow } from "@/lib/windows";
 import { onUpdateNotice } from "@/lib/updates";
+import { staleSettingsNotice } from "@/lib/settings";
 import { pressIsSelection } from "@/lib/useRowMenu";
 import { pushLayer } from "@/commands/layers";
 import { ResizeHandle } from "@/components/ResizeHandle";
@@ -191,6 +192,13 @@ function Shell() {
     const t = setTimeout(() => setShutNotice(null), NOTICE_MS);
     return () => clearTimeout(t);
   }, [shutNotice]);
+  // Once, on the first render: the server read its settings before the file
+  // last changed, so what this window runs on is not what the file says
+  // (architecture.md §6).
+  useEffect(() => {
+    const stale = staleSettingsNotice();
+    if (stale) notify(stale);
+  }, [notify]);
 
   // Opens the Tags face drilled into one tag. Shared by the ui hook (panel and
   // overlay rows, via tag.open) and by the editor bridge (clicked #tags).
