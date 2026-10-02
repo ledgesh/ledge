@@ -283,7 +283,6 @@ describe("the record for ledge open", () => {
     const app = { launcher: "C:\\Users\\dan\\AppData\\Local\\sh.ledge.app\\stable\\app\\bin\\launcher.exe", pid: 4242 };
     const argv = recordArgv(app);
     expect(argv.slice(0, 4)).toEqual(["wsl.exe", "--exec", "sh", "-c"]);
-    expect(argv[4]).toContain('> "$HOME/.ledge/.windows-app.json".tmp && mv');
     expect(argv[5]).toBe("sh");
     expect(argv[6]).toMatch(/^[A-Za-z0-9+/=]+$/);
     expect(JSON.parse(Buffer.from(argv[6]!, "base64").toString())).toEqual(app);

@@ -23,7 +23,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fitFrame, readWindows, writeWindows, type Rect, type WindowState } from "./windowFrame";
-import { startLogging } from "./log";
+import { startLogging, write as writeLog } from "./log";
 import { EXTRACTION_DIRNAME, pruneExtractionDir } from "./updateCache";
 import { createUpdates, offReason } from "./updates";
 import { APP_HOME } from "./workspaces";
@@ -31,7 +31,8 @@ import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { clientOverlay, type ClientNative } from "./clientSeams";
 import { loadClientSettings } from "./clientSettings";
 import { imageFromFile } from "./clipboard";
-import { clientIdFor, clientLabel, ephemeralClientId } from "./clientHome";
+import { CLIENT_HOME, clientIdFor, clientLabel, ensureClientHome, ephemeralClientId } from "./clientHome";
+import { claimInstance, instanceAddress, type Claim } from "./appInstance";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { createConnectionStore } from "./connectionStore";
 import { explainDial, KNOWN_HOSTS_PATH, LOCAL_ID, sshDial, userKnownHosts, type Connection } from "./connections";
@@ -46,6 +47,32 @@ import { checkWord, hasDictionary, learnWord } from "./spelling";
 import { BUILD_VERSION } from "../shared/version";
 import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
 
+// One app process per client home, ahead of everything else this boot does,
+// the log's rotation included: a second launch must not move the running app's
+// log aside (bun/appInstance.ts). A raise's effect depends on how far this boot
+// has got, so it goes through `onRaise`, which later stages replace. A lock that
+// cannot be taken at all is logged below and the app runs without it.
+let onRaise: () => void = () => {};
+const claim: Claim | Error = await ensureClientHome()
+  .then(() => claimInstance(instanceAddress(CLIENT_HOME), { onRaise: () => onRaise() }))
+  .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
+if (!(claim instanceof Error) && !claim.held) {
+  // Appended to the running app's log, which is the one a bug report sends.
+  if (claim.answered) {
+    writeLog("bun", "info", ["[bun] a second launch found Ledge already running; it raised the window and exited"]);
+  } else {
+    writeLog("bun", "error", ["[bun] a second launch found another Ledge holding the app's lock without answering, and exited"]);
+    await Utils.showMessageBox({
+      type: "error",
+      title: "Ledge",
+      message: "Ledge is already running",
+      detail: "Another copy of Ledge is open but not responding. Quit it, or end it in your task manager, then open Ledge again.",
+      buttons: ["Quit"],
+    });
+  }
+  process.exit(0);
+}
+
 // Called before anything that can fail: from here every console line in this
 // process is also on disk, Electrobun's own output included. Call sites keep
 // using console, so nothing else in bun/ knows. Electrobun's
@@ -57,6 +84,7 @@ const local = await Updater.getLocalInfo().catch(() => null);
 console.log(
   `[bun] Ledge ${local?.version ?? "?"} (${local?.channel ?? "?"}, ${local?.hash?.slice(0, 8) ?? "?"}) on ${process.platform} ${process.arch}; bun ${Bun.version}`,
 );
+if (claim instanceof Error) console.error("[bun] could not take the one-app lock, so a second launch will not be stopped:", claim);
 
 // Deletes the previous versions' extraction tars, at 80MB each
 // (bun/updateCache.ts for what is kept and why). Not awaited and never fatal:
@@ -881,7 +909,13 @@ if (WINDOWS) {
   console.log(`[wsl] this build carries server ${wslCarried ? `${wslCarried.version} in ${wslCarried.dir}` : "none"}`);
   const ready = await ensureWslServer({
     payload: wslCarried,
-    started: () => Utils.showNotification({ title: "Setting up Ledge's server in WSL", body: "Ledge opens when it is done." }),
+    started: () => {
+      const notify = () => Utils.showNotification({ title: "Setting up Ledge's server in WSL", body: "Ledge opens when it is done." });
+      notify();
+      // A second launch while this runs has no window to raise, so it hears
+      // the same notice again.
+      onRaise = notify;
+    },
     fail: async ({ headline, detail }) => {
       console.error(`[wsl] ${headline}: ${detail}`);
       await Utils.showMessageBox({ type: "error", title: "Ledge", message: headline, detail, buttons: ["Quit"] });
@@ -907,6 +941,8 @@ if (windows.length === 0) {
   console.error("[bun] no window opened; exiting");
   process.exit(1);
 }
+
+onRaise = () => (focused ?? windows[0])?.window?.activate();
 
 // After the prune, which deletes tars from this same folder. A download that
 // started first could lose its file to it. updates.automatic false leaves only

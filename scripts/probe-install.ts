@@ -238,7 +238,13 @@ async function linuxMachine(image: string, shell: string, update: boolean) {
 
     if (update) {
       step(`[${image}] an update to ${NEXT}, with the Mac still connected`);
-      const next = inside("curl -fsSL file:///release/next/server.sh | sudo -iu ledge sh");
+      // Two at once, the way two app instances starting together ran it (issue #12).
+      const twice = inside("curl -fsSL file:///release/next/server.sh > /tmp/next.sh; for i in 1 2; do sudo -iu ledge sh /tmp/next.sh > /tmp/next-$i.out 2>&1 & done; wait; cat /tmp/next-1.out; echo ===; cat /tmp/next-2.out");
+      const [one = "", two = ""] = twice.out.split("===");
+      check("two runs of it at once both succeed", one.includes(`ledge-server ${NEXT} is installed`) && two.includes(`ledge-server ${NEXT} is installed`), twice.out.slice(-120));
+      check("and the second waited for the first, then found it in place", [one, two].some((o) => o.includes("Waiting for another install") && o.includes("is already in")));
+      check("leaving no lock or download folder behind", asLedge(`ls -A ${home}`).out.split("\n").sort().join(",") === "bin,versions", asLedge(`ls -A ${home}`).out);
+      const next = { code: one.includes(`ledge-server ${NEXT} is installed`) ? 0 : 1, out: one + two, err: "" };
       check("the newer script installs", next.code === 0 && next.out.includes(`ledge-server ${NEXT} is installed`), next.err.slice(0, 80));
       check("and says the running server stays until it exits", next.out.includes(`A ledge-server ${version} that is already running goes on serving`));
       const versions = asLedge(`ls ${home}/versions`).out.split("\n");
@@ -293,7 +299,11 @@ async function macMachine(target: NativeTarget) {
   } catch (err) {
     bad("this Mac: the probe threw", (err as Error).message.slice(0, 300));
   } finally {
-    if (pid) run(["kill", pid], { quiet: true });
+    if (pid) {
+      run(["kill", pid], { quiet: true });
+      // Its last log line would recreate the scratch home if it landed after the rm.
+      for (let i = 0; i < 50 && run(["kill", "-0", pid], { quiet: true }).code === 0; i++) await Bun.sleep(100);
+    }
   }
 }
 

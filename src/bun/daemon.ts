@@ -548,14 +548,16 @@ export function ownCommand(execPath = process.execPath, main = Bun.main): string
 }
 
 /**
- * Start a daemon that outlives this process.
- *
- * Detached, and not sharing this process's stdio: over ssh stdout is the
- * protocol, and one stray byte desynchronizes a length-prefixed stream with no
- * way back (bun/serve.ts). Its stderr goes to the file its own console tee
- * writes, so a crash Bun reports before any app code runs is not lost. Both
- * writers open that file O_APPEND, the one interleaving guarantee POSIX gives.
+ * How `spawnDaemon` starts the daemon. `detached` gives it a session of its
+ * own, which WSL needs before the daemon outlives the `serve` that started it
+ * (remote.md §11). No stdio is shared: over ssh stdout is the protocol. stderr
+ * goes to the daemon's own log, opened O_APPEND like its console tee.
  */
+export function daemonSpawnOptions(errFd: number | "ignore") {
+  return { stdin: "ignore", stdout: "ignore", stderr: errFd, detached: true } as const;
+}
+
+/** Start a daemon that outlives this process (`daemonSpawnOptions`). */
 export function spawnDaemon(head: readonly string[] = ownCommand()): void {
   // --autostart is what makes the idle timeout apply: this daemon exists
   // because a connection wanted one, so it should go when connections stop
@@ -569,7 +571,7 @@ export function spawnDaemon(head: readonly string[] = ownCommand()): void {
     // No log to write to. Losing the daemon's crash output is bad; refusing to
     // start it over that would be worse.
   }
-  Bun.spawn({ cmd: argv, stdin: "ignore", stdout: "ignore", stderr: errFd }).unref();
+  Bun.spawn({ cmd: argv, ...daemonSpawnOptions(errFd) }).unref();
 }
 
 /**

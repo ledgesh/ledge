@@ -38,6 +38,7 @@ const STUBS: Record<string, string> = {
     'printf "%s\\n" "$url" >>"$FAKE_LOG"',
     'file="$FAKE_RELEASE/${url##*/}"',
     'if [ ! -f "$file" ]; then echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; fi',
+    'if [ -n "${FAKE_SLOW:-}" ]; then sleep "$FAKE_SLOW"; fi',
     'cp "$file" "$out"',
   ].join("\n"),
 };
@@ -153,6 +154,23 @@ function script(version: string, sums: { serverSum?: string; key?: string; bunSu
  * only the install test in each shell pays it.
  */
 function install(w: World, text: string, machine: Machine, args: string[] = [], shell = "/bin/sh", piped = false) {
+  const file = join(w.base, "server.sh");
+  writeFileSync(file, text);
+  const argv = piped ? [shell, "-s", "--", ...args] : [shell, file, ...args];
+  const done = Bun.spawnSync(argv, { env: envFor(w, machine), stdin: piped ? Buffer.from(text) : "ignore", stdout: "pipe", stderr: "pipe" });
+  return { code: done.exitCode, out: done.stdout.toString(), err: done.stderr.toString() };
+}
+
+/** `sh script` started and not waited for, so two can run at once. */
+async function installAsync(w: World, text: string, machine: Machine, extra: Record<string, string> = {}) {
+  const file = join(w.base, `server-${crypto.randomUUID()}.sh`);
+  writeFileSync(file, text);
+  const p = Bun.spawn(["/bin/sh", file], { env: { ...envFor(w, machine), ...extra }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  return { code: await p.exited, out, err };
+}
+
+function envFor(w: World, machine: Machine): Record<string, string> {
   const env: Record<string, string> = {
     HOME: w.home,
     PATH: machine.path ?? `${w.stubs}:/usr/bin:/bin`,
@@ -168,11 +186,7 @@ function install(w: World, text: string, machine: Machine, args: string[] = [], 
   if (machine.remoteLogin) env["FAKE_REMOTE_LOGIN"] = machine.remoteLogin;
   if (machine.registry) env["LEDGE_SERVER_REGISTRY"] = machine.registry;
   if (machine.wsl) env["WSL_DISTRO_NAME"] = machine.wsl;
-  const file = join(w.base, "server.sh");
-  writeFileSync(file, text);
-  const argv = piped ? [shell, "-s", "--", ...args] : [shell, file, ...args];
-  const done = Bun.spawnSync(argv, { env, stdin: piped ? Buffer.from(text) : "ignore", stdout: "pipe", stderr: "pipe" });
-  return { code: done.exitCode, out: done.stdout.toString(), err: done.stderr.toString() };
+  return env;
 }
 
 const installed = (w: World) => join(w.home, ".ledge", ".server");
@@ -432,6 +446,50 @@ describe("server.sh", () => {
       expect(listing(join(installed(w), "versions"))).toEqual(["0.2.0", "0.3.0"]);
       const launched = Bun.spawnSync([join(installed(w), "bin", "ledge")], { stdout: "pipe" });
       expect(launched.stdout.toString()).toContain("/versions/0.3.0/bun|");
+    });
+  });
+
+  // Two app instances starting at once each ran an install, and each deleted
+  // the folder the other had just moved into place (issue #12, remote.md §11).
+  describe("two installs at once", () => {
+    test("run one after the other, and the second finds the first one's version in place", async () => {
+      const w = world();
+      const text = release(w, "0.1.0");
+      const [a, b] = await Promise.all([
+        installAsync(w, text, LINUX, { FAKE_SLOW: "0.5" }),
+        Bun.sleep(100).then(() => installAsync(w, text, LINUX, { FAKE_SLOW: "0.5" })),
+      ]);
+      expect([a.code, b.code]).toEqual([0, 0]);
+      expect(b.out).toContain("Waiting for another install of ledge-server to finish...");
+      expect(b.out).toContain("ledge-server 0.1.0 is already in");
+      expect(w.downloads()).toHaveLength(2);
+      expect(listing(installed(w))).toEqual(["bin", "versions"]);
+    });
+
+    test("updating at once still keeps the version they replaced, which may be running", async () => {
+      const w = world();
+      const [first, next] = ["0.1.0", "0.2.0"].map((v) => release(w, v));
+      expect(install(w, first!, LINUX).code).toBe(0);
+      const runs = await Promise.all([installAsync(w, next!, LINUX, { FAKE_SLOW: "0.5" }), Bun.sleep(100).then(() => installAsync(w, next!, LINUX))]);
+      expect(runs.map((r) => r.code)).toEqual([0, 0]);
+      expect(listing(join(installed(w), "versions"))).toEqual(["0.1.0", "0.2.0"]);
+    });
+
+    test("a lock left by an install that was killed is taken over", () => {
+      const w = world();
+      const dead = Bun.spawnSync(["/bin/sh", "-c", "echo $$"]).stdout.toString().trim();
+      mkdirSync(join(installed(w), ".install.lock"), { recursive: true });
+      writeFileSync(join(installed(w), ".install.lock", "pid"), `${dead}\n`);
+      const run = install(w, release(w, "0.1.0"), LINUX);
+      expect(run.code).toBe(0);
+      expect(run.out).not.toContain("Waiting");
+      expect(listing(installed(w))).toEqual(["bin", "versions"]);
+    });
+
+    test("an install that is refused still lets the next one in", () => {
+      const w = world();
+      expect(install(w, release(w, "0.1.0", { serverSum: ZERO }), LINUX).code).not.toBe(0);
+      expect(listing(installed(w))).toEqual(["bin", "versions"]);
     });
   });
 

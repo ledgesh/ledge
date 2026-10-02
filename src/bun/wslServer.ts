@@ -268,7 +268,9 @@ export async function wslFolder(
 export function recordArgv(app: WindowsApp): string[] {
   const b64 = Buffer.from(JSON.stringify(app)).toString("base64");
   const file = `"$HOME/.ledge/${WINDOWS_APP_FILE}"`;
-  return ["wsl.exe", "--exec", "sh", "-c", `mkdir -p "$HOME/.ledge" && printf %s "$1" | base64 -d > ${file}.tmp && mv ${file}.tmp ${file}`, "sh", b64];
+  // The temp file is named for this shell's pid, so two writing at once do not
+  // rename each other's file away (issue #12).
+  return ["wsl.exe", "--exec", "sh", "-c", `mkdir -p "$HOME/.ledge" && printf %s "$1" | base64 -d > ${file}.$$.tmp && mv ${file}.$$.tmp ${file}`, "sh", b64];
 }
 
 /** Writes the record. A failure is logged and otherwise ignored: only `ledge

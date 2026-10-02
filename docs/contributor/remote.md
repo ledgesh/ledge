@@ -1958,6 +1958,21 @@ and its `layoutSave` is dropped by the client rather than filed under an id
 nothing will ask for again. One window per server is the ordinary arrangement
 and never reaches that rule.
 
+**One app process per client home.** Every window is in one process, and the
+client ids above are that process's. A second process on the same client home
+would send the same ids, and the daemon would hand each connection the other's
+session, displacing them in turn (§7). So a launch first claims a lock
+(`bun/appInstance.ts`): a named pipe on Windows, `app.sock` in the client home
+elsewhere, freed by the operating system when its holder dies. A launch that
+finds it held asks the holder to raise its window and exits. Before any window
+exists the holder answers anyway (on Windows, by repeating the notice that WSL
+is being set up). New Window is a window of the running process and never
+reaches the lock. macOS already keeps one copy of a bundled app running; the
+lock is what stops a checkout's `bun run dev` beside the installed app, and
+the only thing that does on Windows and Linux. The claim runs before the log
+rotates, so a second launch leaves the running app's log where it is, and
+appends one line to it.
+
 **The manual has a window, and it is the one window that is not a place to
 work.** The built-in documentation used to be a hidden workspace that took over
 whichever workspace you were in — the one surface in the app that answered "what
@@ -2241,6 +2256,16 @@ and the app's updates are its updates. Without WSL, without a distribution,
 or with WSL signing in as root, the app says what to install and quits. A
 dev build carries no server and dials whatever WSL has.
 
+**WSL's daemon runs in a session of its own.** WSL ends every process in a
+`wsl.exe` invocation's session when that `wsl.exe` exits. A daemon left in the
+session of the `ledge serve` that started it therefore went down whenever the
+window behind that serve disconnected or closed, and every other window met a
+restarted server with its runs and shells gone (issue #12). `spawnDaemon`
+starts it `detached`, which is a new session on every platform, and
+`daemon.fs.test.ts` checks that it leads one. Measured on the Windows PC: a
+plain background child, `setsid` from `sh`, and `nohup` were all killed with
+the `wsl.exe`, and only Bun's `detached` child survived.
+
 **Backups: restic is the engine, and `ledge backup` is everything around it.**
 Ledge ships no backup engine and should not grow one. restic already does
 client-side encryption, deduplication, versions, restore and repository
@@ -2460,6 +2485,7 @@ explicitly, and the checksums still hold. The script:
 | Download | Checks each tarball's SHA-256. The server comes first, and a package with no trampolines for this target is refused before Bun is fetched. Bun is run before anything is moved into place, so one that cannot run here is refused with its own error. |
 | Layout | Unpacks the package into `~/.ledge/.server/versions/<version>` with `bun` beside it, and renames a new `~/.ledge/.server/bin/ledge` over the old one: a two-line `sh` launcher that execs that version's `bun` on its `bin/ledge.js`. |
 | Update | Keeps the previous version and deletes older ones. |
+| Lock | Holds `~/.ledge/.server/.install.lock` (a folder holding its pid) from before the version check until the end, so a second run at the same time waits and then finds that version in place. Without it, two runs each deleted the folder the other had just moved in, under a daemon that may already run from it. A lock whose pid is gone is taken over. |
 | PATH | Appends one line to the login shell's startup file, for the user's own terminals. ssh does not need it, because §4a's prefix is in the command. |
 
 The private Bun is why this beats a compiled binary. The file is named `bun`,
@@ -2682,7 +2708,9 @@ Per `testing.md`'s categories:
   shell, a resize, Ctrl-C and a ```ts block (the private Bun's reason to exist),
   checks the daemon started itself from `versions/<version>/bun`, and runs
   `ledge pair` the way the script's last line says. On Debian it then
-  installs a second version with a client still connected: the running daemon
+  installs a second version with a client still connected, as two runs of
+  `server.sh` at once (one waits on the other's lock, and both versions stay
+  on disk): the running daemon
   keeps serving, exits on its own once nothing is connected, and the next
   connection starts the new one. Ubuntu 20.04 is there for its glibc, and its
   first run found trampolines that did not load below glibc 2.34 (§11), which

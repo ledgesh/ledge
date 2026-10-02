@@ -2,7 +2,7 @@
 // written by the same sh command the app runs through wsl.exe, and the
 // verdicts that decide between launching the app and leaving it be.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inWsl, readWindowsApp, tasklistShowsBun, WINDOWS_APP_FILE } from "./wslApp";
@@ -23,6 +23,18 @@ describe("the record", () => {
     const proc = Bun.spawn({ cmd: recordArgv(app).slice(2), env: { ...process.env, HOME: home }, stdout: "ignore", stderr: "ignore" });
     expect(await proc.exited).toBe(0);
     expect(readWindowsApp(join(home, ".ledge"))).toEqual(app);
+  });
+
+  // Two app instances starting together both wrote the record, and the second
+  // rename found its temp file already gone (issue #12).
+  test("lands whole when several launches write it at once", async () => {
+    const home = appHome();
+    const writes = [1, 2, 3, 4, 5].map((pid) =>
+      Bun.spawn({ cmd: recordArgv({ launcher: "C:\\Ledge\\launcher.exe", pid }).slice(2), env: { ...process.env, HOME: home }, stdout: "ignore", stderr: "ignore" }),
+    );
+    expect(await Promise.all(writes.map((p) => p.exited))).toEqual([0, 0, 0, 0, 0]);
+    expect(readWindowsApp(join(home, ".ledge"))?.launcher).toBe("C:\\Ledge\\launcher.exe");
+    expect(readdirSync(join(home, ".ledge"))).toEqual([WINDOWS_APP_FILE]);
   });
 
   test("is null when missing or not a record", () => {

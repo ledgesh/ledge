@@ -115,6 +115,37 @@ sha256_of() {
   fi
 }
 
+# One install at a time for this account: two at once each delete the folder the
+# other just moved into place, under a daemon that may be running from it
+# (remote.md §11). A lock left by an install that was killed is taken over.
+take_lock() {
+  waited=0
+  while ! mkdir "$lock" 2>/dev/null; do
+    holder=$(cat "$lock/pid" 2>/dev/null || true)
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$lock"
+      continue
+    fi
+    if [ "$waited" -eq 0 ]; then
+      say "Waiting for another install of ledge-server to finish..."
+    fi
+    waited=$((waited + 1))
+    [ "$waited" -lt 600 ] || refuse "another install has held $lock for ten minutes. If no install is running, remove that folder and run this again."
+    sleep 1
+  done
+  locked=1
+  printf '%s\n' "$$" >"$lock/pid"
+}
+
+cleanup() {
+  if [ -n "${tmp:-}" ]; then
+    rm -rf "$tmp"
+  fi
+  if [ "${locked:-0}" -eq 1 ]; then
+    rm -rf "$lock"
+  fi
+}
+
 # Downloads a package tarball into $tmp/<name>.tgz, checks it against its
 # checksum and unpacks it into $tmp/<name>, where npm puts it under package/.
 # With --from, the tarball is copied from that directory under the same name.
@@ -206,6 +237,8 @@ main() {
   bun_url="$registry/$bun_package/-/${bun_package##*/}-$bun_version.tgz"
   target="$root/versions/$version"
   launcher="$root/bin/ledge"
+  # Read before the lock: an install this one waits for replaces the launcher,
+  # and the version it replaced may still be running, so the prune below keeps it.
   previous=$(sed -n 's/^# ledge-server version //p' "$launcher" 2>/dev/null || true)
 
   if [ "$dry_run" -eq 1 ]; then
@@ -222,6 +255,10 @@ main() {
   fi
 
   mkdir -p "$root/versions" "$root/bin"
+  trap cleanup EXIT
+  trap 'exit 1' HUP INT TERM
+  lock="$root/.install.lock"
+  take_lock
   if usable "$target"; then
     say "ledge-server $version is already in $target."
   else
@@ -231,8 +268,6 @@ main() {
       say "Downloading ledge-server $version and Bun $bun_version for $os-$arch..."
     fi
     tmp=$(mktemp -d "$root/.download.XXXXXX")
-    trap 'rm -rf "$tmp"' EXIT
-    trap 'exit 1' HUP INT TERM
     # The server first: it is small, and it is what says whether this release
     # was built for this machine at all.
     get "$server_url" server "$server_sum"

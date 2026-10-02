@@ -14,7 +14,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDaemon, connectToDaemon, IDLE_EXIT_NEVER, type Daemon } from "./daemon";
+import { startDaemon, connectToDaemon, daemonSpawnOptions, IDLE_EXIT_NEVER, type Daemon } from "./daemon";
 import { closeWatchers } from "./watch";
 import { resetVaultForTests, VAULT_PATH } from "./vault";
 import { SETTINGS_PATH } from "./settings";
@@ -1166,6 +1166,21 @@ test("a watcher event with no client attached does not take the daemon with it",
 test("a second daemon on the same socket refuses to start", async () => {
   const { socketPath, pidPath } = await daemonIn();
   await expect(startDaemon({ socketPath, pidPath, idleMs: 1000 })).rejects.toThrow();
+});
+
+// WSL ends every process in a wsl.exe's session when that wsl.exe exits, so a
+// daemon left in the session of the `serve` that started it went down with the
+// first window to disconnect (remote.md §11, issue #12). A session leader is
+// also its own process group leader, which `ps` can show on every platform.
+test("a spawned daemon leads a session of its own", async () => {
+  const child = Bun.spawn({ cmd: ["sleep", "5"], ...daemonSpawnOptions("ignore") });
+  try {
+    const pgid = (pid: number) => Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]).stdout.toString().trim();
+    expect(pgid(child.pid)).toBe(String(child.pid));
+    expect(pgid(child.pid)).not.toBe(pgid(process.pid));
+  } finally {
+    child.kill();
+  }
 });
 
 // The stale-frontmatter hint, end to end through a real daemon (architecture.md
