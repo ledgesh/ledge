@@ -5,7 +5,7 @@
 // call that. The handshake still has to name a build, so the number lives
 // here too. release.test.ts fails the build when this number disagrees with
 // package.json and electrobun.config.ts.
-export const BUILD_VERSION = "0.1.5";
+export const BUILD_VERSION = "0.1.6";
 
 /** What a running Ledge says about itself: the launch log's first line, About
  * Ledge, and `ledge --version`. A field this copy cannot know is "": a server
