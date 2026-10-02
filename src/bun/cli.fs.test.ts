@@ -10,7 +10,8 @@ import { join, resolve, sep } from "node:path";
 import { readNote } from "./notes";
 import { takeOpenRequest } from "./openRequest";
 import { APP_HOME, createManaged, loadWorkspaces } from "./workspaces";
-import { runCli, type CliIo } from "./cli";
+import { cliAppInfo, runCli, type CliIo } from "./cli";
+import { BUILD_VERSION, versionLine } from "../shared/version";
 
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
@@ -426,6 +427,36 @@ describe("open (the bare-title form)", () => {
 // from the preload (workspaces.ts reads APP_HOME from that variable). Only this
 // test covers the assembly: the verbs reach runCli, the env the shell set is
 // honored, and stdout carries the result alone.
+describe("version", () => {
+  test("`version` and `--version` print the version line, and open nothing", async () => {
+    const verb = await run(["version"]);
+    const flag = await run(["--version"]);
+    expect(verb.code).toBe(0);
+    expect(verb.out).toEqual([versionLine(cliAppInfo())]);
+    expect(flag.out).toEqual(verb.out);
+    expect(verb.out[0]).toStartWith(`Ledge ${BUILD_VERSION}`);
+    expect(verb.opens + flag.opens).toBe(0);
+  });
+
+  // The bundle's serve.js sits at Resources/app/bun/, and Electrobun's
+  // version.json at Resources/ (cliAppInfo).
+  test("the app bundle's version.json adds its channel and build hash", async () => {
+    const resources = await mkdtemp(join(tmpdir(), "ledge-bundle-"));
+    const bun = join(resources, "app", "bun");
+    await mkdir(bun, { recursive: true });
+    try {
+      expect(cliAppInfo(bun)).toMatchObject({ version: BUILD_VERSION, channel: "", hash: "" });
+      const json = { version: "9.9.9", hash: "q5lncvuixtwy", channel: "stable", identifier: "sh.ledge.app" };
+      await writeFile(join(resources, "version.json"), JSON.stringify(json));
+      expect(cliAppInfo(bun)).toMatchObject({ version: "9.9.9", channel: "stable", hash: "q5lncvuixtwy" });
+      await writeFile(join(resources, "version.json"), JSON.stringify({ ...json, identifier: "com.example.other" }));
+      expect(cliAppInfo(bun)).toMatchObject({ version: BUILD_VERSION, channel: "", hash: "" });
+    } finally {
+      await rm(resources, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("spawned process", () => {
   test("cat by title, and mcp answering initialize", async () => {
     const HOME = await mkdtemp(join(tmpdir(), "ledge-cli-proc-"));

@@ -13,6 +13,7 @@ export function CommandMenuItem({
   target,
   onClose,
   hint,
+  label,
 }: {
   id: string;
   target?: CommandTarget;
@@ -22,6 +23,9 @@ export function CommandMenuItem({
   // from Trash for 30 days"; the callers are in notes/NoteBrowser.tsx and
   // workspace/Sidebar.tsx.
   hint?: string;
+  // The row's text where the menu spec shortens the title (menu.ts
+  // labelAfterColon): the header's menus pass buildMenu's label.
+  label?: string;
 }) {
   const { exec, commands, ctx } = useCommands();
   const cmd = commands.find((c) => c.id === id);
@@ -29,7 +33,7 @@ export function CommandMenuItem({
 
   const c = { ...ctx(), target };
   const enabled = !cmd.when || cmd.when(c);
-  const title = typeof cmd.title === "function" ? cmd.title(c) : cmd.title;
+  const title = label ?? (typeof cmd.title === "function" ? cmd.title(c) : cmd.title);
   const Icon = cmd.iconOf?.(c) ?? cmd.icon;
 
   return (

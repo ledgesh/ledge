@@ -182,6 +182,8 @@ export const COMMANDS = {
   // palette (lib/shell.ts quitsByCommand). Ctrl+Q is the desktop convention
   // wherever Mod is Ctrl.
   "app.quit": { title: "Quit Ledge", keys: ["Mod-q"] },
+  // The version a bug report needs. No chord: it is looked up, not used.
+  "app.about": { title: "About Ledge" },
 
   // Per-note params (frontmatter). Both verbs are palette and menu only, since
   // neither is frequent enough to spend a chord on. Restart kills the note's

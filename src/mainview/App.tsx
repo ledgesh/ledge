@@ -3,7 +3,7 @@ import { CircleHelp, Hash, Link2, PanelLeft, Search, TableOfContents, TerminalSq
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSinglePane } from "@/lib/viewport";
-import { hasTerminal } from "@/lib/shell";
+import { hasTerminal, menuInWindow } from "@/lib/shell";
 import { docsWindow, onDocsShow } from "@/lib/windows";
 import { onUpdateNotice } from "@/lib/updates";
 import { staleSettingsNotice } from "@/lib/settings";
@@ -47,6 +47,8 @@ import type { TagInfo } from "../shared/tags";
 import { CommandProvider, useCommands } from "@/commands/CommandProvider";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { SettingsEditor } from "@/components/SettingsEditor";
+import { AboutDialog } from "@/components/AboutDialog";
+import { WindowMenu } from "@/commands/WindowMenu";
 import { ConnectionPicker } from "@/components/ConnectionPicker";
 import { AttachFolderDialog } from "@/components/AttachFolderDialog";
 import { activeConnection } from "@/lib/connections";
@@ -224,11 +226,13 @@ function Shell() {
   const [profileEditing, setProfileEditing] = useState<string | null>(null);
   // The ⌘, settings editor dialog (settings.jsonc in an in-app CodeMirror).
   const [settingsEditing, setSettingsEditing] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [pickingConnection, setPickingConnection] = useState(false);
   // The Attach Folder dialog. Owned here rather than by the strip because a
   // phone keeps the sidebar unmounted, and the verb is the palette's too.
   const [attaching, setAttaching] = useState(false);
   const closeAttach = useCallback(() => setAttaching(false), []);
+  const closeAbout = useCallback(() => setAboutOpen(false), []);
   // The vault passphrase dialog, carrying the act that was waiting on it
   // (lock this note, remove that lock). App runs the follow-up once the
   // passphrase is accepted, rather than stopping at the prompt
@@ -449,6 +453,7 @@ function Shell() {
       },
       openProfileEditor: setProfileEditing,
       openSettingsEditor: () => setSettingsEditing(true),
+      openAbout: () => setAboutOpen(true),
       openConnectionPicker: () => setPickingConnection(true),
       attachFolder: () => setAttaching(true),
       openVaultDialog: (then) => setVaultDialog({ then }),
@@ -795,6 +800,9 @@ function Shell() {
         >
           <Search className="size-4" />
         </Button>
+        {/* The menus a Mac keeps in its menu bar, where there is no such bar
+            (interactions.md §10). */}
+        {menuInWindow() && <WindowMenu />}
         <div className="flex-1" />
         {hasTerminal() && (
           <Button
@@ -992,6 +1000,7 @@ function Shell() {
         <ProfileEditor name={profileEditing} onClose={() => setProfileEditing(null)} />
       )}
       {settingsEditing && <SettingsEditor onClose={() => setSettingsEditing(false)} />}
+      {aboutOpen && <AboutDialog onClose={closeAbout} />}
       {pickingConnection && <ConnectionPicker onClose={() => setPickingConnection(false)} />}
       {attaching &&
         (() => {

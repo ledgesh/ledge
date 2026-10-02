@@ -7,6 +7,7 @@ import type { Settings, SettingsHome } from "./settings";
 import type { NoteParams } from "./frontmatter";
 import type { SearchHit } from "./search";
 import type { TagInfo } from "./tags";
+import type { AppInfo } from "./version";
 
 /** A streamed update about one running block, pushed Bun -> webview. */
 export type RunEvent =
@@ -825,6 +826,10 @@ export type LedgeRPC = {
       // quitsByCommand); on a Mac the bar's role item quits and this is never
       // called. `ok` is false on a shell that cannot quit itself.
       appQuit: { params: {}; response: { ok: boolean } };
+      // About Ledge: this app's version, update channel, build hash, platform
+      // and Bun (shared/version.ts versionLine), on every client. The client
+      // shell answers it about itself; the server's build is connectionList's.
+      appInfo: { params: {}; response: AppInfo };
       // This app's own update, which is the client's and never a server's: a
       // server across a connection is a different program, updated by whoever
       // installed it (remote.md §11). All three are in NATIVE_METHODS and never

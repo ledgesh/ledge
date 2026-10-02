@@ -144,6 +144,9 @@ export interface UiHooks {
   // (components/SettingsEditor.tsx). The file itself is still the settings
   // UI. Ledge only supplies the editor.
   openSettingsEditor(): void;
+  // Open About Ledge (components/AboutDialog.tsx): this app's version line and
+  // the server's build, with a Copy button for a bug report.
+  openAbout(): void;
   // Open the connection chooser, which picks the machine that holds the notes
   // (components/ConnectionPicker.tsx, remote.md §8). A dialog rather than an
   // anchored menu: switching rebuilds the whole session, and adding a server

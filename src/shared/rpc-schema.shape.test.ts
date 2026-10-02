@@ -194,7 +194,11 @@ describe("the schema's shape against the protocol version", () => {
   // Then settingsGet's response gained an optional `stale`, the notice for a
   // settings file that changed after the server read it. An old client never
   // reads it, and an old server never sends it, which shows no notice.
-  const PINNED = { protocol: 5, shape: "6e4a9f2e4f831523" };
+  // Then About Ledge on every desktop: appInfo, one new method, in
+  // NATIVE_METHODS. appQuit's case: the client shell answers it, no frame
+  // carries it, and no server sees the name. The pin moves and the version
+  // does not.
+  const PINNED = { protocol: 5, shape: "de8bd9f853f55606" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

@@ -67,7 +67,9 @@ export const MENU: readonly MenuSection[] = [
     // title in bold. This label is what it shows.
     label: "Ledge",
     items: [
-      { role: "about", label: "About Ledge" },
+      // A command rather than AppKit's `about` role, whose panel knows no
+      // channel, build hash or server (components/AboutDialog.tsx).
+      { command: "app.about" },
       // A two-faces pair: while an update waits to be installed, Restart to
       // Install Update replaces Check for Updates…. Both are absent on a build
       // that does not update itself (lib/updates.ts).
@@ -82,6 +84,9 @@ export const MENU: readonly MenuSection[] = [
       { role: "showAll", label: "Show All" },
       "---",
       { role: "quit", label: "Quit Ledge", accelerator: "command+q" },
+      // Quit where no AppKit role can answer it: the header's menus on Linux
+      // and Windows (windowMenu). Hidden on a Mac, where its `when` is false.
+      { command: "app.quit", hideWhenDisabled: true },
     ],
   },
   {
@@ -350,4 +355,34 @@ export function buildMenu(commands: readonly Command[], ctx: CommandCtx): AppMen
   }
 
   return MENU.map((section) => ({ label: section.label, submenu: build(section.items) }));
+}
+
+/**
+ * The menus as the window's header draws them, where no native bar exists
+ * (lib/shell.ts menuInWindow, interactions.md §10): buildMenu's output with the
+ * `role` items taken out, because only AppKit can answer one. The clipboard
+ * roles stay with the keyboard and the editor's context menu, Quit is the
+ * `app.quit` item beside its role, and a section left empty (Window) is
+ * dropped.
+ */
+export function windowMenu(commands: readonly Command[], ctx: CommandCtx): AppMenuItem[] {
+  function strip(items: readonly AppMenuItem[]): AppMenuItem[] {
+    const out: AppMenuItem[] = [];
+    for (const item of items) {
+      if ("type" in item) {
+        if (out.length > 0 && !("type" in out[out.length - 1]!)) out.push(item);
+        continue;
+      }
+      if (item.role) continue;
+      if (item.submenu) {
+        const submenu = strip(item.submenu);
+        if (submenu.length > 0) out.push({ ...item, submenu });
+        continue;
+      }
+      out.push(item);
+    }
+    while (out.length > 0 && "type" in out[out.length - 1]!) out.pop();
+    return out;
+  }
+  return strip(buildMenu(commands, ctx));
 }

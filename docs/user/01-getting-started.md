@@ -86,7 +86,7 @@ The Linux app is the same app. The keys in this manual are the keys of the deskt
 | --- | --- |
 | Tabs | Alt+1 to Alt+9 jumps to a tab, because Ctrl+1 to Ctrl+9 is the workspace jump. |
 | The terminal drawer | Every plain Ctrl chord goes to the shell, so Ctrl+C still interrupts a program. Ctrl+Shift+C copies, Ctrl+Shift+V pastes, and Ctrl+Shift+P still opens the palette from the terminal. |
-| Menus | There is no menu bar. Every menu item this manual names is in the command palette (Ctrl+Shift+P), and Quit Ledge is Ctrl+Q. |
+| Menus | The menus are at the top of the window, beside the search button: Ledge, File, Edit, Note, View and Help, as on a Mac, without the Window menu. Every item is also in the command palette (Ctrl+Shift+P), and Quit Ledge is Ctrl+Q. |
 | Two chords GNOME keeps | Ubuntu's desktop takes Ctrl+Alt+T and Ctrl+Alt+L before any app sees them, so Toggle Tags and Toggle Backlinks run from the palette there. |
 | Passwords | Kept in the desktop's keyring through `secret-tool`, which the `libsecret-tools` package provides ([[Keep Notes on a Remote Server]]). |
 | Spelling | Enchant's dictionaries, the ones WebKitGTK underlines with, through the `enchant-2` command ([[Notes and Workspaces]]). |
@@ -94,7 +94,7 @@ The Linux app is the same app. The keys in this manual are the keys of the deskt
 
 ## Ledge on Windows
 
-The Windows app is the same app, and its keys are Linux's: the chords in this manual with Ctrl and Alt, Alt+1 to Alt+9 for tabs, no menu bar, and Quit Ledge on Ctrl+Q.
+The Windows app is the same app, and its keys are Linux's: the chords in this manual with Ctrl and Alt, Alt+1 to Alt+9 for tabs, the menus at the top of the window, and Quit Ledge on Ctrl+Q.
 
 Your notes and your code live in WSL, the Windows Subsystem for Linux. The app is a window onto a Ledge server in your default Linux distribution, and every block runs in that distribution's shell, as a Linux command.
 
@@ -117,9 +117,11 @@ Each time it starts, Ledge checks the server in WSL and installs its own version
 
 Ledge checks for a newer version when it starts and once a day after that, and downloads one in the background when it finds one.
 
-When the download finishes, a notice says so and Restart to Install Update appears in the Ledge menu (in the command palette, on Linux and Windows). Choosing it quits Ledge and reopens the new version. Notes are already saved. A block that is still running keeps running on the old server, and the new version waits for it to finish before it swaps the server for its own, so the output arrives in the new window.
+When the download finishes, a notice says so and Restart to Install Update appears in the Ledge menu. Choosing it quits Ledge and reopens the new version. Notes are already saved. A block that is still running keeps running on the old server, and the new version waits for it to finish before it swaps the server for its own, so the output arrives in the new window.
 
-Ledge > Check for Updates… (Check for Updates… in the palette, on Linux and Windows) checks now and tells you the result.
+Ledge > Check for Updates… checks now and tells you the result.
+
+Ledge > About Ledge shows the version you are running, its update channel and build, and the version of the server the window is connected to. Copy puts those lines on the clipboard for a bug report. `ledge version` prints the same first line in a terminal ([[The ledge CLI]]).
 
 To check only when you ask, set `updates.automatic` to `false` under This app in Settings (⌘,) and relaunch. Ledge then makes no request at launch or during the day, and Check for Updates… still checks and downloads.
 

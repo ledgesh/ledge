@@ -31,6 +31,7 @@ import {
   FolderPlus,
   Hash,
   Image,
+  Info,
   IndentDecrease,
   IndentIncrease,
   Italic,
@@ -787,6 +788,12 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       icon: LogOut,
       when: () => quitsByCommand(),
       run: () => deps.quitApp(),
+    }),
+    // On every client, and on a Mac in place of AppKit's About panel
+    // (menu.ts), so each platform shows the same line (components/AboutDialog.tsx).
+    cmd("app.about", {
+      icon: Info,
+      run: (ctx) => ctx.ui.openAbout?.(),
     }),
     // Put `ledge` on this Mac's PATH. The outcome always
     // surfaces, so nobody has to go hunting in a bin dir: success (where they

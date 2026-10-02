@@ -39,6 +39,7 @@ import { configureClipboard } from "./lib/clipboard";
 import { configureSpelling } from "./editor/spelling";
 import { configureMenu, dispatchNativeCommand } from "./lib/menu";
 import { configureCli } from "./lib/cli";
+import { configureAbout } from "./lib/about";
 import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
 import { configureUpdates, loadUpdateState, recordUpdateState } from "./lib/updates";
 import { captureFailures, configureLog } from "./lib/log";
@@ -474,6 +475,9 @@ async function boot(requests: RequestClient): Promise<void> {
   applyAppearance();
   configureCli({
     install: () => requests.cliInstall({}),
+  });
+  configureAbout({
+    info: () => requests.appInfo({}),
   });
   // The app's own update, answered by the shell rather than any server. Not
   // awaited, like the vault read below: the mirror starts "off", so the update

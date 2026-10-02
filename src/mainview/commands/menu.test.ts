@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { initialState, type Action, type AppState } from "@/workspace/store";
 import { firstLeaf } from "@/workspace/tree";
 import { buildCommands } from "./registry";
-import { INNER_OWNED_CHORDS, MENU, acceleratorOf, buildMenu, shellOwnsChord, type MenuItem } from "./menu";
+import { INNER_OWNED_CHORDS, MENU, acceleratorOf, buildMenu, shellOwnsChord, windowMenu, type MenuItem } from "./menu";
+import { configureShell } from "@/lib/shell";
 import type { AppMenuItem } from "../../shared/rpc-schema";
 import type { Command, CommandCtx, CommandTarget, RegistryDeps } from "./types";
 
@@ -239,6 +240,49 @@ describe("buildMenu", () => {
         .map((i) => ("type" in i ? "" : `${i.action}:${i.enabled}`));
     expect(faces(built)).toEqual(["vault.lock:true", "vault.unlock:false"]);
     expect(faces(locked)).toEqual(["vault.lock:false", "vault.unlock:true"]);
+  });
+});
+
+// The header's menus on Linux and Windows (interactions.md §10): the same spec
+// with AppKit's role items taken out, and Quit as a command.
+describe("windowMenu", () => {
+  function labels(items: AppMenuItem[]): string[] {
+    return items.flatMap((i) => ("type" in i ? [] : [i.label]));
+  }
+
+  test("carries no role item, and drops the Window menu, which held nothing else", () => {
+    const menu = windowMenu(commands, makeCtx());
+    expect(flatten(menu).filter((i) => !("type" in i) && i.role)).toEqual([]);
+    expect(labels(menu)).toEqual(["Ledge", "File", "Edit", "Note", "View", "Help"]);
+  });
+
+  test("never leads, ends or doubles a divider once the roles are gone", () => {
+    for (const section of windowMenu(commands, makeCtx())) {
+      if ("type" in section) continue;
+      const items = section.submenu ?? [];
+      expect("type" in items[0]!).toBe(false);
+      expect("type" in items[items.length - 1]!).toBe(false);
+      items.forEach((item, i) => {
+        if ("type" in item) expect("type" in items[i - 1]!).toBe(false);
+      });
+    }
+  });
+
+  test("Quit Ledge is the app.quit command where no menu bar quits, and absent on a Mac", () => {
+    const quitIn = (menu: AppMenuItem[]) => flatten(menu).filter((i) => !("type" in i) && i.action === "app.quit");
+    expect(quitIn(buildMenu(commands, makeCtx()))).toEqual([]);
+    configureShell({ quitsByCommand: true });
+    try {
+      const ledge = windowMenu(commands, makeCtx())[0]!;
+      expect(!("type" in ledge) && labels(ledge.submenu ?? [])).toContain("Quit Ledge");
+    } finally {
+      configureShell({ quitsByCommand: false });
+    }
+  });
+
+  test("About Ledge is a command in the Ledge menu on every desktop", () => {
+    const ledge = windowMenu(commands, makeCtx())[0]!;
+    expect(!("type" in ledge) && ledge.submenu?.[0]).toMatchObject({ label: "About Ledge", action: "app.about" });
   });
 });
 

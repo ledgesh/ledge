@@ -27,6 +27,7 @@
 // pipe never has to strip chatter. Exit codes: 0 ok, 1 failure (including a
 // search with no hits, grep's contract), 2 usage. interactions.md §9 governs
 // the verb table.
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { serve } from "./mcp";
@@ -35,6 +36,7 @@ import { tildify } from "./cliShim";
 import { openLinuxApp } from "./linuxApp";
 import { inWsl, openWindowsApp } from "./wslApp";
 import { writeOpenRequest } from "./openRequest";
+import { BUILD_VERSION, versionLine, type AppInfo } from "../shared/version";
 import { APP_HOME, loadWorkspaces, rootContaining, roots, workspaceMatches } from "./workspaces";
 
 export { tildify }; // display formatting; defined in cliShim.ts so the app's install handler shares it
@@ -53,6 +55,7 @@ export interface CliFlags {
   json: boolean;
   all: boolean;
   help: boolean;
+  version: boolean;
 }
 
 export interface ParsedCli {
@@ -65,7 +68,7 @@ export interface ParsedCli {
 // a library's config). Flags may sit anywhere. `--` ends flag parsing, so a
 // title that starts with a dash stays reachable.
 export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: string } {
-  const flags: CliFlags = { json: false, all: false, help: false };
+  const flags: CliFlags = { json: false, all: false, help: false, version: false };
   const positionals: string[] = [];
   const valued: Record<string, "workspace" | "folder" | "heading" | "message" | "template"> = {
     "--workspace": "workspace",
@@ -99,6 +102,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: stri
     if (a === "--json") flags.json = true;
     else if (a === "--all" || a === "-a") flags.all = true;
     else if (a === "--help" || a === "-h") flags.help = true;
+    else if (a === "--version") flags.version = true;
     else return { error: `unknown flag: ${a}` };
   }
   const [verb = "", ...rest] = positionals;
@@ -166,6 +170,32 @@ export function resolveWorkspaceArg(value: string, registered: readonly string[]
   throw new Error(`not a workspace: ${value} — known: ${registered.map((r) => tildify(r, home)).join(", ")}`);
 }
 
+/**
+ * What `ledge version` prints about this copy. The app's bundle keeps
+ * Electrobun's version.json two levels above its serve.js (bun/cliShim.ts
+ * SERVE_ENTRY), which adds the channel and build hash the launch log names. A
+ * server package has no such file, and its line carries the version alone.
+ * The identifier check keeps an unrelated version.json at that spot out.
+ */
+export function cliAppInfo(dir: string = import.meta.dir): AppInfo {
+  let bundle: { version?: unknown; channel?: unknown; hash?: unknown; identifier?: unknown } = {};
+  try {
+    bundle = JSON.parse(readFileSync(join(dir, "..", "..", "version.json"), "utf8"));
+  } catch {
+    // No bundle around this copy.
+  }
+  const ours = bundle.identifier === BUNDLE_ID;
+  const text = (v: unknown): string => (ours && typeof v === "string" ? v : "");
+  return {
+    version: text(bundle.version) || BUILD_VERSION,
+    channel: text(bundle.channel),
+    hash: text(bundle.hash),
+    platform: process.platform,
+    arch: process.arch,
+    bun: Bun.version,
+  };
+}
+
 // --- the verbs ---------------------------------------------------------------
 
 const USAGE = `ledge: notes from the shell, and this machine's server
@@ -190,6 +220,8 @@ usage:
          --heading <h>         append at the end of that heading's section
   ledge workspaces             list workspace roots
   ledge mcp                    serve the Ledge MCP server on stdio
+  ledge version                this copy's version, as a bug report wants it
+                               (also --version)
   ledge help                   this text
 
 server verbs (what the Ledge apps reach over ssh):
@@ -290,6 +322,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   const { verb, positionals, flags } = parsed;
   if (flags.help || verb === "help") {
     io.out(USAGE);
+    return 0;
+  }
+  if (flags.version || verb === "version") {
+    io.out(versionLine(cliAppInfo()));
     return 0;
   }
   if (verb === "") return openApp(io);

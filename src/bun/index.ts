@@ -44,7 +44,7 @@ import { ensureWslServer, explainWsl, recordWindowsApp, stopWslDaemon, wslFolder
 import { readWindowsClipboardHtml, readWindowsClipboardImage } from "./winclip";
 import { installShims, SERVE_ENTRY, tildify } from "./cliShim";
 import { checkWord, hasDictionary, learnWord } from "./spelling";
-import { BUILD_VERSION } from "../shared/version";
+import { BUILD_VERSION, versionLine, type AppInfo } from "../shared/version";
 import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
 
 // One app process per client home, ahead of everything else this boot does,
@@ -81,9 +81,16 @@ if (!(claim instanceof Error) && !claim.held) {
 // produces. The appends are synchronous, so they reach the file.
 startLogging();
 const local = await Updater.getLocalInfo().catch(() => null);
-console.log(
-  `[bun] Ledge ${local?.version ?? "?"} (${local?.channel ?? "?"}, ${local?.hash?.slice(0, 8) ?? "?"}) on ${process.platform} ${process.arch}; bun ${Bun.version}`,
-);
+// The same line About Ledge shows and `ledge --version` prints (shared/version.ts).
+const APP_INFO: AppInfo = {
+  version: local?.version ?? BUILD_VERSION,
+  channel: local?.channel ?? "",
+  hash: local?.hash ?? "",
+  platform: process.platform,
+  arch: process.arch,
+  bun: Bun.version,
+};
+console.log(`[bun] ${versionLine(APP_INFO)}`);
 if (claim instanceof Error) console.error("[bun] could not take the one-app lock, so a second launch will not be stopped:", claim);
 
 // Deletes the previous versions' extraction tars, at 80MB each
@@ -139,6 +146,7 @@ async function mainViewUrl(): Promise<string> {
 // shell command, so every window shares them. The two that are a window's,
 // the menu bar and New Window, are added per window by `nativeFor` below.
 const sharedNative: ClientNative = {
+  appInfo: () => APP_INFO,
   clipboardFormats: () => {
     // Windows' HTML read checks for the format itself (bun/winclip.ts), so
     // null there has clipboardReadRich ask it every time.
@@ -541,7 +549,8 @@ let focused: Win | null = null;
 
 // Only a Mac has an application menu bar in Electrobun (devkit proc/linux.md).
 // On Linux every push would log a warning and change nothing, so the bar is
-// skipped there and the view's commands live in the palette alone.
+// skipped off macOS and the view draws the menus in its header instead
+// (interactions.md §10).
 const HAS_MENU_BAR = process.platform === "darwin";
 
 function applyMenu(win: Win): void {

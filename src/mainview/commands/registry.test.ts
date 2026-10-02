@@ -383,6 +383,16 @@ describe("registry", () => {
     expect(opens).toHaveLength(1);
   });
 
+  test("run: app.about opens About Ledge, on every client", () => {
+    const opens: number[] = [];
+    const ctx = makeCtx(initialState(FOLDER, []));
+    ctx.ui = { openAbout: () => opens.push(1) };
+    const about = find(buildCommands(stubDeps()), "app.about");
+    expect(about.when?.(ctx) ?? true).toBe(true);
+    about.run(ctx);
+    expect(opens).toHaveLength(1);
+  });
+
   test("run: cli.install routes to the installCli edge and surfaces the outcome", async () => {
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));

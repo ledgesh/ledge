@@ -21,7 +21,7 @@
     "mcp": "bun src/bun/serve.ts mcp",
     "serve": "bun src/bun/serve.ts serve",
     "serve:daemon": "bun src/bun/serve.ts daemon",
-    "cli": "bun src/bun/serve.ts cli",
+    "cli": "bun src/bun/serve.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:e2e": "bun scripts/e2e.ts",

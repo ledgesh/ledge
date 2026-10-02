@@ -13,7 +13,8 @@
 // it is absent rather than present and failing: `runsBlocks`, `hasTerminal`
 // and `installsCli` (interactions.md §8). `picksFolders` withholds a button
 // inside a dialog the same way. `quitsByCommand` adds a verb instead, where
-// no menu bar carries it. `softKeyboard` changes an editor rather than a
+// no menu bar carries it, and `menuInWindow` draws the menus in the window's
+// header for the same reason (interactions.md §10). `softKeyboard` changes an editor rather than a
 // verb, and `deviceKey` says which key authenticates (ios.md §8).
 //
 // A configureX seam like the others (architecture.md §5). The entry point sets
@@ -47,6 +48,9 @@ interface Shell {
   /** Whether Quit is one of this client's commands, because nothing native
    * offers it. */
   quitsByCommand: boolean;
+  /** Whether the window's header carries the menus (commands/menu.ts
+   * windowMenu), because no native menu bar does. */
+  menuInWindow: boolean;
 }
 
 let shell: Shell = {
@@ -60,6 +64,7 @@ let shell: Shell = {
   picksFolders: true,
   installsCli: true,
   quitsByCommand: false,
+  menuInWindow: false,
 };
 
 export function configureShell(next: Partial<Shell>): void {
@@ -226,4 +231,8 @@ export function installsCli(): boolean {
  */
 export function quitsByCommand(): boolean {
   return shell.quitsByCommand;
+}
+
+export function menuInWindow(): boolean {
+  return shell.menuInWindow;
 }

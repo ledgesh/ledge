@@ -27,12 +27,14 @@ const electrobun = new Electrobun.Electroview({ rpc });
 // The keyboard grammar is decided by modKey.ts from navigator.platform. What
 // follows from it here: a desktop where Mod is Ctrl has no menu bar, so Quit
 // is a command there (lib/shell.ts quitsByCommand, interactions.md §10). A Mac
-// keeps the shell's defaults, whose Quit is the menu bar's.
+// keeps the shell's defaults, whose Quit is the menu bar's. The same desktop
+// draws the menus in the window's header instead (menuInWindow).
 //
 // Windows' server is in WSL (bun/wslServer.ts), and `ledge` is already on
 // WSL's PATH from server.sh, so Install Shell Command is left out there.
 const WINDOWS = navigator.platform.startsWith("Win");
-configureShell({ quitsByCommand: modKey() === "Ctrl", ...(WINDOWS ? { installsCli: false } : {}) });
+const NO_MENU_BAR = modKey() === "Ctrl";
+configureShell({ quitsByCommand: NO_MENU_BAR, menuInWindow: NO_MENU_BAR, ...(WINDOWS ? { installsCli: false } : {}) });
 
 // The cast says two derivations of LedgeRPC agree. It is not a claim about
 // runtime shapes. Electrobun builds its per-method request map from the

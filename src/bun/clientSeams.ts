@@ -22,6 +22,7 @@ import { loadClientSettings, readClientSettingsFile, writeClientSettingsFile } f
 import { mergeSettings, type Settings } from "../shared/settings";
 import type { UpdateState } from "../shared/rpc-schema";
 import { openableUrl } from "../shared/links";
+import { BUILD_VERSION, type AppInfo } from "../shared/version";
 import { NATIVE_METHODS, type NativeMethod, type RequestHandlers } from "../shared/wire";
 
 /** The pasteboard's text, and its HTML flavor where the shell can read one. */
@@ -57,6 +58,10 @@ export interface ClientNative {
   // Quits the app, every window with it, the way the Mac's ⌘Q does. Absent on
   // a shell that quits some other way or never quits (a phone).
   quit?(): void;
+  // What this app says about itself for About Ledge (shared/version.ts).
+  // Absent where nothing better is known than this process's own facts, and
+  // those are answered instead.
+  appInfo?(): AppInfo;
   // This device's spelling dictionary (bun/spelling.ts on a Mac). Absent on a
   // shell with none, where every word answers correct and Learn does nothing.
   spelling?: {
@@ -103,6 +108,14 @@ export interface ClientNative {
 const OPENER = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
 
 const NO_UPDATES: UpdateState = { phase: "off", version: "", detail: "This app does not update itself." };
+const THIS_PROCESS: AppInfo = {
+  version: BUILD_VERSION,
+  channel: "",
+  hash: "",
+  platform: process.platform,
+  arch: process.arch,
+  bun: Bun.version,
+};
 const NO_CLI = { ok: false, message: "This app has no shell command to install." };
 
 // NATIVE_METHODS, CONNECTION_METHODS and CLIENT_METHODS live in
@@ -268,6 +281,9 @@ export function clientSeams(
       native.quit();
       return { ok: true };
     },
+    // This app's version, never the server's: the server's build is the
+    // handshake's (connectionList `build`).
+    appInfo: async () => native.appInfo?.() ?? THIS_PROCESS,
     // The app's update, which belongs to the process rather than to a window,
     // so every window's handlers reach the same one (bun/index.ts).
     updateState: async () => native.updates?.state() ?? NO_UPDATES,

@@ -36,6 +36,7 @@ import { configureWorkspaces, dispatchWorkspacesChanged, recordWorkspaceKinds } 
 import { configureClipboard } from "./lib/clipboard";
 import { configureSpelling } from "./editor/spelling";
 import { configureCli } from "./lib/cli";
+import { configureAbout } from "./lib/about";
 import { configureUpdates, loadUpdateState, recordUpdateState } from "./lib/updates";
 import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
 import { configureAssets } from "./lib/assets";
@@ -87,6 +88,8 @@ configureShell({
   // Quit is a command only where no menu bar carries it (lib/shell.ts
   // quitsByCommand), which is the Ctrl grammar's desktop.
   quitsByCommand: CTRL_MOD,
+  // And the menus are drawn in the header, for the same reason.
+  menuInWindow: CTRL_MOD,
   // `runsBlocks` is absent from this list because it is true of every shell the
   // harness can be. A phone runs a note's blocks inline as a Mac does, and the
   // two differ over the drawer alone (lib/shell.ts).
@@ -1367,6 +1370,10 @@ applyAppearance();
 // so the palette command and its notice strip are drivable end to end.
 configureCli({
   install: async () => ({ ok: true, message: "ledge installed in ~/.ledge/.server/bin" }),
+});
+
+configureAbout({
+  info: async () => ({ version: "0.1.0", channel: "stable", hash: "abcdefgh1234", platform: "darwin", arch: "arm64", bun: "1.3.0" }),
 });
 
 // The app's update is the shell's, and this fake plays the shell: it holds the

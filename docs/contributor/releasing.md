@@ -473,9 +473,9 @@ WebKit's storage goes beside the app, under `stable/WebKit/`. The runtime
 packages are GTK 3, WebKitGTK 4.1, libayatana-appindicator3 and librsvg2,
 which an Ubuntu desktop has.
 
-Two things a Linux install has no menu bar for. Check for Updates… and
-Restart to Install Update are commands in the palette (Ctrl+Shift+P), and
-Quit is Ctrl+Q (`interactions.md` §10). The updater is otherwise §7 as
+A Linux install has no menu bar. Its menus are in the window's header, where
+the Ledge menu holds Check for Updates…, Restart to Install Update and Quit
+(Ctrl+Q) (`interactions.md` §10). The updater is otherwise §7 as
 written: the same address, the Linux prefixes, and a manifest the site serves
 per prefix.
 

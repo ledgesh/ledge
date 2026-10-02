@@ -6,6 +6,7 @@
 import { hostPart, validateConnection, validatePassword, type AuthMode } from "../../shared/connections";
 import { fedDuplex, type ClientConnection, type Duplex } from "../../shared/transport";
 import type { UpdateState } from "../../shared/rpc-schema";
+import { BUILD_VERSION } from "../../shared/version";
 import {
   CLIENT_METHODS,
   fromBase64,
@@ -511,6 +512,10 @@ function clientSeams(
     // A phone never quits by command (lib/shell.ts quitsByCommand), and nothing
     // calls this. No Swift call.
     appQuit: async () => ({ ok: false }),
+    // The page's own version, which is the app's: both are built from one
+    // checkout. A store build has no update channel or Electrobun hash, and a
+    // phone runs no Bun. No Swift call.
+    appInfo: async () => ({ version: BUILD_VERSION, channel: "", hash: "", platform: window.webkit?.messageHandlers?.[SHELL_HANDLER] ? "ios" : "android", arch: "", bun: "" }),
     // A phone's app is updated by the store it came from, never by itself, so
     // the view leaves Check for Updates… out (lib/updates.ts). No Swift call.
     updateState: async () => PHONE_UPDATES,
