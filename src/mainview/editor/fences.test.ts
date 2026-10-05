@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import {
   closeFence,
-  fenceCloser,
-  fenceOpener,
   insertCodeBlockSpec,
   pairedBelow,
   typedFence,
@@ -276,22 +274,3 @@ describe("pairedBelow", () => {
   });
 });
 
-describe("fenceOpener / fenceCloser", () => {
-  test("openers: marks, info strings, up to 3 spaces of indent", () => {
-    expect(fenceOpener("```")).toEqual({ indent: "", marker: "```" });
-    expect(fenceOpener("   ````python")).toEqual({ indent: "   ", marker: "````" });
-    expect(fenceOpener("~~~ any ` info")).toEqual({ indent: "", marker: "~~~" });
-    expect(fenceOpener("    ```")).toBeNull(); // 4 spaces: indented code
-    expect(fenceOpener("``")).toBeNull();
-    expect(fenceOpener("text")).toBeNull();
-  });
-
-  test("closers: same character, at least as many, nothing after", () => {
-    expect(fenceCloser("```", "```")).toBe(true);
-    expect(fenceCloser("````", "```")).toBe(true);
-    expect(fenceCloser("```", "````")).toBe(false);
-    expect(fenceCloser("~~~", "```")).toBe(false);
-    expect(fenceCloser("``` js", "```")).toBe(false);
-    expect(fenceCloser("  ``` \r", "```")).toBe(true);
-  });
-});

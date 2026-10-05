@@ -22,10 +22,9 @@ import {
   requestRunConfirm,
   type RunDestination,
 } from "./bridge";
-import { confirmFor, noRun, parseFenceInfo, type ConfirmSpec } from "./fenceInfo";
+import { confirmFor, fenceCloser, fenceOpener, noRun, parseFenceInfo, type ConfirmSpec } from "../../shared/fenceInfo";
 import { hasTerminal, runsBlocks, softKeyboard } from "../lib/shell";
 import { activeConnection, linkState, subscribeConnections } from "../lib/connections";
-import { fenceCloser, fenceOpener } from "./fences";
 import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
 import { sessionIdFacet } from "./session";
@@ -66,10 +65,10 @@ interface Block {
   // offers to run the block hangs off this.
   closed: boolean;
   // The fence's confirm marker resolved against the note's default, or null
-  // when this block runs straight through (editor/fenceInfo.ts).
+  // when this block runs straight through (shared/fenceInfo.ts).
   confirm: ConfirmSpec | null;
   // Whether the fence is marked `norun`: the block is there to be read or
-  // copied, not run from this note (editor/fenceInfo.ts, interactions.md
+  // copied, not run from this note (shared/fenceInfo.ts, interactions.md
   // §4e). Everything that offers to run the block hangs off this too.
   norun: boolean;
 }

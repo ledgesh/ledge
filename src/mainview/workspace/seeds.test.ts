@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SETTINGS } from "../../shared/settings";
 import { headingOf } from "../../shared/slug";
-import { noRun, parseFenceInfo } from "../editor/fenceInfo";
+import { noRun, parseFenceInfo } from "../../shared/fenceInfo";
 import { SCRATCH_DOC, WELCOME_DOC, WELCOME_TITLE, seedDoc } from "./seeds";
 
 function openers(text: string): string[] {

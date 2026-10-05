@@ -27,36 +27,12 @@ import {
   type TransactionSpec,
 } from "@codemirror/state";
 import { EditorView, keymap, type Command } from "@codemirror/view";
+import { fenceCloser, fenceOpener } from "../../shared/fenceInfo";
 import { frontmatterEnd } from "../../shared/frontmatter";
 
 // The frontmatter opener, shared/frontmatter.ts's FENCE: exactly three
 // dashes, trailing blanks (and a pasted \r) tolerated.
 const FM_FENCE = /^---[ \t\r]*$/;
-
-// A code-fence opener per CommonMark: up to 3 spaces of indent, then ``` or
-// ~~~ (3+ marks), then an info string. A backtick fence's info string may not
-// contain a backtick (` ```js`` ` is not a fence).
-const OPEN_TICK = /^( {0,3})(`{3,})([^`]*)$/;
-const OPEN_TILDE = /^( {0,3})(~{3,})(.*)$/;
-
-/**
- * The line's code-fence opener shape (its indent and its fence marks), or
- * null. Pure, so the grammar is testable line by line.
- */
-export function fenceOpener(lineText: string): { indent: string; marker: string } | null {
-  const m = OPEN_TICK.exec(lineText) ?? OPEN_TILDE.exec(lineText);
-  return m ? { indent: m[1]!, marker: m[2]! } : null;
-}
-
-/**
- * Whether a line closes a fence opened with `marker`: the same character, at
- * least as many of them, nothing but blanks after (a close fence carries no
- * info string).
- */
-export function fenceCloser(lineText: string, marker: string): boolean {
-  const m = /^ {0,3}(`{3,}|~{3,})[ \t\r]*$/.exec(lineText);
-  return !!m && m[1]![0] === marker[0] && m[1]!.length >= marker.length;
-}
 
 /**
  * Whether a closer below already answers a fence opened with `marker`, reading

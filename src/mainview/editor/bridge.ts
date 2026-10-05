@@ -5,7 +5,7 @@
 // main.tsx hands it (mainview/boot.tsx `configureBridge`).
 import type { NoteMeta, RunEvent } from "../../shared/rpc-schema";
 import type { TagInfo } from "../../shared/tags";
-import type { ConfirmSpec } from "./fenceInfo";
+import type { ConfirmSpec } from "../../shared/fenceInfo";
 
 /** Where a block's output goes when it runs. */
 export type RunDestination = "inline" | "terminal";

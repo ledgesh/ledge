@@ -1,6 +1,6 @@
 # The ledge CLI
 
-The `ledge` command lists, reads, searches, creates, and appends to notes from any terminal. The running app follows along live, because a CLI write is an ordinary file change.
+The `ledge` command lists, reads, searches, creates, and appends to notes from any terminal, and runs their code blocks. The running app follows along live, because a CLI write is an ordinary file change.
 
 ## Install
 
@@ -25,6 +25,7 @@ The same launcher is what lets your phone reach this computer's notes ([[Ledge o
 | `ledge workspaces` | Lists the workspace roots. |
 | `ledge new <title>` | Creates a note, with the body piped on stdin or stamped from `--template`, in the folder you are standing in or the one `-f` names. |
 | `ledge append <title>` | Appends to a note, or to one heading's section with `--heading`. |
+| `ledge run <title>` | Runs a note's code blocks in this terminal. |
 | `ledge today` | Opens today's daily note in the app. |
 | `ledge <title>` | Opens the app at that note. `ledge` alone just opens the app. |
 | `ledge version` | Prints the version of this copy of Ledge, as a bug report wants it. `ledge --version` is the same. |
@@ -69,6 +70,36 @@ ledge new "API Rollout"      # creates ~/Notes/projects/api-rollout.md
 Inside a note's terminal drawer it also knows the note, so a bare `ledge append -m "TODO: check the logs"` appends to the note the terminal belongs to.
 
 Three flags override the scope: `-w <workspace>` targets a specific workspace, `-f <folder>` targets a folder, and `--all` widens `ls` and `search` to every workspace.
+
+## Run a note's blocks
+
+`ledge run` runs a note's code blocks in the terminal you type it in. Their output goes to that terminal, and `ledge run` exits with the status of the last block it ran, so it works in scripts and CI.
+
+| Command | What runs |
+| --- | --- |
+| `ledge run Deploy` | Nothing. It lists the note's runnable blocks, numbered. In a terminal it then asks which one to run. |
+| `ledge run Deploy -b 2` | Block 2 of that list. |
+| `ledge run Deploy -b migrate` | The block whose fence says `name=migrate`. |
+| `ledge run "Deploy#Rollback"` | Every block in the Rollback section, in order. |
+| `ledge run Deploy --all` | Every runnable block in the note, top to bottom. |
+
+A block gets a name on its fence, after the language:
+
+````markdown
+```sh name=migrate
+./migrate.sh
+```
+````
+
+Several blocks run in one shell, so a `cd` or an `export` in one block reaches the next, as it does in the app. The run stops at the first block that exits nonzero, names that block on stderr, and exits with its status. Blocks marked `norun`, and blocks with no closing fence, never run ([[Running Code#Keep a block from running]]).
+
+The blocks run in the note's `cwd:`, or in the directory you ran `ledge run` from when the note has none. The environment is your terminal's, with the note's `env:`, `envFile:` and profile on top ([[Frontmatter and Environments]]). Your shell's startup files are not read, so aliases and functions defined there are not available.
+
+A block marked `confirm` shows its code and asks before anything runs. With no terminal to ask in, as in CI, `ledge run` refuses such a block unless you pass `--yes`.
+
+A note whose `host:` line names another machine is refused for now ([[Run Code on Remote Hosts]]). Run it from the app.
+
+Inside a note's terminal drawer, `ledge run` with no title means that note.
 
 ## Piping and JSON output
 

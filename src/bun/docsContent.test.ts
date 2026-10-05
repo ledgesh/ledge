@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { respellChords } from "../mainview/commands/format";
 import { configureModKey } from "../mainview/commands/modKey";
-import { noRun, parseFenceInfo } from "../mainview/editor/fenceInfo";
+import { noRun, parseFenceInfo } from "../shared/fenceInfo";
 import { DEFAULT_SETTINGS } from "../shared/settings";
 import { DOC_PAGES } from "./docsContent";
 

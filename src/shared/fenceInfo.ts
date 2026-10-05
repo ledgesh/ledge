@@ -7,14 +7,18 @@
 // `showLineNumbers` in Docusaurus, `{1,3}` for line-range highlighting. A
 // note carried in from one of them has to keep running here.
 //
-// Ledge reads two attributes, both decided by `confirmFor` and `noRun` below,
-// which sit beside the grammar so one test covers the parse and the meaning.
-// `confirm` (§4b) puts a modal between the run chord and execution. `norun`
-// (§4e) takes the run verbs off a block that is in the note to be read or
-// copied, such as an install step for another machine. Without the mark such
-// a block shows a live run button aimed at wherever this note's shell is,
-// which is why every fence in a runnable language in the manual carries it
-// (writing.md §10).
+// Ledge reads three attributes, decided by `confirmFor`, `noRun` and
+// `blockName` below, which sit beside the grammar so one test covers the
+// parse and the meaning. `confirm` (§4b) puts a modal between the run chord
+// and execution. `norun` (§4e) takes the run verbs off a block that is in the
+// note to be read or copied, such as an install step for another machine.
+// Without the mark such a block shows a live run button aimed at wherever this
+// note's shell is, which is why every fence in a runnable language in the
+// manual carries it (writing.md §10). `name` is how `ledge run -b` addresses
+// one block (interactions.md §9).
+//
+// The module is shared because both ends read fences: the view to draw run
+// controls, the CLI to run blocks from a shell (shared/codeBlocks.ts).
 
 /** A fence opener's language and attributes. */
 export interface FenceInfo {
@@ -32,12 +36,36 @@ export interface ConfirmSpec {
 }
 
 // A fence opener line: leading spaces or tabs, 3+ marks, then the info
-// string. fences.ts matches openers too, for a different job (deciding when
-// a typed mark or Enter closes the fence), and its patterns are narrower:
-// OPEN_TICK and OPEN_TILDE split the two mark characters, allow at most
+// string. OPEN_TICK and OPEN_TILDE below are narrower, for deciding whether a
+// line is an opener at all: they split the two mark characters, allow at most
 // three spaces of indent, and OPEN_TICK rejects a backtick inside the info.
-// Blocks here arrive already parsed as FencedCode, so the info is known good.
+// Blocks reach parseFenceInfo already parsed as FencedCode.
 const OPENER = /^[ \t]*(?:`{3,}|~{3,})(.*)$/;
+
+// A code-fence opener per CommonMark: up to 3 spaces of indent, then ``` or
+// ~~~ (3+ marks), then an info string. A backtick fence's info string may not
+// contain a backtick (` ```js`` ` is not a fence).
+const OPEN_TICK = /^( {0,3})(`{3,})([^`]*)$/;
+const OPEN_TILDE = /^( {0,3})(~{3,})(.*)$/;
+
+/**
+ * The line's code-fence opener shape (its indent and its fence marks), or
+ * null. Pure, so the grammar is testable line by line.
+ */
+export function fenceOpener(lineText: string): { indent: string; marker: string } | null {
+  const m = OPEN_TICK.exec(lineText) ?? OPEN_TILDE.exec(lineText);
+  return m ? { indent: m[1]!, marker: m[2]! } : null;
+}
+
+/**
+ * Whether a line closes a fence opened with `marker`: the same character, at
+ * least as many of them, nothing but blanks after (a close fence carries no
+ * info string).
+ */
+export function fenceCloser(lineText: string, marker: string): boolean {
+  const m = /^ {0,3}(`{3,}|~{3,})[ \t\r]*$/.exec(lineText);
+  return !!m && m[1]![0] === marker[0] && m[1]!.length >= marker.length;
+}
 
 // An attribute name: a letter, then letters/digits/-/_. A name that fails
 // this is another tool's syntax (`{1,3}`, `:::`) and is dropped in silence.
@@ -136,4 +164,14 @@ export function noRun(attrs: Map<string, string>): boolean {
   const raw = attrs.get("norun");
   if (raw === undefined) return false;
   return !OFF.has(raw.trim().toLowerCase());
+}
+
+/**
+ * The block's `name` attribute, or null when it has none. `ledge run -b
+ * <name>` addresses a block by it. A bare `name` or an empty value names
+ * nothing. The value keeps its case and is matched case-insensitively.
+ */
+export function blockName(attrs: Map<string, string>): string | null {
+  const raw = attrs.get("name")?.trim();
+  return raw ? raw : null;
 }

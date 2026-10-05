@@ -11,7 +11,7 @@ describe("parseCliArgs", () => {
     expect(p).toEqual({
       verb: "append",
       positionals: ["Shipping", "Notes"],
-      flags: { message: "hello", heading: "Log", json: false, all: false, help: false, version: false },
+      flags: { message: "hello", heading: "Log", json: false, all: false, yes: false, help: false, version: false },
     });
   });
 
@@ -19,12 +19,12 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["--version"])).toEqual({
       verb: "",
       positionals: [],
-      flags: { json: false, all: false, help: false, version: true },
+      flags: { json: false, all: false, yes: false, help: false, version: true },
     });
   });
 
   test("no argv at all is the empty verb (open the app)", () => {
-    expect(parseCliArgs([])).toEqual({ verb: "", positionals: [], flags: { json: false, all: false, help: false, version: false } });
+    expect(parseCliArgs([])).toEqual({ verb: "", positionals: [], flags: { json: false, all: false, yes: false, help: false, version: false } });
   });
 
   test("boolean flags and short aliases", () => {
@@ -32,7 +32,7 @@ describe("parseCliArgs", () => {
     expect(p).toEqual({
       verb: "ls",
       positionals: [],
-      flags: { workspace: "notes", json: true, all: true, help: false, version: false },
+      flags: { workspace: "notes", json: true, all: true, yes: false, help: false, version: false },
     });
   });
 
@@ -40,12 +40,12 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["new", "Idea", "-f", "projects/api"])).toEqual({
       verb: "new",
       positionals: ["Idea"],
-      flags: { folder: "projects/api", json: false, all: false, help: false, version: false },
+      flags: { folder: "projects/api", json: false, all: false, yes: false, help: false, version: false },
     });
     expect(parseCliArgs(["ls", "--folder", "admin"])).toEqual({
       verb: "ls",
       positionals: [],
-      flags: { folder: "admin", json: false, all: false, help: false, version: false },
+      flags: { folder: "admin", json: false, all: false, yes: false, help: false, version: false },
     });
   });
 

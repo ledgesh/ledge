@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { confirmFor, noRun, parseFenceInfo } from "./fenceInfo";
+import { blockName, confirmFor, fenceCloser, fenceOpener, noRun, parseFenceInfo } from "./fenceInfo";
 
 const attrsOf = (line: string) => Object.fromEntries(parseFenceInfo(line).attrs);
 
@@ -104,5 +104,41 @@ describe("noRun", () => {
     const attrs = parseFenceInfo("```sh norun confirm").attrs;
     expect(noRun(attrs)).toBe(true);
     expect(confirmFor(attrs, false)).toEqual({ message: null });
+  });
+});
+
+describe("fenceOpener / fenceCloser", () => {
+  test("openers: marks, info strings, up to 3 spaces of indent", () => {
+    expect(fenceOpener("```")).toEqual({ indent: "", marker: "```" });
+    expect(fenceOpener("   ````python")).toEqual({ indent: "   ", marker: "````" });
+    expect(fenceOpener("~~~ any ` info")).toEqual({ indent: "", marker: "~~~" });
+    expect(fenceOpener("    ```")).toBeNull(); // 4 spaces: indented code
+    expect(fenceOpener("``")).toBeNull();
+    expect(fenceOpener("text")).toBeNull();
+  });
+
+  test("closers: same character, at least as many, nothing after", () => {
+    expect(fenceCloser("```", "```")).toBe(true);
+    expect(fenceCloser("````", "```")).toBe(true);
+    expect(fenceCloser("```", "````")).toBe(false);
+    expect(fenceCloser("~~~", "```")).toBe(false);
+    expect(fenceCloser("``` js", "```")).toBe(false);
+    expect(fenceCloser("  ``` \r", "```")).toBe(true);
+  });
+});
+
+describe("blockName", () => {
+  const nameOf = (line: string) => blockName(parseFenceInfo(line).attrs);
+
+  test("reads name=, quoted or not, keeping its case", () => {
+    expect(nameOf("```sh name=migrate")).toBe("migrate");
+    expect(nameOf('```sh confirm name="Roll Back"')).toBe("Roll Back");
+    expect(nameOf("```sh NAME=Deploy")).toBe("Deploy");
+  });
+
+  test("a bare or empty name names nothing", () => {
+    expect(nameOf("```sh name")).toBeNull();
+    expect(nameOf('```sh name=""')).toBeNull();
+    expect(nameOf("```sh")).toBeNull();
   });
 });

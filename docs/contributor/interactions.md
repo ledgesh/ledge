@@ -1039,7 +1039,7 @@ redis-cli -n 0 flushdb
 ```
 ````
 
-- **The grammar is the fence's info string** (`editor/fenceInfo.ts`), because
+- **The grammar is the fence's info string** (`shared/fenceInfo.ts`), because
   CommonMark leaves everything past the language word free and every other
   renderer keeps highlighting off that first word alone: a marked block is
   still a highlighted `sh` block on GitHub, and the marker travels with the
@@ -1047,7 +1047,8 @@ redis-cli -n 0 flushdb
   reported** — mdBook's `no_run`, Docusaurus's `title=`, and line-range
   `{1,3}` all live in this slot, and a note carried in from one of them must
   not stop running. `confirm=no` is the off switch; any other value is the
-  question to ask.
+  question to ask. The same slot carries `norun` (§4e) and `name=`, which
+  only `ledge run -b` reads (§9).
 - **A note-wide stance is frontmatter** (`confirm: true`), for a runbook whose
   blocks are all consequential; the per-block attribute wins in both
   directions, so one harmless block opts out with `confirm=no`.
@@ -1158,7 +1159,7 @@ run this.`
 
 A fence marked `norun` in its info string offers no way to run it: no run pair
 on the card, no Run Block Inline in the context menu, and the chords and the
-palette answer with a notice instead of executing (`editor/fenceInfo.ts`
+palette answer with a notice instead of executing (`shared/fenceInfo.ts`
 `noRun`, `editor/blocks.ts`). Only the copy button remains.
 
 ````markdown
@@ -1483,7 +1484,7 @@ verb table (`src/bun/cli.ts`), governed here so it stays coherent with the
 app rather than growing its own dialect.
 
 - **Verbs are unix-shaped and few**: `ls`, `cat`, `search`, `tags`, `new`,
-  `today`, `append`, `workspaces`, `open`, `mcp`, `version`, `help`, plus the four
+  `today`, `append`, `run`, `workspaces`, `open`, `mcp`, `version`, `help`, plus the four
   server verbs `serve`, `daemon`, `pair` and `backup`, which
   `src/bun/serve.ts` answers before this table sees the arguments and
   remote.md governs. `backup` has verbs of its own (`setup`, `now`,
@@ -1516,6 +1517,33 @@ app rather than growing its own dialect.
   resolution, workspace deixis, naming, and the divergence guard cannot
   drift from what agents (and the app) get. Error guidance is the handlers'
   text with tool names translated to CLI verbs (`humanize` in cli.ts).
+- **`ledge run` runs a note's blocks in the caller's shell, never the
+  daemon's** (`src/bun/runBlocks.ts` plans, cli.ts runs). The note comes
+  through `read_note`, so a locked note refuses. A block is addressed three
+  ways: `-b <n>` by its number among the note's runnable blocks (the list's
+  numbering), `-b <name>` by `name=` on its fence (§4b's slot; two blocks
+  with one name refuse), and `Title#Heading` for every block in that section
+  (`shared/wikilinks.ts` headingSection, append's rule). `--all` runs the
+  whole note. With none of these it prints the list and exits 2, or offers
+  a pick when stdin and stdout are a terminal. "Runnable" is the app's
+  rule: a `blocks.runnable` language, a closing fence, no `norun` (§4c,
+  §4e), read with the editor's Lezer parser (`shared/codeBlocks.ts`), so a
+  number means the same block in both. The selected blocks run in order in
+  one `settings.shell.path` (zsh or bash) process via `runner.ts`, so cwd
+  and env carry across them as in the note's inline shell; the first
+  non-zero exit stops the run and is the verb's exit code, with the block
+  named on stderr. The caller's directory is the cwd when the note has no
+  `cwd:`; a `cwd:` that is not a directory refuses rather than falling back
+  to `$HOME`. The base env is the caller's (host-terminal vars kept, rc
+  files not read), with the note's layers and `LEDGE_NOTE`/`LEDGE_WORKSPACE`
+  on top (architecture.md §6a). `confirm` (§4b) asks every question before
+  the first block runs, showing the code, so a declined block never leaves
+  a runbook half done; with no terminal it refuses unless `--yes`, which is
+  the script author's explicit answer rather than a remembered one. A note
+  whose `host:` names any machine but `local` refuses: there is no picker
+  without a person, and the remote path is not built yet. There is no MCP
+  twin: an agent has its own shell, and an agent passing `--yes` would
+  defeat `confirm`.
 - **"Here" is the cwd, down to the folder.** A cwd inside a registered root
   scopes `ls`/`search` (`--all` widens), anchors `new`, and tie-breaks title
   resolution — folded into the same `$LEDGE_WORKSPACE` chain a note terminal's

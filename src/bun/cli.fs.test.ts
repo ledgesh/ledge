@@ -4,7 +4,7 @@
 // or a title. One spawned process covers import.meta.main. This file and
 // notes.fs.test.ts share the preload's scratch APP_HOME, re-checked below.
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { readNote } from "./notes";
@@ -56,10 +56,14 @@ interface Run {
 // The default cwd of tmpdir() stands for "outside every workspace". tmpdir()
 // sits above the scratch APP_HOME, not inside a registered root, and
 // rootContaining matches only a path at or below a root.
-async function run(argv: string[], opts: { cwd?: string; stdin?: string } = {}): Promise<Run> {
+async function run(
+  argv: string[],
+  opts: { cwd?: string; stdin?: string; answers?: string[] } = {},
+): Promise<Run> {
   const out: string[] = [];
   const err: string[] = [];
   let opens = 0;
+  const answers = opts.answers;
   const io: CliIo = {
     out: (l) => out.push(l),
     err: (l) => err.push(l),
@@ -68,6 +72,20 @@ async function run(argv: string[], opts: { cwd?: string; stdin?: string } = {}):
     openApp: async () => {
       opens += 1;
       return true;
+    },
+    // A person at a terminal only when the test brings answers.
+    interactive: () => answers !== undefined,
+    ask: async (question) => {
+      err.push(question);
+      return answers?.shift() ?? null;
+    },
+    // The real spawn, with the child's output captured per line.
+    exec: async (cmd, { cwd, env }) => {
+      const proc = Bun.spawn({ cmd, cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      const [o, e] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+      out.push(...o.split("\n").filter((l) => l !== ""));
+      err.push(...e.split("\n").filter((l) => l !== ""));
+      return await proc.exited;
     },
   };
   return { code: await runCli(argv, io), out, err, opens };
@@ -373,6 +391,131 @@ describe("folders", () => {
     await rm(wandering.out[0]!, { force: true });
     const named = await run(["today", "-f", "journal"], { cwd: ROOT });
     expect(named.out[0]!.startsWith(join(ROOT, "journal") + sep)).toBe(true);
+  });
+});
+
+describe("run", () => {
+  // A note made from its whole text, frontmatter included.
+  const note = async (text: string): Promise<void> => {
+    const r = await run(["new"], { cwd: ROOT, stdin: text });
+    expect(r.code).toBe(0);
+  };
+
+  const RUNBOOK = [
+    "# Runbook",
+    "",
+    "```sh name=setup",
+    "cd /",
+    "export GREETING=hello",
+    "```",
+    "",
+    "## Check",
+    "",
+    "```sh",
+    'echo "$GREETING from $(pwd)"',
+    "```",
+    "",
+    "```ts name=typed",
+    "console.log(1 + 1);",
+    "```",
+  ].join("\n");
+
+  test("with no block named and no terminal, it lists the blocks and runs nothing", async () => {
+    await note(RUNBOOK);
+    const r = await run(["run", "Runbook"]);
+    expect(r.code).toBe(2);
+    expect(r.out).toEqual(["1  sh  setup  Runbook  cd /", "2  sh         Check    echo \"$GREETING from $(pwd)\"", "3  ts  typed  Check    console.log(1 + 1);"]);
+    expect(r.err.join("\n")).toContain("nothing run");
+  });
+
+  test("--json lists the blocks as data", async () => {
+    await note(RUNBOOK);
+    const r = await run(["run", "Runbook", "--json"]);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out.join("\n")).map((b: { name: string | null }) => b.name)).toEqual(["setup", null, "typed"]);
+  });
+
+  test("--all runs the blocks in one shell, so cd and export carry", async () => {
+    await note(RUNBOOK);
+    const r = await run(["run", "Runbook", "--all"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toEqual(["hello from /", "2"]);
+    expect(r.err).toContain('ledge: running block 3 "typed" (ts, line 14)');
+  });
+
+  test("-b runs one block by name or number, and a section runs its blocks", async () => {
+    await note(RUNBOOK);
+    expect((await run(["run", "Runbook", "-b", "typed"])).out).toEqual(["2"]);
+    // With no cwd: in the note, the caller's directory.
+    expect((await run(["run", "Runbook", "-b", "2"], { cwd: ROOT })).out).toEqual([` from ${await realpath(ROOT)}`]);
+    expect((await run(["run", "Runbook#Check"])).out).toEqual([` from ${await realpath(tmpdir())}`, "2"]);
+  });
+
+  test("the run stops at the first failing block and exits with its status", async () => {
+    await note(["# Fails", "", "```sh", "echo one", "exit 3", "```", "", "```sh", "echo never", "```"].join("\n"));
+    const r = await run(["run", "Fails", "--all"]);
+    expect(r.code).toBe(3);
+    expect(r.out).toEqual(["one"]);
+    expect(r.err).toContain("ledge: block 1 (sh, line 3) exited 3; the blocks after it did not run");
+  });
+
+  test("the note's cwd, env and identity reach the shell", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ledge-run-cwd-"));
+    try {
+      await note(
+        ["---", `cwd: ${dir}`, "env:", "  COLOR: blue", "---", "# Env", "", "```sh", 'echo "$(pwd) $COLOR"', 'echo "$LEDGE_NOTE"', "```"].join("\n"),
+      );
+      const r = await run(["run", "Env", "-b", "1"]);
+      expect(r.code).toBe(0);
+      expect(r.out[0]).toBe(`${await realpath(dir)} blue`);
+      expect(r.out[1]).toEndWith(`${sep}env.md`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a confirm block asks first, and with no terminal needs --yes", async () => {
+    await note(["# Careful", "", '```sh confirm="Wipe it?"', "echo wiped", "```"].join("\n"));
+    const refused = await run(["run", "Careful", "-b", "1"]);
+    expect(refused.code).toBe(1);
+    expect(refused.out).toEqual([]);
+    expect(refused.err.join("\n")).toContain("Pass --yes");
+
+    expect((await run(["run", "Careful", "-b", "1", "--yes"])).out).toEqual(["wiped"]);
+
+    const declined = await run(["run", "Careful", "-b", "1"], { answers: ["n"] });
+    expect(declined.code).toBe(1);
+    expect(declined.out).toEqual([]);
+    expect(declined.err).toContain("Block 1 (sh, line 3) asks first: Wipe it?");
+    expect(declined.err).toContain("    echo wiped");
+
+    expect((await run(["run", "Careful", "-b", "1"], { answers: ["y"] })).out).toEqual(["wiped"]);
+  });
+
+  test("at a terminal, the list is a pick", async () => {
+    await note(RUNBOOK);
+    const r = await run(["run", "Runbook"], { answers: ["typed"] });
+    expect(r.code).toBe(0);
+    expect(r.out.at(-1)).toBe("2");
+    const none = await run(["run", "Runbook"], { answers: [""] });
+    expect(none.code).toBe(0);
+  });
+
+  test("a note whose blocks run on another machine is refused", async () => {
+    await note(["---", "host: deploy@prod", "---", "# Remote", "", "```sh", "echo here", "```"].join("\n"));
+    const r = await run(["run", "Remote", "--all"]);
+    expect(r.code).toBe(1);
+    expect(r.out).toEqual([]);
+    expect(r.err.join("\n")).toContain("on deploy@prod (its host: line)");
+  });
+
+  test("norun and unclosed blocks are not offered, and say why when named", async () => {
+    await note(["# Quoted", "", "```sh norun name=install", "sudo x", "```"].join("\n"));
+    const listed = await run(["run", "Quoted"]);
+    expect(listed.code).toBe(1);
+    expect(listed.err.join("\n")).toContain("has no runnable blocks");
+    const named = await run(["run", "Quoted", "-b", "install"]);
+    expect(named.err.join("\n")).toContain("is marked norun");
   });
 });
 

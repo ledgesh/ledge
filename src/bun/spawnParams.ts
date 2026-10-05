@@ -64,10 +64,12 @@ export function resolveSpawn(
   deps: SpawnDeps,
   home: string = homedir(),
   profilesDir: string = PROFILES_DIR,
+  // False for `ledge run`, whose blocks do run inside the caller's terminal.
+  opts: { scrubHostTerminal?: boolean } = {},
 ): ResolvedSpawn {
   const cwd = resolveCwd(params?.cwd ?? null, home, deps);
   const env = { ...baseEnv };
-  scrubHostTerminal(env);
+  if (opts.scrubHostTerminal !== false) scrubHostTerminal(env);
 
   if (params?.envFile) {
     // Relative to the note's cwd, so `envFile: ./.env` composes with
@@ -257,16 +259,21 @@ function expandTilde(path: string, home: string): string {
   return path;
 }
 
+/** The absolute path a note's `cwd:` names. ~ expands, and a relative path
+ * resolves against $HOME, the only anchor a note has: a note's own path is
+ * not one, since notes move on retitle. */
+export function noteCwdPath(cwd: string, home: string = homedir()): string {
+  const expanded = expandTilde(cwd, home);
+  return isAbsolute(expanded) ? expanded : resolve(home, expanded);
+}
+
 // A cwd that does not name a real directory falls back to $HOME with a warning
 // rather than being passed through. The spawn trampoline `_exit(125)`s on a
 // failed chdir (dist-native/ledge_pty.c), so a stale path would end the shell
 // before it ran anything, and the terminal would show nothing to say why.
 function resolveCwd(cwd: string | null, home: string, deps: SpawnDeps): string {
   if (!cwd) return home;
-  // Relative resolves against $HOME, the only anchor a note has. A note's own
-  // path is not one: notes move on retitle.
-  const expanded = expandTilde(cwd, home);
-  const absolute = isAbsolute(expanded) ? expanded : resolve(home, expanded);
+  const absolute = noteCwdPath(cwd, home);
   if (deps.isDir(absolute)) return absolute;
   deps.warn(`cwd "${cwd}" is not a directory; spawning in ${home}`);
   return home;

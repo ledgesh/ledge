@@ -89,6 +89,10 @@ Use it for a command that belongs on some other machine, or in some other direct
 
 The manual's own blocks are all marked this way, which is why none of them has a Run button.
 
+## Run blocks from a terminal
+
+`ledge run` runs a note's blocks from any terminal, a script or CI, with the note's `cwd`, `env` and profile. `name=` on a fence gives a block a name to run it by: ```` ```sh name=migrate ````. See [[The ledge CLI#Run a note's blocks]].
+
 ## Shell blocks share one shell
 
 Shell blocks (`sh`, `bash`, `zsh`) run in the note's persistent inline shell. There is one per note, so a `cd`, an exported variable, or an activated virtualenv carries into the next run.

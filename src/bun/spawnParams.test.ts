@@ -171,6 +171,15 @@ describe("resolveSpawn: host-terminal identity is scrubbed", () => {
     expect(r.env["KITTYCAT"]).toBe("also mine");
   });
 
+  test("ledge run keeps them: its blocks run inside the caller's terminal", () => {
+    const { deps } = fakeFs();
+    const r = resolveSpawn(undefined, { ...BASE, TERM_PROGRAM: "WezTerm", TMUX: "/tmp/t" }, deps, HOME, PROFILES, {
+      scrubHostTerminal: false,
+    });
+    expect(r.env["TERM_PROGRAM"]).toBe("WezTerm");
+    expect(r.env["TMUX"]).toBe("/tmp/t");
+  });
+
   test("a note can opt one back in: the scrub is base-layer only", () => {
     // Frontmatter env applies after the scrub, so setting one of these names
     // there puts it back. A note can ask for the outer cmux's socket in order

@@ -158,6 +158,23 @@ export function headingsOf(text: string): NoteHeading[] {
 }
 
 /**
+ * The lines of `heading`'s section, 0-based: `start` is the heading's own line
+ * and `end` (exclusive) is the next heading of the same or shallower level, or
+ * the end of the note. The match is case-insensitive and whitespace-trimmed,
+ * and the first match wins. append_note and `ledge run Title#Heading` both
+ * read sections through this.
+ */
+export function headingSection(text: string, heading: string): { start: number; end: number } | null {
+  const want = heading.trim().toLowerCase();
+  if (want === "") return null;
+  const all = headingsOf(text);
+  const target = all.find((h) => h.text.toLowerCase() === want);
+  if (!target) return null;
+  const next = all.find((h) => h.line > target.line && h.level <= target.level);
+  return { start: target.line - 1, end: next ? next.line - 1 : text.split("\n").length };
+}
+
+/**
  * `text` with `addition` appended, at the end of the note or (given a
  * `heading`) at the end of that heading's section. A section runs to the next
  * heading of the same or shallower level, so appending under `## Sub` stays
@@ -178,14 +195,10 @@ export function appendToNote(text: string, addition: string, heading: string | n
   let secStart = 0;
   let secEnd = lines.length;
   if (heading !== null) {
-    const want = heading.trim().toLowerCase();
-    if (want === "") return null;
-    const all = headingsOf(text);
-    const target = all.find((h) => h.text.toLowerCase() === want);
-    if (!target) return null;
-    const next = all.find((h) => h.line > target.line && h.level <= target.level);
-    secStart = target.line - 1;
-    secEnd = next ? next.line - 1 : lines.length;
+    const section = headingSection(text, heading);
+    if (!section) return null;
+    secStart = section.start;
+    secEnd = section.end;
   }
 
   // Walk back from the section end: over blank lines, then over any whole

@@ -27,9 +27,12 @@
 // pipe never has to strip chatter. Exit codes: 0 ok, 1 failure (including a
 // search with no hits, grep's contract), 2 usage. interactions.md §9 governs
 // the verb table.
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { constants as osConstants, homedir, tmpdir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline";
 import { serve } from "./mcp";
 import { ledgeTools, resolveNoteForOpen } from "./mcpTools";
 import { tildify } from "./cliShim";
@@ -38,6 +41,20 @@ import { inWsl, openWindowsApp } from "./wslApp";
 import { writeOpenRequest } from "./openRequest";
 import { BUILD_VERSION, versionLine, type AppInfo } from "../shared/version";
 import { APP_HOME, loadWorkspaces, rootContaining, roots, workspaceMatches } from "./workspaces";
+import { loadSettings } from "./settings";
+import { bundledBun, interpretersFor, runnerFor } from "./runner";
+import {
+  isExecutableFile,
+  isSupportedShell,
+  noteCwdPath,
+  PROFILES_DIR,
+  resolveSpawn,
+  shellRefusal,
+  stampSessionFacts,
+  type SpawnDeps,
+} from "./spawnParams";
+import { blockLabel, confirmQuestion, driverScript, formatBlockList, hostRefusal, planRun, runOutcome } from "./runBlocks";
+import { LOCAL_HOST } from "../shared/frontmatter";
 
 export { tildify }; // display formatting; defined in cliShim.ts so the app's install handler shares it
 
@@ -52,8 +69,10 @@ export interface CliFlags {
   heading?: string;
   message?: string;
   template?: string;
+  block?: string;
   json: boolean;
   all: boolean;
+  yes: boolean;
   help: boolean;
   version: boolean;
 }
@@ -68,9 +87,9 @@ export interface ParsedCli {
 // a library's config). Flags may sit anywhere. `--` ends flag parsing, so a
 // title that starts with a dash stays reachable.
 export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: string } {
-  const flags: CliFlags = { json: false, all: false, help: false, version: false };
+  const flags: CliFlags = { json: false, all: false, yes: false, help: false, version: false };
   const positionals: string[] = [];
-  const valued: Record<string, "workspace" | "folder" | "heading" | "message" | "template"> = {
+  const valued: Record<string, "workspace" | "folder" | "heading" | "message" | "template" | "block"> = {
     "--workspace": "workspace",
     "-w": "workspace",
     "--folder": "folder",
@@ -79,6 +98,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: stri
     "--message": "message",
     "-m": "message",
     "--template": "template",
+    "--block": "block",
+    "-b": "block",
   };
   let literal = false;
   for (let i = 0; i < argv.length; i += 1) {
@@ -101,6 +122,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCli | { error: stri
     }
     if (a === "--json") flags.json = true;
     else if (a === "--all" || a === "-a") flags.all = true;
+    else if (a === "--yes" || a === "-y") flags.yes = true;
     else if (a === "--help" || a === "-h") flags.help = true;
     else if (a === "--version") flags.version = true;
     else return { error: `unknown flag: ${a}` };
@@ -218,6 +240,14 @@ usage:
   ledge append [title...]      append to a note; no title = the current note
          -m <text>             the text to append (or pipe it on stdin)
          --heading <h>         append at the end of that heading's section
+  ledge run [title[#heading]]  run a note's code blocks in this shell; no
+                               title = the current note. Lists the blocks
+                               unless told which: a #heading runs that
+                               section's blocks
+         -b <number|name>      run one block (a name is \`name=\` on the fence)
+         --all                 run every block, top to bottom; stops at the
+                               first that fails, with its exit code
+         -y, --yes             run blocks marked confirm without asking
   ledge workspaces             list workspace roots
   ledge mcp                    serve the Ledge MCP server on stdio
   ledge version                this copy's version, as a bug report wants it
@@ -246,7 +276,8 @@ flags:
   -f, --folder <folder>        ls/search/tags: only that folder and below;
                                new/today: create the note there;
                                cat/append: which of two same-titled notes
-  -a, --all                    ls/search: ignore the cwd workspace, go wide
+  -a, --all                    ls/search: ignore the cwd workspace, go wide;
+                               run: every block in the note
   --json                       machine-readable output`;
 
 /** The process seams, injected so cli.fs.test.ts can run verbs in-process. */
@@ -260,6 +291,14 @@ export interface CliIo {
    * this bun on Linux). Injected with the rest: a test driving the verbs must
    * never actually launch Ledge. False = not opened. */
   openApp(): Promise<boolean>;
+  /** Whether a person is at a terminal on both stdin and stdout, so `run`
+   * can offer a pick and ask before a confirm block. */
+  interactive(): boolean;
+  /** One line typed in answer to `question`; null at end of input. */
+  ask(question: string): Promise<string | null>;
+  /** Run `cmd` to completion and return its exit status. The real seam
+   * shares this process's stdin, stdout and stderr with it. */
+  exec(cmd: string[], opts: { cwd: string; env: Record<string, string> }): Promise<number>;
 }
 
 // Dispatch into a tool by name, the same seam mcpTools.fs.test.ts uses. A
@@ -492,6 +531,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
           if (n.divergedTo) io.err(`ledge: a concurrent edit was moved to the trash: ${tildify(n.divergedTo as string)}`);
           return 0;
         }
+        case "run":
+          return await runVerb(positionals.join(" "), flags, scope, io);
         case "workspaces":
         case "ws": {
           const list = await tool("list_workspaces", {});
@@ -529,6 +570,139 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 }
 
+// `ledge run`: the verb's I/O around runBlocks.ts's pure plan. The note comes
+// through read_note, so title resolution, deixis and the locked-note refusal
+// are the handler's. The blocks run in a child shell sharing this process's
+// terminal, never in the daemon (interactions.md §9).
+async function runVerb(arg: string, flags: CliFlags, scope: string | null, io: CliIo): Promise<number> {
+  // `Title#Heading`, split at the first # as a wikilink is.
+  const hash = arg.indexOf("#");
+  const title = (hash < 0 ? arg : arg.slice(0, hash)).trim();
+  const heading = hash < 0 ? null : arg.slice(hash + 1).trim() || null;
+  if (title === "" && !process.env["LEDGE_NOTE"]) {
+    io.err("ledge: run needs a title or a path (ledge ls shows both)");
+    return 2;
+  }
+  const n = await tool("read_note", targetArgs(title === "" ? null : title, io.cwd(), scope, flags.folder));
+  const settings = await loadSettings();
+  const req = { heading, block: flags.block ?? null, all: flags.all };
+  let plan = planRun(n.text, req, settings.blocks.runnable);
+
+  if (plan.kind === "list") {
+    if (flags.json) {
+      io.out(JSON.stringify(plan.blocks, null, 2));
+      return 0;
+    }
+    if (plan.blocks.length === 0) {
+      io.err(`ledge: "${n.title}" has no runnable blocks`);
+      return 1;
+    }
+    for (const row of formatBlockList(plan.blocks)) io.out(row);
+    if (!io.interactive()) {
+      io.err("ledge: nothing run. Name a block with -b, a section with Title#Heading, or run them all with --all");
+      return 2;
+    }
+    const pick = (await io.ask("Run which block? (number or name, Enter for none) "))?.trim() ?? "";
+    if (pick === "") return 0;
+    plan = planRun(n.text, { ...req, block: pick }, settings.blocks.runnable);
+  }
+  if (plan.kind === "error") {
+    io.err(`ledge: ${plan.message}`);
+    return plan.exit;
+  }
+  const blocks = plan.blocks;
+
+  const refusal = hostRefusal(plan.params) ?? shellRefusal(settings.shell.path, isExecutableFile);
+  if (refusal) {
+    io.err(`ledge: ${refusal}`);
+    return 1;
+  }
+  if (!isSupportedShell(settings.shell.path)) {
+    io.err(`ledge: run needs zsh or bash, and settings.jsonc names ${settings.shell.path}`);
+    return 1;
+  }
+
+  // Every confirm is answered before anything runs, so a declined block
+  // never leaves a runbook half done (interactions.md §4b).
+  if (!flags.yes) {
+    for (const b of blocks.filter((x) => x.confirm)) {
+      if (!io.interactive()) {
+        io.err(`ledge: ${blockLabel(b)} is marked confirm and there is no terminal to ask in. Pass --yes to run it anyway.`);
+        return 1;
+      }
+      io.err(confirmQuestion(b));
+      for (const line of b.code.split("\n")) io.err(`    ${line}`);
+      const answer = (await io.ask("Run it? [y/N] "))?.trim().toLowerCase();
+      if (answer !== "y" && answer !== "yes") {
+        io.err("ledge: nothing run");
+        return 1;
+      }
+    }
+  }
+
+  // The note's cwd: when it has one, else the caller's. A cwd: that is not a
+  // directory is refused here, where the app's shell would fall back to $HOME.
+  const params = plan.params;
+  let cwd = io.cwd();
+  if (params.cwd) {
+    cwd = noteCwdPath(params.cwd);
+    if (!isDirectory(cwd)) {
+      io.err(`ledge: this note's cwd: ${params.cwd} is not a directory`);
+      return 1;
+    }
+  }
+  const base: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined) base[k] = v;
+  const deps: SpawnDeps = {
+    readFile: (path) => {
+      try {
+        return readFileSync(path, "utf8");
+      } catch {
+        return null;
+      }
+    },
+    isDir: isDirectory,
+    warn: (msg) => io.err(`ledge: ${msg}`),
+  };
+  const { env } = resolveSpawn(params, base, deps, homedir(), PROFILES_DIR, { scrubHostTerminal: false });
+  stampSessionFacts(env, { note: n.path, workspace: n.workspace });
+
+  const dir = await mkdtemp(join(tmpdir(), "ledge-run-"));
+  const runId = `cli-${randomUUID()}`;
+  const interpreters = interpretersFor(LOCAL_HOST, settings.blocks);
+  const specs = blocks.map((b) => runnerFor(`${runId}-${b.index}`, b.lang, b.code, interpreters, bundledBun(process.execPath)));
+  try {
+    for (const spec of specs) await Bun.write(spec.path, spec.contents);
+    const driver = join(dir, "run.sh");
+    await Bun.write(driver, driverScript(blocks, specs, dir));
+    const status = await io.exec([settings.shell.path, driver], { cwd, env });
+    const current = Number(readTextOrNull(join(dir, "current")) ?? NaN);
+    const done = readTextOrNull(join(dir, "done")) !== null;
+    const outcome = runOutcome(blocks, status, Number.isNaN(current) ? null : current, done);
+    if (outcome) io.err(`ledge: ${outcome}`);
+    return status;
+  } finally {
+    await Promise.all(specs.map((spec) => rm(spec.path, { force: true })));
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function readTextOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 /** The real process seams, for `ledge` (serve.ts). */
 export function processIo(): CliIo {
   return {
@@ -542,6 +716,32 @@ export function processIo(): CliIo {
       if (process.platform !== "darwin") return false;
       const proc = Bun.spawn({ cmd: ["open", "-b", BUNDLE_ID], stdout: "ignore", stderr: "ignore" });
       return (await proc.exited) === 0;
+    },
+    interactive: () => !!process.stdin.isTTY && !!process.stdout.isTTY,
+    ask: async (question) => {
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        return await new Promise<string | null>((done) => {
+          rl.once("close", () => done(null));
+          rl.question(question, done);
+        });
+      } finally {
+        rl.close();
+      }
+    },
+    exec: async (cmd, { cwd, env }) => {
+      // Ctrl-C reaches the child through the terminal's process group. This
+      // process outlives it, to clean up and pass its status on.
+      const ignore = (): void => {};
+      process.on("SIGINT", ignore);
+      try {
+        const proc = Bun.spawn({ cmd, cwd, env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+        await proc.exited;
+        if (proc.signalCode) return 128 + (osConstants.signals[proc.signalCode] ?? 0);
+        return proc.exitCode ?? 1;
+      } finally {
+        process.off("SIGINT", ignore);
+      }
     },
   };
 }
