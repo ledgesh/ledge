@@ -116,8 +116,8 @@ const EMPTY_PARAMS_KEY = JSON.stringify({ params: parseFrontmatter("").params, n
 // harmless, a missed one leaves the next shell with a stale cwd or env.
 //
 // A note that names no `cwd:` of its own inherits its workspace's default
-// (workspaceDefaultCwd: the folder itself for an external workspace, null for
-// a managed one). The merge happens here, the one point params leave the view,
+// (workspaceDefaultCwd: the workspace's own folder, null for the docs
+// workspace). The merge happens here, the one point params leave the view,
 // so every consumer Bun-side (persistent, overflow, and drawer shells) gets the
 // same answer without knowing workspaces exist.
 function syncParams(e: Entry, text: string): void {

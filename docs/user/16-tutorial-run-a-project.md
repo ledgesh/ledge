@@ -28,7 +28,7 @@ The inline shell persists, so an exported variable or an activated virtualenv fr
 
 ## 2. Point it at the project
 
-So far those blocks run from your home folder, the default for notes in a managed workspace. One frontmatter line, added with ⌥⌘,, starts them in the project instead:
+So far those blocks run from the workspace's own folder in `~/.ledge`, the default for notes in a managed workspace. One frontmatter line, added with ⌥⌘,, starts them in the project instead:
 
 ```
 ---

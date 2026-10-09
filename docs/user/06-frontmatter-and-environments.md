@@ -26,7 +26,7 @@ A bad line costs only itself, never the rest of the block. Ledge writes what it 
 
 `cwd:` sets the working directory for every shell the note spawns, both the inline shell and the terminal drawer. `~` expands to your home folder, and a relative path resolves against it. If the directory does not exist, the shell spawns in your home folder instead.
 
-Notes in an attached project workspace use that project folder as their `cwd`, so they usually need no frontmatter. Notes in a managed workspace default to your home folder.
+A note with no `cwd:` uses its workspace's folder: the project folder for an attached workspace, the workspace's folder in `~/.ledge` for a managed one. Notes in the built-in documentation use your home folder.
 
 Inside a block, `$PWD` is that directory.
 

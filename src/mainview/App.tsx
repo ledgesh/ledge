@@ -231,6 +231,16 @@ function Shell() {
   // The Attach Folder dialog. Owned here rather than by the strip because a
   // phone keeps the sidebar unmounted, and the verb is the palette's too.
   const [attaching, setAttaching] = useState(false);
+  // New Workspace's name field, drawn at the end of the workspace strip.
+  // Owned here because ⇧⌘N may arrive while the sidebar, and so the strip, is
+  // unmounted: the hook opens the sidebar and raises this together.
+  const [namingWorkspace, setNamingWorkspace] = useState(false);
+  const endNaming = useCallback(() => setNamingWorkspace(false), []);
+  // Shutting the sidebar takes the field with it, so the next open does not
+  // bring back a name nobody is typing.
+  useEffect(() => {
+    if (!sidebarOpen) setNamingWorkspace(false);
+  }, [sidebarOpen]);
   const closeAttach = useCallback(() => setAttaching(false), []);
   const closeAbout = useCallback(() => setAboutOpen(false), []);
   // The vault passphrase dialog, carrying the act that was waiting on it
@@ -456,6 +466,10 @@ function Shell() {
       openAbout: () => setAboutOpen(true),
       openConnectionPicker: () => setPickingConnection(true),
       attachFolder: () => setAttaching(true),
+      beginNewWorkspace: () => {
+        openSidebar(true);
+        setNamingWorkspace(true);
+      },
       openVaultDialog: (then) => setVaultDialog({ then }),
       confirmRemoveLock: setRemoveLockConfirm,
       confirmLock: setLockConfirm,
@@ -888,12 +902,12 @@ function Shell() {
           {sidebarOpen &&
             (singlePane ? (
               <Drawer side="left" onClose={closeSidebar}>
-                <Sidebar />
+                <Sidebar naming={namingWorkspace} onEndNaming={endNaming} />
               </Drawer>
             ) : (
               <>
                 <div style={{ width: sidebarWidth }} className="min-w-0 shrink-0">
-                  <Sidebar />
+                  <Sidebar naming={namingWorkspace} onEndNaming={endNaming} />
                 </div>
                 <ResizeHandle
                   axis="x"

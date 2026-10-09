@@ -41,6 +41,7 @@ test.beforeEach(async ({ page }) => {
 
 test("a new workspace starts with an empty browser; the first keeps its notes", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await expect(wsRow(page, "Workspace 2")).toHaveClass(/bg-accent/);
   await expect(noteRow(page, "Alpha")).toHaveCount(0);
   await expect(page.getByText("No notes yet")).toBeVisible();
@@ -50,6 +51,7 @@ test("a new workspace starts with an empty browser; the first keeps its notes", 
 
 test("a note typed in workspace 2 lists there and only there", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   // The new workspace opens on a seeded scratch tab. Typing in it triggers
   // the first save. That save creates the file in the new workspace's folder.
   await page.locator(".cm-content").first().click();
@@ -64,6 +66,7 @@ test("a note typed in workspace 2 lists there and only there", async ({ page }) 
 
 test("⌘P quick-open lists only the selected workspace's notes", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await page.keyboard.press("Meta+p");
   const input = page.getByPlaceholder(/Search notes/);
   await expect(input).toBeVisible();
@@ -81,6 +84,7 @@ test("⌘P quick-open lists only the selected workspace's notes", async ({ page 
 
 test("⌥⌘P full-text search is scoped to the selected workspace", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await page.keyboard.press("Alt+Meta+p");
   const input = page.getByPlaceholder("Search inside notes");
   await input.fill("alpha body");
@@ -96,6 +100,7 @@ test("the Trash section is the selected workspace's; deletes stay in their folde
   // Workspace 1 boots with one seeded trashed note ("Older").
   await expect(page.getByText("Trash", { exact: true })).toBeVisible();
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   // Workspace 2's folder has an empty trash, so the section hides entirely.
   await expect(page.getByText("Trash", { exact: true })).toHaveCount(0);
   // A delete in workspace 1 lands in workspace 1's trash. Workspace 2 stays

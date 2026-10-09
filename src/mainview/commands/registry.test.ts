@@ -35,10 +35,6 @@ function stubDeps(
     },
     newWindow: () => calls.push("newWindow"),
     quitApp: () => calls.push("quitApp"),
-    createWorkspace: async () => {
-      calls.push("createWorkspace");
-      return null;
-    },
     attachWorkspace: async (path) => {
       calls.push(`attachWorkspace:${path}`);
       return null;
@@ -676,16 +672,27 @@ describe("registry", () => {
     expect(calls).toEqual([`restartSession:${leaf.tabs[0]!.docId}`]);
   });
 
-  test("run: workspace commands route through the action deps, not the reducer", () => {
-    // Creating needs a Bun round trip (the folder). Removing trashes or
-    // detaches the folder after the reducer closes the view. Both go through
-    // deps so the registry stays pure.
+  test("run: workspace.remove routes through the action deps, not the reducer", () => {
+    // Removing trashes or detaches the folder after the reducer closes the
+    // view, so it goes through deps and the registry stays pure.
     const calls: string[] = [];
     const cmds = buildCommands(stubDeps(calls));
     const state = apply(initialState(FOLDER, []), secondWs);
-    find(cmds, "workspace.new").run(makeCtx(state));
     find(cmds, "workspace.remove").run(makeCtx(state));
-    expect(calls).toEqual(["createWorkspace", `removeWorkspace:${state.selectedId}`]);
+    expect(calls).toEqual([`removeWorkspace:${state.selectedId}`]);
+  });
+
+  test("workspace.new asks for the name before anything is created", () => {
+    // The strip's field collects the name, and the folder is made from it
+    // (workspace/actions.ts createWorkspace). The command only opens it.
+    const calls: string[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const opened: string[] = [];
+    const ctx = makeCtx(initialState(FOLDER, []));
+    ctx.ui = { beginNewWorkspace: () => opened.push("new") };
+    find(cmds, "workspace.new").run(ctx);
+    expect(opened).toEqual(["new"]);
+    expect(calls).toEqual([]);
   });
 
   test("workspace.attach opens the dialog, which asks for the path", () => {

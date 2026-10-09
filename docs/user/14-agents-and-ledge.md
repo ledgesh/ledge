@@ -40,6 +40,8 @@ Every shell a note spawns carries two environment variables: `LEDGE_NOTE`, the n
 
 So "summarize this note" or "add a TODO section here" needs no explanation of what "this" means. Open the note you are working in, press ⌃` for its terminal, start your agent, and talk about "this note" and "this workspace" in plain words.
 
+Unless the note sets `cwd:`, that terminal starts in the workspace's folder, so the agent's own working directory is the workspace too ([[Frontmatter and Environments]]).
+
 ## Prompt fences
 
 A fenced block whose language is `prompt` is an agent run. Write instructions in it and press ⌘↩. The block's text is piped to the agent CLI in one-shot mode, and the output streams into the panel below like any other run ([[Running Code]]).

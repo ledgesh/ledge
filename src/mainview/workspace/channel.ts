@@ -81,15 +81,16 @@ export function dailyWorkspaceRoot(): string | null {
 
 /**
  * The default working directory for shells of notes in `folder`, null for
- * none (Bun spawns in $HOME). An external workspace anchors its shells to the
- * folder the user attached, which is mostly why anyone attaches a project
- * folder. A managed ~/.ledge/<slug>/ gets null: a shell born in a hidden
- * dotfolder helps nobody. A note's own `cwd:` wins over both (notes/store.ts
- * syncParams), and Bun validates the cwd it receives (bun/spawnParams.ts
- * resolveCwd, architecture.md §6a).
+ * none (Bun spawns in $HOME). A managed or external workspace anchors its
+ * shells to its own folder, so an agent started in a note's terminal works
+ * in the workspace it was started from. The docs workspace and an unknown
+ * root get null. A note's own `cwd:` wins (notes/store.ts syncParams), and
+ * Bun validates the cwd it receives (bun/spawnParams.ts resolveCwd,
+ * architecture.md §6a).
  */
 export function workspaceDefaultCwd(folder: string): string | null {
-  return kinds.get(folder) === "external" ? folder : null;
+  const kind = kinds.get(folder);
+  return kind === "managed" || kind === "external" ? folder : null;
 }
 
 // Test seam: forget every recorded kind (and the daily root).

@@ -19,7 +19,14 @@ import { configureUi, uiHooks } from "@/commands/glue";
 import { jumpBadge, keyChip, tooltip } from "@/commands/format";
 import { workspaceSelectKey } from "@/commands/keys";
 import { targetAttrs } from "@/commands/target";
-import { deleteDeletedWorkspace, renameWorkspace, restoreDeletedWorkspace, setWorkspaceIcon } from "./actions";
+import {
+  createWorkspace,
+  deleteDeletedWorkspace,
+  nextWorkspaceName,
+  renameWorkspace,
+  restoreDeletedWorkspace,
+  setWorkspaceIcon,
+} from "./actions";
 import {
   refreshTrashedWorkspaces,
   useTrashedWorkspaces,
@@ -28,7 +35,7 @@ import {
 } from "./channel";
 import { useWorkspace } from "./store";
 import { IconPicker } from "./IconPicker";
-import { iconFor } from "./icons";
+import { DEFAULT_ICON, iconFor } from "./icons";
 import { countTabs, leafIds, type Workspace } from "./tree";
 
 // How the sidebar splits between its two sections, and the room each keeps when
@@ -49,7 +56,9 @@ const STACK_BELOW = 480;
 // collection of tabs and panes. The browser lists the selected workspace's
 // notes (NoteBrowser.tsx). Both sections stay visible at once where there is
 // height for both; where there is not, the sidebar is one scrolling column.
-export function Sidebar() {
+// `naming`: New Workspace's name field is up at the end of the strip. App
+// holds the flag (App.tsx), because ⇧⌘N may arrive while the sidebar is shut.
+export function Sidebar({ naming = false, onEndNaming }: { naming?: boolean; onEndNaming?: () => void }) {
   const [stripHeight, setStripHeight] = useState(STRIP_DEFAULT);
   // The sidebar's live height, measured because the split depends on it and
   // the strip's height is clamped against it. Null until the first layout.
@@ -102,7 +111,7 @@ export function Sidebar() {
         style={stacked ? undefined : { height }}
         className="flex min-h-0 shrink-0 flex-col"
       >
-        <WorkspaceStrip stacked={stacked} />
+        <WorkspaceStrip stacked={stacked} naming={naming} onEndNaming={onEndNaming ?? (() => {})} />
       </div>
       {!stacked && (
         <ResizeHandle axis="y" current={height} onResize={resize} title="Drag to resize" />
@@ -124,7 +133,15 @@ let draggingWs: string | null = null;
 
 // `stacked`: the sidebar is one scrolling column (Sidebar above), so the list
 // takes its natural height and scrolls with the column instead of within it.
-function WorkspaceStrip({ stacked }: { stacked: boolean }) {
+function WorkspaceStrip({
+  stacked,
+  naming,
+  onEndNaming,
+}: {
+  stacked: boolean;
+  naming: boolean;
+  onEndNaming: () => void;
+}) {
   const { state, dispatch } = useWorkspace();
   const { exec } = useCommands();
   const modHeld = useModHeld();
@@ -291,6 +308,19 @@ function WorkspaceStrip({ stacked }: { stacked: boolean }) {
           </div>
         ))}
         {dropIndex === strip.length && <DropMarker />}
+        {naming && (
+          <NewWorkspaceRow
+            initial={nextWorkspaceName(state)}
+            onCommit={(name) => {
+              const trimmed = name.trim();
+              if (!trimmed) return;
+              void createWorkspace(trimmed, dispatch).then((err) => {
+                if (err) uiHooks.showError?.(err);
+              });
+            }}
+            onDone={onEndNaming}
+          />
+        )}
       </div>
       <WorkspaceTrashSection />
       {/* A split button: the wide half runs New Workspace, the chevron opens a
@@ -379,6 +409,32 @@ function WorkspaceStrip({ stacked }: { stacked: boolean }) {
 // The insertion caret shown between rows while a drag hovers the strip.
 function DropMarker() {
   return <div className="mx-1 my-0.5 h-0.5 rounded bg-primary" />;
+}
+
+// The row New Workspace adds while it asks for the name: the shape of a
+// WorkspaceRow, holding only the field. Enter or blur creates the workspace,
+// Escape leaves nothing behind (RenameField).
+function NewWorkspaceRow({
+  initial,
+  onCommit,
+  onDone,
+}: {
+  initial: string;
+  onCommit: (name: string) => void;
+  onDone: () => void;
+}) {
+  const Icon = iconFor(DEFAULT_ICON);
+  return (
+    <div
+      data-testid="new-workspace-row"
+      className="flex items-center gap-2 rounded-md px-2 py-1.5 touch:min-h-[44px]"
+    >
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <RenameField initial={initial} onCommit={onCommit} onDone={onDone} />
+      </div>
+    </div>
+  );
 }
 
 function WorkspaceRow({

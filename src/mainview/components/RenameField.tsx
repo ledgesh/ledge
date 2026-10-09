@@ -58,8 +58,12 @@ export function RenameField({
         // bubble phase (commands/CommandProvider.tsx). A name being typed here
         // is not a command, so the key does not reach them.
         e.stopPropagation();
-        if (e.key === "Enter") commit();
-        else if (e.key === "Escape") abandon();
+        // Default prevented, so the Enter that creates a workspace does not
+        // also type a newline into the editor that takes focus next.
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") abandon();
       }}
       // It opens focused and selected, so this is not a target to find. It is
       // one to put the caret back into after a typo, and 22 points is not that.

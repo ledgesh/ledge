@@ -148,8 +148,8 @@ filed, that goes one level deeper: a cwd BELOW the root names a folder too
 (`cwdFolder`), which `ls`, `search`, `tags` and `new` honor — a shell command
 acting on the directory you stand in. The folder rides as a tool argument and
 not as a third environment fact: there is no `$LEDGE_FOLDER`, because a note's
-terminal spawns in `$HOME` or the note's own `cwd:` (§6a), neither of which
-says anything about where the note is filed. And **the open
+terminal spawns in its workspace's root or the note's own `cwd:` (§6a),
+neither of which says which folder inside the workspace the note is filed in. And **the open
 request** (`bun/openRequest.ts`): `ledge <title>` resolves the title
 CLI-side, writes `.open-request.json` in the app home (temp-plus-rename),
 and launches/activates the app; the app consumes it — read, delete,
@@ -972,13 +972,13 @@ alike, which is what keeps all three telling one story about the note.
   anywhere, same cwd, same env. A knob belongs in frontmatter only when the
   right value genuinely varies per note (cwd, env); a knob that varies per
   person stays in settings. Neither is session state (§6 still applies).
-- **An external workspace anchors the default cwd.** A note that names no
-  `cwd:` of its own spawns shells in its workspace's folder when that
-  workspace is an attached external directory — attaching a project folder
-  is mostly *about* its shells starting in the project. Managed
-  `~/.ledge/<slug>/` workspaces have no default (a shell born inside a
-  hidden dotfolder helps nobody): their notes keep `$HOME`, exactly as
-  before workspaces had folders. The merge is view-side and implicit — no
+- **A workspace anchors the default cwd.** A note that names no `cwd:` of
+  its own spawns shells in its workspace's folder, managed or external. For
+  an attached project folder that is the project. For a managed
+  `~/.ledge/<slug>/` it is where an agent started in the note's terminal
+  should work: its working directory then is the workspace the MCP server's
+  `$LEDGE_WORKSPACE` already names. The docs workspace has no default and
+  keeps `$HOME`. The merge is view-side and implicit — no
   per-workspace knob, no persistence: `notes/store.ts` (`syncParams`) fills
   the empty cwd from `workspace/channel.ts`'s kind map, which records each
   root's kind as its handle enters the view. Bun neither knows nor cares:

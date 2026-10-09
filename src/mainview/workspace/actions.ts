@@ -22,16 +22,16 @@ import { tabPaths, type Workspace } from "./tree";
 import { isIconKey } from "./icons";
 import type { NoteMeta, TrashMeta } from "../../shared/rpc-schema";
 
-// New Workspace. Bun creates the folder first (it slugs the display name and
-// allocates a name nothing else holds, bun/workspaces.ts), then this adds the
-// workspace over it. The name counts the existing workspaces the way the old
-// pure action did, so the strip still reads Workspace 2, Workspace 3, and so
-// on.
-export async function createWorkspace(
-  state: AppState,
-  dispatch: (action: Action) => void,
-): Promise<string | null> {
-  const name = `Workspace ${state.workspaces.length + 1}`;
+// The name the strip's New Workspace field opens with: Workspace 2,
+// Workspace 3, and so on, counting the existing workspaces.
+export function nextWorkspaceName(state: AppState): string {
+  return `Workspace ${state.workspaces.length + 1}`;
+}
+
+// New Workspace, once the strip's field has its name. Bun creates the folder
+// first, named from that name (it slugs it and allocates a name nothing else
+// holds, bun/workspaces.ts), then this adds the workspace over it.
+export async function createWorkspace(name: string, dispatch: (action: Action) => void): Promise<string | null> {
   try {
     const folder = await createWorkspaceFolder(name);
     dispatch({ type: "addWorkspace", name, folder });

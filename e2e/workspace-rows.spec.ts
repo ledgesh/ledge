@@ -23,6 +23,7 @@ test("Enter on a focused row switches to that workspace", async ({ page }) => {
   // /bg-accent/ below matches an unselected row too, for the reason the
   // anchored assertion gives, so it does not check the selection itself.
   await page.keyboard.press("Meta+Shift+N"); // second workspace
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await expect(wsRow(page, "Workspace 2")).toHaveClass(/bg-accent/);
   await wsRow(page, "Workspace 2").click();
   // ArrowUp moves the focused row to Scratch without selecting it. Selection
@@ -36,6 +37,27 @@ test("Enter on a focused row switches to that workspace", async ({ page }) => {
   // Enter commits the switch.
   await page.keyboard.press("Enter");
   await expect(wsRow(page, "Scratch")).toHaveClass(/(^|\s)bg-accent(\s|$)/);
+});
+
+test("New Workspace asks for the name first, and the folder is named after it", async ({ page }) => {
+  await page.keyboard.press("Meta+Shift+N");
+  const field = page.getByTestId("new-workspace-row").getByRole("textbox");
+  await expect(field).toHaveValue("Workspace 2");
+  await field.fill("Infra Runbooks");
+  await field.press("Enter");
+  await expect(wsRow(page, "Infra Runbooks")).toHaveClass(/(^|\s)bg-accent(\s|$)/);
+  await expect(page.getByTestId("new-workspace-row")).toHaveCount(0);
+  const root = await page.evaluate(
+    () => [...window.__harness.store.labels].find(([, l]) => l.name === "Infra Runbooks")?.[0] ?? null,
+  );
+  expect(root).toBe("/harness/infra-runbooks");
+});
+
+test("Escape in the New Workspace field creates nothing", async ({ page }) => {
+  await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Escape");
+  await expect(page.getByTestId("new-workspace-row")).toHaveCount(0);
+  await expect(page.locator('[data-target-kind="workspace"]')).toHaveCount(1);
 });
 
 test("`r` begins an inline rename; committing it renames the workspace", async ({ page }) => {
@@ -54,6 +76,7 @@ test("`r` begins an inline rename; committing it renames the workspace", async (
 
 test("keys typed in the rename field are typing, never row verbs", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+N"); // a second workspace, so there is something to close
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await wsRow(page, "Workspace 2").click();
   await page.keyboard.press("r");
   const field = page.locator('[data-target-kind="workspace"]').getByRole("textbox");
@@ -72,6 +95,7 @@ test("keys typed in the rename field are typing, never row verbs", async ({ page
 
 test("⌫ deletes the focused workspace", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await wsRow(page, "Workspace 2").click();
   await page.keyboard.press("Backspace");
   await expect(wsRow(page, "Workspace 2")).toHaveCount(0);
@@ -118,6 +142,7 @@ const trashedRow = (page: Page, name: string) =>
 // survival the specs below can check.
 async function workspaceWithNote(page: Page): Promise<void> {
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await expect(wsRow(page, "Workspace 2")).toBeVisible();
   await page.keyboard.press("Meta+n");
   await page.keyboard.type("Kept Note");

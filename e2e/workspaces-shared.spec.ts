@@ -60,6 +60,7 @@ test("another client's rename renames the row here", async ({ page }) => {
 
 test("a workspace another client removed leaves the strip", async ({ page }) => {
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await expect(wsRow(page, "Workspace 2")).toBeVisible();
   // The create stored the name on the server, the label a phone would read.
   const root = await page.evaluate(

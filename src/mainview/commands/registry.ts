@@ -534,18 +534,13 @@ export function buildCommands(deps: RegistryDeps): Command[] {
     // That window has no workspace strip (remote.md §8a), so a workspace
     // created there would be selected and invisible: the manual replaced by a
     // scratch note, with no way back to either.
+    // The name comes first, so the folder Bun makes is named after it
+    // (bun/workspaces.ts createManaged) rather than after a placeholder the
+    // user renames later.
     cmd("workspace.new", {
       icon: Plus,
       when: () => !docsWindow(),
-      // Async behind a void (deleteNoteWithUndo's pattern): Bun creates the
-      // folder, then the reducer adds the workspace over it. The promise
-      // resolves to an error message to show, or to null (types.ts
-      // createWorkspace).
-      run: (ctx) => {
-        void deps.createWorkspace(ctx.state, ctx.dispatch).then((err) => {
-          if (err) ctx.ui.showError?.(err);
-        }, failed(ctx));
-      },
+      run: (ctx) => ctx.ui.beginNewWorkspace?.(),
     }),
     // Register an existing directory on the server as a workspace, by its
     // path there. The dialog App owns asks for it (App.tsx), and its submit

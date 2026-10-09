@@ -15,7 +15,7 @@ Ledge saves as you type, a moment after you pause. ⌘S saves at once.
 The strip at the top of the sidebar lists your workspaces. Each one is a single folder of notes, and ⌘1 through ⌘9 jump between them. There are two kinds:
 
 - **Attached.** "Attach Folder as Workspace…" (in the command palette, in the + button's menu, or by right-clicking the empty space below the workspaces) turns a folder you already have into a workspace, usually a project you work on. Type the folder's path (`~` stands for your home folder), or press Choose Folder… to pick it. Its `.md` files become notes where they are, and each of those notes runs its blocks in the project folder with no frontmatter ([[Running Code]]).
-- **Managed.** ⇧⌘N creates a workspace whose folder Ledge makes for you inside `~/.ledge`. Its notes default to your home folder, and `cwd:` frontmatter points them elsewhere ([[Frontmatter and Environments]]).
+- **Managed.** ⇧⌘N asks for a name, then creates a workspace whose folder Ledge makes for you inside `~/.ledge`, named after it: "Infra Runbooks" gets `~/.ledge/infra-runbooks`. Escape cancels. Renaming the workspace later changes only the name in the sidebar, not the folder. Its notes run their blocks in that folder, and `cwd:` frontmatter points them elsewhere ([[Frontmatter and Environments]]).
 
 Managed workspace folders live in `~/.ledge`.
 

@@ -88,6 +88,11 @@ export interface UiHooks {
   // its note list and its text search. "" or absent means the whole workspace.
   openOverlay(mode: "notes" | "commands" | "search", opts?: { query?: string; folder?: string }): void;
   beginRenameWorkspace(id: string): void;
+  // Open the sidebar with a name field at the end of the workspace strip.
+  // Enter creates the workspace and its folder from the name typed, Escape
+  // creates nothing. App owns it, because the strip is unmounted while the
+  // sidebar is shut.
+  beginNewWorkspace(): void;
   // Put the inline rename field on a folder row of the note browser, the same
   // gesture the workspace strip uses. The browser owns it because the field
   // replaces a row, and only the list knows which row that is.
@@ -214,12 +219,11 @@ export interface RegistryDeps {
   // bar's role item (lib/shell.ts quitsByCommand). Returns nothing.
   quitApp(): void;
   // Workspace lifecycle (workspace/actions.ts). Each needs a Bun round trip
-  // (create a folder, register a path, trash or detach a folder), so the
-  // reducer cannot do it alone. Create and attach resolve to an error message
-  // to surface, or null. `attachWorkspace` is the dialog's submit
-  // (ui.attachFolder above opens it), so its error goes back into the dialog.
-  // Remove resolves to that and the Undo to offer.
-  createWorkspace(state: AppState, dispatch: (a: Action) => void): Promise<string | null>;
+  // (register a path, trash or detach a folder), so the reducer cannot do it
+  // alone. Attach resolves to an error message to surface, or null.
+  // `attachWorkspace` is the dialog's submit (ui.attachFolder above opens it),
+  // so its error goes back into the dialog. Remove resolves to that and the
+  // Undo to offer. Creating one is the strip's (ui.beginNewWorkspace).
   attachWorkspace(path: string, dispatch: (a: Action) => void): Promise<string | null>;
   removeWorkspace(
     id: string,
@@ -273,7 +277,7 @@ export interface RegistryDeps {
   // the fallback Bun uses when the daily.workspace setting pins none. The open
   // goes through the external-open subscriber (glue passes Bun's answer to
   // dispatchExternalOpen), so the command dispatches no openNote itself.
-  // Resolves to an error message to surface, or null, as createWorkspace does.
+  // Resolves to an error message to surface, or null, as attachWorkspace does.
   openDailyNote(folder: string): Promise<string | null>;
   // Instantiate a template note into `folder`, titled "Untitled": the H1 is
   // the rename UI, so there is no title prompt. `templatePath` is the picker
@@ -319,7 +323,7 @@ export interface RegistryDeps {
   // The vault (note locking, locking.md). vaultState reads the view's
   // mirrored copy (vault/channel.ts), cheap enough for `when` to ask per
   // render. The two note ops resolve to an error message to surface, or null,
-  // as createWorkspace does. Both refresh the note lists themselves.
+  // as attachWorkspace does. Both refresh the note lists themselves.
   vaultState(): VaultState;
   lockVaultNow(): void;
   // Lock resolves to what to surface: an error, or a notice that the sweep

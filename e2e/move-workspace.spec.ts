@@ -13,6 +13,7 @@ const tab = (page: Page, title: string) => page.locator("[data-tab]", { hasText:
 // A second workspace to move into, with the first selected again afterwards.
 async function withSecondWorkspace(page: Page): Promise<void> {
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await expect(wsRow(page, "Workspace 2")).toBeVisible();
   await page.keyboard.press("Meta+1");
   await expect(noteRow(page, "Alpha")).toBeVisible();

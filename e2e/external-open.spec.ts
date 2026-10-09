@@ -36,6 +36,7 @@ test("an external open lands as a tab in the note's own workspace", async ({ pag
 test("from another workspace, the note's workspace is selected first — then the tab", async ({ page }) => {
   // ⇧⌘N makes a second workspace and selects it. It has no notes of its own.
   await page.keyboard.press("Meta+Shift+N");
+  await page.getByTestId("new-workspace-row").getByRole("textbox").press("Enter");
   await expect(noteRow(page, "Alpha")).toHaveCount(0);
   await externalOpen(page, SCRATCH, "Beta");
   // Back in workspace 1: its browser lists Alpha again, and Beta's tab is up.

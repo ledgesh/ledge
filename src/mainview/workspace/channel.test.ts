@@ -2,8 +2,9 @@
 // place roots enter the view, so it records a root's kind as the handle
 // passes through listWorkspaceRoots, createWorkspaceFolder,
 // attachWorkspaceFolder. boot.tsx and the harness
-// fetch the registry directly and record with recordWorkspaceKinds. Only an
-// external root yields a default cwd.
+// fetch the registry directly and record with recordWorkspaceKinds. A managed
+// or external root yields a default cwd; the docs root and an unknown one do
+// not.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   attachWorkspaceFolder,
@@ -53,18 +54,23 @@ afterEach(() => {
 });
 
 describe("workspaceDefaultCwd", () => {
-  test("only an external root anchors a default; managed and unknown do not", async () => {
+  test("managed and external roots anchor a default; unknown does not", async () => {
     fakeBridge();
     await listWorkspaceRoots();
     expect(workspaceDefaultCwd("/ext/project")).toBe("/ext/project");
-    expect(workspaceDefaultCwd("/ws/managed")).toBeNull();
+    expect(workspaceDefaultCwd("/ws/managed")).toBe("/ws/managed");
     expect(workspaceDefaultCwd("/never/seen")).toBeNull();
   });
 
-  test("a created folder is managed: no default", async () => {
+  test("a created folder is managed: its own folder is the default", async () => {
     fakeBridge();
     await createWorkspaceFolder("Scratch");
-    expect(workspaceDefaultCwd("/ws/created")).toBeNull();
+    expect(workspaceDefaultCwd("/ws/created")).toBe("/ws/created");
+  });
+
+  test("the docs root has no default", () => {
+    recordWorkspaceKinds([{ root: "/ws/.ledge-docs", kind: "docs", available: true }]);
+    expect(workspaceDefaultCwd("/ws/.ledge-docs")).toBeNull();
   });
 
   test("an attached folder carries the kind the attach reported", async () => {

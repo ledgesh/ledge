@@ -840,9 +840,9 @@ describe("params syncing", () => {
 });
 
 // The per-workspace default cwd: a note with no `cwd:` of its own inherits its
-// external workspace's folder (workspace/channel.ts workspaceDefaultCwd),
-// merged into every params send. A managed workspace has no default, so a
-// pathless note there still sends nothing at bind.
+// workspace's folder (workspace/channel.ts workspaceDefaultCwd), merged into
+// every params send. The docs workspace has no default, so a pathless note
+// there still sends nothing at bind.
 describe("workspace default cwd", () => {
   const withFm = (inner: string, body = "# Note\n\nbody\n") => `---\n${inner}---\n${body}`;
   const external = () => recordWorkspaceKinds([{ root: FOLDER, kind: "external", available: true }]);
@@ -861,11 +861,19 @@ describe("workspace default cwd", () => {
     });
   });
 
-  test("a managed workspace's pathless note keeps the old economy: nothing sent", () => {
+  test("a managed workspace's note gets its folder as cwd too", () => {
+    const fs = fakeBridge();
+    recordWorkspaceKinds([{ root: FOLDER, kind: "managed", available: true }]);
+    bind("doc-1", null, noop());
+    expect(fs.configures).toHaveLength(1);
+    expect(fs.configures[0].params.cwd).toBe(FOLDER);
+  });
+
+  test("a docs workspace's pathless note keeps the old economy: nothing sent", () => {
     // Only a pathless note sends nothing. An on-disk note always announces
     // its location once (see "announces its location once" above).
     const fs = fakeBridge();
-    recordWorkspaceKinds([{ root: FOLDER, kind: "managed", available: true }]);
+    recordWorkspaceKinds([{ root: FOLDER, kind: "docs", available: true }]);
     bind("doc-1", null, noop());
     expect(fs.configures).toEqual([]);
   });
