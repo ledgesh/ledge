@@ -157,10 +157,13 @@ export function TerminalDrawer({
         copyText(term.getSelection());
         return false;
       }
+      // A clipboard with no text (an image, say) still pastes an empty
+      // bracketed paste, as iTerm2 does: Claude Code reads that as "attach the
+      // clipboard's image" and fetches the picture itself.
       if (cmd && (e.key === "v" || e.key === "V")) {
         e.preventDefault();
         void readClipboard().then((text) => {
-          if (text) term.paste(text);
+          if (text || term.modes.bracketedPasteMode) term.paste(text);
         });
         return false;
       }
