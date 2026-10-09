@@ -99,6 +99,8 @@ All of those except `ledge <title>` are navigations, so the tab they open is a p
 
 ⌃` opens the terminal drawer for the note that has focus, and closes it for that note only. Each note remembers whether its drawer is open.
 
+From inside the drawer, ⌃`, ⌘Escape, or Escape twice closes it. The first Escape goes to the shell, so a program that wants Escape still gets it. While a full-screen program such as `vim` or `htop` is running, every Escape belongs to it, and ⌘Escape or ⌃` is the way out.
+
 Switching to a note whose drawer you opened shows that note's shell. Switching to a note whose drawer is closed hides the drawer.
 
 Shells keep running while their drawer is hidden. Coming back replays the scrollback.

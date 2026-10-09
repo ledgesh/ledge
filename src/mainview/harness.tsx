@@ -29,7 +29,12 @@ import {
 } from "./editor/bridge";
 import { sendRunKey } from "./editor/inlineTerm";
 import { barFaceOf, type BarFace } from "./lib/nativeBridge";
-import { configureTerminal, dispatchTerminalDetached, dispatchTerminalRelink } from "./terminal/channel";
+import {
+  configureTerminal,
+  dispatchTerminalDetached,
+  dispatchTerminalOutput,
+  dispatchTerminalRelink,
+} from "./terminal/channel";
 import { configureNotes, dispatchExternalOpen, dispatchNotesChanged, dispatchNotesRelink, type ExternalOpenInfo, type FolderDeleted, type FolderRenamed, type NoteFile } from "./notes/channel";
 import { configureVault, recordVaultState, refreshVaultState } from "./vault/channel";
 import { configureWorkspaces, dispatchWorkspacesChanged, recordWorkspaceKinds } from "./workspace/channel";
@@ -1476,6 +1481,9 @@ declare global {
       // object for the same reason. `by` is that client's id, which the notice
       // turns into a name through the presence list below.
       terminalTaken: (sessionId: string, by?: string) => void;
+      // Push output at a drawer's shell, the way Bun's terminalOutput would.
+      // PTYs are inert here, so this is how a spec puts a program on screen.
+      terminalOutput: (sessionId: string, text: string) => void;
       // Every session a restart went out for, in order.
       shellRestarts: () => string[];
       // Simulate Bun's sessionStale push: this note's live shells were born
@@ -1580,6 +1588,7 @@ window.__harness = {
   termInputs: () => termInputs.map((i) => ({ ...i })),
   termResizes: () => termResizes.map((r) => ({ ...r })),
   terminalTaken: (sessionId, by = "") => dispatchTerminalDetached(sessionId, by),
+  terminalOutput: (sessionId, text) => dispatchTerminalOutput(sessionId, btoa(text)),
   presence: (others) => recordPresence(others),
   inlineRuns: () => inlineRuns.map((r) => ({ ...r })),
   inlineResizes: () => inlineResizes.map((r) => ({ ...r })),

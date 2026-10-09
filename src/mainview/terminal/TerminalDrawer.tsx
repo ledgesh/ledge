@@ -21,6 +21,7 @@ import { settings } from "../lib/settings";
 import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
 import { eventToChord, matchesKey, terminalChord } from "../commands/keymap";
 import { keyOf } from "../commands/keys";
+import { escapeLeaves } from "../editor/inlineTerm";
 
 function xtermTheme(dark: boolean) {
   return dark
@@ -37,8 +38,9 @@ function xtermTheme(dark: boolean) {
 
 // `onReady` fires once the terminal has mounted and subscribed to output, so a
 // queued "run in terminal" command flushes without racing the first output.
-// `onClose` hides the drawer (Escape); the shell keeps running. `spawnHost` is
-// the machine picked for this open, used only if this attach spawns the shell.
+// `onClose` hides the drawer (Escape twice, or ⌘Escape); the shell keeps
+// running. `spawnHost` is the machine picked for this open, used only if this
+// attach spawns the shell.
 // `onHost` reports the host from the attach response, shown as App's badge.
 
 // A shell has one drawer across the whole server, not one per client. Another
@@ -110,6 +112,10 @@ export function TerminalDrawer({
       if (mine && linkState().state !== "lost") sendTerminalText(sessionId, data);
     });
 
+    // When the last bare Escape was pressed, for the double tap that closes
+    // the drawer.
+    let lastEscape = 0;
+
     // Clipboard, matching a normal terminal. xterm draws its own selection (not a
     // DOM selection the browser can copy) and the native paste event does not fire
     // reliably in this WebView, so Cmd+C and Cmd+V are handled explicitly and go
@@ -117,10 +123,17 @@ export function TerminalDrawer({
     // still sends SIGINT; Cmd+A selects the whole buffer.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
-      // Escape hides the drawer rather than sending ESC to the shell. The
-      // tradeoff is accepted: a full-screen TUI in the drawer cannot receive a
-      // bare Escape, which is fine for a notes-app scratch terminal.
+      const cmd = terminalChord(e);
+      // Escape closes the drawer on the inline panel's rule (escapeLeaves,
+      // interactions.md §6a): ⌘Escape always, Escape twice unless a full-screen
+      // program has the alternate buffer. The first of the two reaches the
+      // shell. The closing one does not, unlike the panel's: an interactive
+      // bash reads ESC ESC as completion.
       if (e.key === "Escape") {
+        const since = Date.now() - lastEscape;
+        lastEscape = cmd ? 0 : Date.now();
+        const pinned = term.buffer.active.type === "alternate";
+        if (!escapeLeaves({ meta: cmd, pinned, sinceLastEscMs: since })) return true;
         e.preventDefault();
         onCloseRef.current?.();
         return false;
@@ -139,7 +152,6 @@ export function TerminalDrawer({
       // terminalChord). preventDefault on the handled keys. An unhandled
       // Cmd-key reaches AppKit's key-equivalent path, which rings the system
       // alert (the "blip") even though the copy or paste itself succeeded.
-      const cmd = terminalChord(e);
       if (cmd && (e.key === "c" || e.key === "C") && term.hasSelection()) {
         e.preventDefault();
         copyText(term.getSelection());

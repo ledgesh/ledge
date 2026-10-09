@@ -1223,8 +1223,11 @@ topmost layer only:
 4. Editor find panel, and the `[[` completion popup (both CodeMirror-internal,
    editor focus only; the popup's Escape is consumed by its keymap before the
    window ever sees it, per the §7 consume rule)
-5. Terminal drawer (terminal focus only — documented tradeoff: full-screen
-   TUIs in the drawer can't receive a bare Escape)
+5. Terminal drawer (terminal focus only). It closes on the inline panel's
+   rule (§6a, `escapeLeaves`): ⌘Escape always, Escape twice unless a
+   full-screen program holds the alternate buffer. A full-screen program gets
+   every bare Escape, and a prompt gets the first of the two (the closing one
+   is swallowed, since an interactive bash reads ESC ESC as completion)
 
 While a layer of kind menu/dialog/overlay is open, the window keymap
 dispatcher is fully suppressed. New modals must register with `pushLayer`
@@ -1324,9 +1327,10 @@ secret written to a synced file — because focus never moved.
     owns the panel (the alternate buffer, the same signal that pins the
     grid) — vim users double-tap Escape by reflex.
   - Neither is withheld from the program: the bare exit acts on the second
-    tap, so the first has already gone through. The drawer (§6 layer 5) does
-    take Escape from its shell; the inline panel is where full-screen
-    programs actually get run, so it cannot afford that tradeoff.
+    tap, so the first has already gone through. The drawer (§6 layer 5)
+    follows the same rule, reading the alternate buffer at the keypress
+    rather than latching it, since its shell outlives any one program. It
+    swallows the closing Escape, which the panel passes on.
 - **On touch the exit is a control in the header, because neither key exists.**
   A phone has no ⌘, and its software keyboard has no Escape at all. That leaves
   the exit a Mac never has to think about — clicking the prose — and a
