@@ -133,7 +133,18 @@ function Shell() {
   // Live rather than boot-static, so a window dragged across the breakpoint
   // lands in the arrangement that fits. A phone is one pane either way up.
   const singlePane = useSinglePane();
-  const [termOpen, setTermOpen] = useState(false);
+  // The notes whose terminal drawer is open. The drawer shows when the
+  // focused note is one of them, so opening or closing it is per note.
+  const [termDocs, setTermDocs] = useState<ReadonlySet<string>>(() => new Set());
+  const setTermFor = useCallback((docId: string, open: boolean) => {
+    setTermDocs((prev) => {
+      if (prev.has(docId) === open) return prev;
+      const next = new Set(prev);
+      if (open) next.add(docId);
+      else next.delete(docId);
+      return next;
+    });
+  }, []);
   const [termHeight, setTermHeight] = useState(280);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   // The sidebar starts open where it is a pane and shut where it is a drawer.
@@ -294,6 +305,7 @@ function Shell() {
   // The note whose terminal the drawer shows: the focused pane's active tab.
   // Its docId is the sessionId for that note's per-note terminal shell.
   const activeDocId = focusedDocId(selected);
+  const termOpen = activeDocId !== null && termDocs.has(activeDocId);
   // A "run in terminal" fired while the drawer is closed (or for a note other
   // than the one shown) queues its command here. It flushes once that note's
   // terminal has mounted, so its output is not dropped.
@@ -310,7 +322,7 @@ function Shell() {
   // The machine the drawer's shell is on (attach response), for the badge.
   const [termHost, setTermHost] = useState<string | null>(null);
   // The host picked for the next drawer spawn. A ref, not state: the mount
-  // that follows setTermOpen consumes it. The doc-change effect below clears
+  // that follows setTermFor consumes it. The doc-change effect below clears
   // it, so a tab switch spawns on the new note's own frontmatter default
   // rather than on a stale pick.
   const spawnHost = useRef<string | null>(null);
@@ -358,7 +370,7 @@ function Shell() {
         }
         pending.current = { sessionId, cmd: code, language, host };
         spawnHost.current = host;
-        setTermOpen(true);
+        setTermFor(sessionId, true);
       };
       // The confirmation, when the block asked for one, sits between the
       // settled machine and the paste (interactions.md §4b). It comes after
@@ -396,7 +408,7 @@ function Shell() {
         }
       });
     },
-    [termOpen, activeDocId, selected.root, dispatch],
+    [termOpen, activeDocId, selected.root, dispatch, setTermFor],
   );
 
   // Shell owns the chrome state (terminal drawer, sidebar, overlay) and
@@ -421,24 +433,25 @@ function Shell() {
   useEffect(() => {
     configureUi({
       toggleTerminal: () => {
+        const sid = activeDocRef.current;
+        if (!sid) return;
         if (termOpenRef.current) {
-          setTermOpen(false);
+          setTermFor(sid, false);
           return;
         }
         // Opening the drawer on a multi-host note whose shell is not alive
         // spawns one, so the machine is chosen first. Single-host and local
         // notes open without asking, spawning on their frontmatter's own
         // answer. A live shell reopens wherever it already is.
-        const sid = activeDocRef.current;
-        const hosts = sid ? (paramsOf(sid)?.hosts ?? []) : [];
-        if (!sid || hosts.length <= 1) {
+        const hosts = paramsOf(sid)?.hosts ?? [];
+        if (hosts.length <= 1) {
           spawnHost.current = hosts[0] ?? null;
-          setTermOpen(true);
+          setTermFor(sid, true);
           return;
         }
         void terminalStatus(sid).then(({ live }) => {
           if (live) {
-            setTermOpen(true);
+            setTermFor(sid, true);
             return;
           }
           requestHostPick(sid, {
@@ -446,12 +459,14 @@ function Shell() {
             anchor: headerPickAnchor(),
             onPick: (host) => {
               spawnHost.current = host;
-              setTermOpen(true);
+              setTermFor(sid, true);
             },
           });
         });
       },
-      closeTerminal: () => setTermOpen(false),
+      closeTerminal: () => {
+        if (activeDocRef.current) setTermFor(activeDocRef.current, false);
+      },
       toggleSidebar: () => openSidebar(!sidebarOpenRef.current),
       toggleBacklinks: () => openRightPanel(rightPanelRef.current === "backlinks" ? null : "backlinks"),
       toggleOutline: () => openRightPanel(rightPanelRef.current === "outline" ? null : "outline"),
@@ -581,13 +596,10 @@ function Shell() {
     }
   }, []);
 
-  // Close the drawer when the shown note's terminal shell exits (the user
-  // typed `exit`). Bun has already torn that shell down, so reopening the
-  // drawer spawns a fresh one.
-  useEffect(
-    () => onTerminalExit((sid) => { if (sid === activeDocId) setTermOpen(false); }),
-    [activeDocId],
-  );
+  // Close a note's drawer when its terminal shell exits (the user typed
+  // `exit`). Bun has already torn that shell down, so reopening the drawer
+  // spawns a fresh one.
+  useEffect(() => onTerminalExit((sid) => setTermFor(sid, false)), [setTermFor]);
 
   // Typing in a preview tab is what says to keep it (interactions.md §1b).
   // onNoteEdited fires for real edits and not for the loads at open, and
@@ -606,6 +618,7 @@ function Shell() {
       if (!live.has(id)) {
         releaseEditor(id);
         closeSession(id);
+        setTermFor(id, false);
       }
     }
     prevDocs.current = live;
@@ -955,7 +968,7 @@ function Shell() {
             title="Drag to resize terminal"
           />
         )}
-        {termOpen && (
+        {termOpen && activeDocId && (
           <section style={{ height: termHeight }} className="flex shrink-0 flex-col bg-background">
             <div className="flex h-7 shrink-0 items-center gap-2 border-b px-2">
               <TerminalSquare className="size-3.5 text-muted-foreground" />
@@ -980,22 +993,17 @@ function Shell() {
               </Button>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden p-1.5">
-              {activeDocId ? (
-                // Keyed by the note: switching tabs remounts, detaching the old
-                // note's shell (it keeps running) and attaching the new note's.
-                <TerminalDrawer
-                  key={activeDocId}
-                  sessionId={activeDocId}
-                  spawnHost={spawnHost.current}
-                  onReady={onTerminalReady}
-                  onClose={() => setTermOpen(false)}
-                  onHost={setTermHost}
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center text-[11px] text-muted-foreground">
-                  No note selected
-                </div>
-              )}
+              {/* Keyed by the note: switching to another note with its drawer
+                  open remounts, detaching the old note's shell (it keeps
+                  running) and attaching the new note's. */}
+              <TerminalDrawer
+                key={activeDocId}
+                sessionId={activeDocId}
+                spawnHost={spawnHost.current}
+                onReady={onTerminalReady}
+                onClose={() => setTermFor(activeDocId, false)}
+                onHost={setTermHost}
+              />
             </div>
           </section>
         )}

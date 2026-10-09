@@ -95,11 +95,13 @@ A note that is not open becomes a new tab in the focused pane. This is how ⌘P,
 
 All of those except `ledge <title>` are navigations, so the tab they open is a preview one.
 
-## The terminal drawer follows the focused note
+## The terminal drawer opens per note
 
-⌃` opens the terminal for whichever note has focus. Switching panes or tabs swaps the drawer to that note's shell.
+⌃` opens the terminal drawer for the note that has focus, and closes it for that note only. Each note remembers whether its drawer is open.
 
-Shells keep running while the drawer shows another note's. Coming back replays the scrollback.
+Switching to a note whose drawer you opened shows that note's shell. Switching to a note whose drawer is closed hides the drawer.
+
+Shells keep running while their drawer is hidden. Coming back replays the scrollback.
 
 There is one drawer, spanning the window below the panes, rather than one per pane.
 
