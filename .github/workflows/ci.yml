@@ -149,9 +149,10 @@ jobs:
       - name: Build the app
         run: bun run build
 
-  # The Android client: its unit tests and the release bundle, unsigned. The
-  # signed one is built on a Mac with the upload key (android.md §8); this
-  # proves that a clean machine can build the thing that gets signed.
+  # The Android client: its unit tests, and the release bundle and APK,
+  # unsigned. The signed ones are built on a Mac with the upload key
+  # (android.md §8); this proves that a clean machine can build what gets
+  # signed.
   android:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -193,6 +194,6 @@ jobs:
       # Lint fails on its errors only, and the one it has caught is a call
       # newer than minSdk, which runs on the emulator and fails on an older
       # phone.
-      - name: Kotlin unit tests, lint, and the release bundle
+      - name: Kotlin unit tests, lint, and the release bundle and APK
         working-directory: android
-        run: ./gradlew testDebugUnitTest lintRelease bundleRelease
+        run: ./gradlew testDebugUnitTest lintRelease bundleRelease assembleRelease

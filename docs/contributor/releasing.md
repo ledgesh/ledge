@@ -24,6 +24,8 @@ Every release uploads all of them. A missing patch costs installs a full
 download. A missing tarball or manifest breaks the update. A Linux release
 adds the same three kinds of file per architecture, built and uploaded by the
 workflow in §9, and a Windows release adds them once more, for x64 (§10).
+Every release also carries `android-Ledge.apk`, which `bun run android --
+--apk` builds and a person uploads (android.md §8).
 
 Two app bundles get built, and both are signed:
 
@@ -148,7 +150,8 @@ preflight first for that reason.
    ten seconds and notarization is two round trips to Apple.
 4. Verify the artifact (§5).
 5. Tag the commit `v<version>` and push the tag. Create the GitHub release on
-   `ledgesh/ledge` as a draft, with every file in `artifacts/`.
+   `ledgesh/ledge` as a draft, with every file in `artifacts/`. Build the
+   Android APK and add it to the draft (android.md §8).
 6. Run the Linux workflow (§9) and the Windows workflow (§10) on the tag. They
    upload their files to the draft.
 7. Publish the release, then publish the tag to the update server for every

@@ -20,11 +20,11 @@ android {
         versionName = findProperty("ledgeVersion") as String? ?: "0.0.0"
     }
 
-    // The upload key, not the key phones check: Play App Signing re-signs
-    // with a key Google holds. The keystore lives outside the checkout and its
-    // password comes from the Keychain, by way of the environment
-    // (android.md §8). Without them the release build is unsigned, which is
-    // what CI builds.
+    // The upload key (android.md §8). Play App Signing re-signs a bundle with
+    // a key Google holds. The APK on a GitHub release keeps this signature, so
+    // there it is the key phones check. The keystore and its password come
+    // from the environment. Without them the release build is unsigned, which
+    // is what CI builds.
     val keystore = System.getenv("LEDGE_ANDROID_KEYSTORE")
     val password = System.getenv("LEDGE_ANDROID_KEYSTORE_PASSWORD")
     val upload = if (keystore != null && password != null) {

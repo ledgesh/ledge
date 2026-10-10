@@ -161,12 +161,21 @@ would paste its `content://` URI as text.
 
 ## 8. Distribution
 
-**Google Play, through a closed test first.** A personal Play Console account
+**Two channels: Google Play, and an APK on every GitHub release.** Both carry
+the same release build under different signatures, so a phone cannot update
+an install from one with the other.
+
+| Channel | Build | The key phones check | Updates |
+| --- | --- | --- | --- |
+| Google Play | `--store`, an `.aab` | Play App Signing's, which Google holds | through Play |
+| GitHub release | `--apk`, `android-Ledge.apk` | the upload key | a newer APK installed over the old one |
+
+**Google Play goes through a closed test first.** A personal Play Console account
 created after 2023-11-13 cannot publish to production until a closed test has
 had at least 12 testers opted in for 14 days in a row. The clock is the
 schedule, so the closed test starts as soon as a build is accepted.
 
-### The build
+### The Play bundle
 
 `bun run android -- --store` builds `build/android/Ledge-<version>-<build>.aab`
 and checks it is signed. Upload it in the Play Console.
@@ -179,6 +188,30 @@ and checks it is signed. Upload it in the Play Console.
 | R8 | off: sshj and Bouncy Castle find algorithms by reflection, and a missed keep rule fails only on a phone |
 | Native libraries | CameraX's and androidx.graphics', all 16 KB aligned, which Play requires for targetSdk 35 and later |
 | Size | about 16 MB of bundle; a phone downloads one ABI's split |
+
+### The APK
+
+`bun run android -- --apk` builds `build/android/android-Ledge.apk`: the
+release build as one universal APK, signed with the upload key. It is for
+phones with no Google account, which cannot join the closed test or install
+from Play.
+
+Every release carries it, a desktop-only one too. The README and the manual
+link to it as `releases/latest/download/android-Ledge.apk`, so a latest
+release without the file breaks both links. Add it to the draft:
+
+```bash
+gh release upload v<version> build/android/android-Ledge.apk
+```
+
+| What | Value |
+| --- | --- |
+| Signature | APK Signature Scheme v2, by the upload key |
+| Certificate SHA-256 | `fd2a8fa9be47bd0601b554f606287b3a0421ef3b9c0d2cf2a77476cd339a1f49` |
+| Certificate check | the script compares the built APK's certificate with that digest and writes no file on a mismatch |
+| Updates | none of its own. A newer APK installs over an older one and keeps the pairing |
+| Against a Play install | Android refuses to install either over the other. Switching means uninstalling, which deletes the device key, and pairing again |
+| Size | about 40 MB: four ABIs, and dex files stored uncompressed |
 
 ### The upload key
 
@@ -197,9 +230,12 @@ security add-generic-password -s ledge-android-upload -a "$USER" -w
 
 The full path matters: `/usr/bin/keytool` is macOS's stub, which looks for
 a system Java and finds none. The alias must be `upload`. The keystore is
-PKCS12, so the key's password is the store's. A lost upload key is recoverable: the Play Console resets it on
-request. The keystore still belongs in the same backup as the Apple
-certificates.
+PKCS12, so the key's password is the store's.
+
+A lost upload key is recoverable for Play: the Play Console resets it on
+request. It is not recoverable for the APK. An APK signed by a new key
+installs on no phone that has the old one, so every such phone uninstalls and
+pairs again. Keep the keystore in the same backup as the Apple certificates.
 
 ### The Play Console
 
@@ -221,9 +257,9 @@ taken on a Galaxy A15 against the same fixture server, and cropped to the
 web view: Play refuses a long side more than twice the short one, which the
 phone's full 1080 × 2340 is.
 
-**CI builds the bundle unsigned.** The `android` job in `ci.yml` runs the
-Kotlin unit tests, lint and `bundleRelease` on Linux, so a clean machine
-proves it can build what the Mac signs. Lint fails on errors only. Its `NewApi`
+**CI builds the bundle and the APK unsigned.** The `android` job in `ci.yml`
+runs the Kotlin unit tests, lint, `bundleRelease` and `assembleRelease` on
+Linux, so a clean machine proves it can build what the Mac signs. Lint fails on errors only. Its `NewApi`
 check is the one that matters: a call newer than minSdk works on the emulator
 and fails on an Android 10 phone.
 

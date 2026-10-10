@@ -3,6 +3,7 @@
 //   bun run android                          build, install, launch, stream its log
 //   bun run android -- --build               build only
 //   bun run android -- --store               a Play Store bundle, signed with the upload key
+//   bun run android -- --apk                 the APK a GitHub release carries, signed with the same key
 //   bun run android -- --test                the Kotlin unit tests, on this Mac's JVM
 //   bun run android -- --server ledge@10.0.2.2 --port 2222
 //   bun run android -- --avd ledge-pixel     which emulator to boot if none is running
@@ -18,13 +19,17 @@
 // (android.md §8), written to build/android/Ledge-<version>-<build>.aab for
 // the Play Console. It installs nothing.
 //
+// `--apk` is the same release build as one universal .apk, written to
+// build/android/android-Ledge.apk for the GitHub release. It is for phones
+// with no Google account, and it installs nothing either.
+//
 // The unit tests hold PairingCode.kt to shared/pairing.vectors.json, beside
 // the TypeScript and Swift readers (remote.md §4b).
 //
 // Needs a JDK 21 and the Android SDK, and no Android Studio: JAVA_HOME and
 // ANDROID_HOME default to where Homebrew's openjdk@21 and the command-line
 // tools put them.
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -32,6 +37,10 @@ const REPO = join(import.meta.dir, "..");
 const ANDROID = join(REPO, "android");
 const APK = join(ANDROID, "app", "build", "outputs", "apk", "debug", "app-debug.apk");
 const PACKAGE = "sh.ledge.android";
+// The SHA-256 of the upload key's certificate. A phone refuses an update whose
+// certificate differs from the installed app's, so `--apk` writes no APK that
+// another key signed (android.md §8).
+const APK_CERT = "fd2a8fa9be47bd0601b554f606287b3a0421ef3b9c0d2cf2a77476cd339a1f49";
 
 const argv = Bun.argv.slice(2);
 const flag = (name: string): string | null => {
@@ -40,6 +49,7 @@ const flag = (name: string): string | null => {
 };
 const buildOnly = argv.includes("--build");
 const store = argv.includes("--store");
+const apk = argv.includes("--apk");
 const testOnly = argv.includes("--test");
 const headless = argv.includes("--headless");
 const avd = flag("avd") ?? "ledge-pixel";
@@ -94,7 +104,7 @@ const version = (await Bun.file(join(REPO, "package.json")).json()).version as s
 const buildNumber = (await run(["git", "rev-list", "--count", "HEAD"], { quiet: true })).trim();
 const versions = [`-PledgeVersion=${version}`, `-PledgeBuild=${buildNumber}`];
 
-if (store) {
+if (store || apk) {
   const keystore = process.env["LEDGE_ANDROID_KEYSTORE"] ?? join(homedir(), ".config", "ledge", "android-upload.jks");
   if (!existsSync(keystore)) {
     throw new Error(`no upload keystore at ${keystore}; android.md §8 has the keytool line, or set LEDGE_ANDROID_KEYSTORE`);
@@ -108,6 +118,25 @@ if (store) {
     })).trim();
   env["LEDGE_ANDROID_KEYSTORE"] = keystore;
   env["LEDGE_ANDROID_KEYSTORE_PASSWORD"] = password;
+  const out = join(REPO, "build", "android");
+  mkdirSync(out, { recursive: true });
+
+  if (apk) {
+    console.log(`[apk] gradle assembleRelease, version ${version} (${buildNumber})`);
+    await run(["./gradlew", "-q", "assembleRelease", ...versions], { cwd: ANDROID });
+    const built = join(ANDROID, "app", "build", "outputs", "apk", "release", "app-release.apk");
+    const newest = readdirSync(sdk("build-tools")).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1)!;
+    // apksigner exits nonzero on an APK with no valid signature.
+    const certs = await run([sdk("build-tools", newest, "apksigner"), "verify", "--print-certs", built], { quiet: true });
+    const signer = /certificate SHA-256 digest: ([0-9a-f]{64})/.exec(certs)?.[1];
+    if (signer !== APK_CERT) {
+      throw new Error(`${built} is signed by ${signer ?? "no certificate apksigner could read"}, not the upload key; installed copies would refuse it as an update`);
+    }
+    const named = join(out, "android-Ledge.apk");
+    copyFileSync(built, named);
+    console.log(`  ${named}`);
+    process.exit(0);
+  }
 
   console.log(`[aab] gradle bundleRelease, version ${version} (${buildNumber})`);
   await run(["./gradlew", "-q", "bundleRelease", ...versions], { cwd: ANDROID });
@@ -116,8 +145,6 @@ if (store) {
   // says so only after the upload.
   const verified = await run([join(env["JAVA_HOME"]!, "bin", "jarsigner"), "-verify", aab], { quiet: true }).catch(() => "");
   if (!verified.includes("jar verified")) throw new Error(`${aab} is not signed; check the upload keystore's alias is "upload"`);
-  const out = join(REPO, "build", "android");
-  mkdirSync(out, { recursive: true });
   const named = join(out, `Ledge-${version}-${buildNumber}.aab`);
   copyFileSync(aab, named);
   console.log(`  ${named}`);

@@ -2,9 +2,17 @@
 
 Ledge runs on an iPhone, an iPad or an Android phone as a window onto a server. The phone holds no notes: it reaches a server over ssh, the way the desktop app does in [[Keep Notes on a Remote Server]], and shows you what is there.
 
-Get Ledge for iPhone from the App Store. It runs on iOS and iPadOS 17 or newer. Ledge for Android is in an open beta on Google Play and runs on Android 10 or newer: [ledge.sh/android](https://ledge.sh/android) has the three steps to join. Either one needs a server to connect to before it shows anything.
+Get Ledge for iPhone from the App Store. It runs on iOS and iPadOS 17 or newer. Ledge for Android is in an open beta on Google Play and runs on Android 10 or newer: [ledge.sh/android](https://ledge.sh/android) has the three steps to join. A phone with no Google account installs the APK instead ("Install the Android APK" below). Either one needs a server to connect to before it shows anything.
 
 A server that already serves your desktop needs nothing more. A machine without one needs the server installed first, as "Install the server" on that page describes, and the phone shows the same commands ("Set up a server" below).
+
+## Install the Android APK
+
+Every Ledge release on GitHub carries the Android app as [android-Ledge.apk](https://github.com/ledgesh/ledge/releases/latest/download/android-Ledge.apk). It installs without Google Play and without a Google account. Download it on the phone and open it, and Android asks once to let your browser or file manager install apps.
+
+The APK does not update itself. To update, download the newer APK and install it over the old one. The pairing with your server stays.
+
+An APK install and a Google Play install cannot update each other, because the two are signed with different keys. Switching from one to the other means uninstalling Ledge first and pairing the phone with your server again.
 
 ## The first screen
 

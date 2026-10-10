@@ -71,8 +71,11 @@ to your own computer, and reads, edits, and runs the same notes from anywhere.
 
 **Android.** Ledge for Android is in an open beta on Google Play, and anyone
 can join: [ledge.sh/android](https://ledge.sh/android) walks through joining
-the testers group, opting in, and installing. It runs on Android 10 or newer
-and connects to a server the same way the iPhone app does.
+the testers group, opting in, and installing. Without a Google account,
+install
+[the APK](https://github.com/ledgesh/ledge/releases/latest/download/android-Ledge.apk)
+from the latest release instead. It runs on Android 10 or newer and connects
+to a server the same way the iPhone app does.
 
 **Server.** Host your notes on a Linux server or a Mac, run their blocks
 there, and reach them from every device over ssh. Signed in as the account
