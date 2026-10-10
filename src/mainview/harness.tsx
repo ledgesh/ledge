@@ -1035,6 +1035,8 @@ const termClaims: string[] = [];
 // "Restart Note Shell" command).
 const termRestarts: string[] = [];
 let claimAnswer: TerminalClaim = { state: "attached", dataB64: "", host: "local" };
+// The scrollback an attach replays, by session (window.__harness.shellHistory).
+const termHistory = new Map<string, string>();
 configureTerminal({
   sendInput: (sessionId, dataB64) => {
     termInputs.push({ sessionId, dataB64 });
@@ -1047,7 +1049,7 @@ configureTerminal({
   },
   attach: async (sessionId, host) => {
     termAttaches.push({ sessionId, host: host ?? null });
-    return { dataB64: "", host: host ?? "local" };
+    return { dataB64: btoa(termHistory.get(sessionId) ?? ""), host: host ?? "local" };
   },
   detach: () => {},
   status: async () => ({ live: false, host: null }),
@@ -1550,6 +1552,9 @@ declare global {
       // linkState("live") to choose which of the three answers a spec is
       // testing. An "attached" one carries the scrollback to replay.
       shellClaim: (claim: TerminalClaim) => void;
+      // What a session's shell has printed so far, which the next attach
+      // replays as its scrollback (rpc-schema terminalAttach).
+      shellHistory: (sessionId: string, text: string) => void;
       // The vault moving on the server with nobody listening: its idle relock
       // firing, or another device unlocking it. The state changes and no
       // vaultChanged reaches the app, the way a push at a dropped wire is lost
@@ -1609,6 +1614,9 @@ window.__harness = {
   setStale: (sessionId, stale) => setSessionStale(sessionId, stale),
   shellClaim: (claim) => {
     claimAnswer = claim;
+  },
+  shellHistory: (sessionId, text) => {
+    termHistory.set(sessionId, text);
   },
   vaultMoved: (state) => {
     store.vault.state = state;

@@ -103,12 +103,24 @@ export function TerminalDrawer({
     // refuses them from anyone else. This flag keeps them from being sent.
     let mine = false;
 
+    // How many scrollback snapshots xterm has yet to finish parsing. A
+    // snapshot holds the queries programs sent when they ran (vim asks for
+    // the cursor position and the colors), and xterm answers each one again
+    // through onData, which would type the answers at the prompt.
+    let replaying = 0;
+    const writeSnapshot = (snapshot: Uint8Array): void => {
+      if (!snapshot.length) return;
+      replaying++;
+      term.write(snapshot, () => replaying--);
+    };
+
     // The handler sends keystrokes and pasted text to Bun while this client has
     // the shell and a wire to carry them, and skips the send otherwise:
     // `terminalInput` is a `void` call (boot.tsx) whose rejection nothing reads,
     // so a line typed at a dropped connection would disappear silently. The gate
     // is "lost" and not "reconnecting", as in editor/blocks.ts `linkDown`.
     const dataSub = term.onData((data) => {
+      if (replaying > 0) return;
       if (mine && linkState().state !== "lost") sendTerminalText(sessionId, data);
     });
 
@@ -198,7 +210,7 @@ export function TerminalDrawer({
         if (disposed) return;
         onHost?.(host);
         if (replace) term.reset();
-        if (snapshot.length) term.write(snapshot);
+        writeSnapshot(snapshot);
         for (const q of queue) term.write(q);
         queue.length = 0;
         ready = true;
@@ -239,8 +251,7 @@ export function TerminalDrawer({
           // anything, and the caret may be in the note.
           onHost?.(claim.host);
           term.reset();
-          const snapshot = b64ToBytes(claim.dataB64);
-          if (snapshot.length) term.write(snapshot);
+          writeSnapshot(b64ToBytes(claim.dataB64));
           for (const q of queue) term.write(q);
           queue.length = 0;
           ready = true;
