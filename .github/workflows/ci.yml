@@ -44,8 +44,9 @@ jobs:
             projects: ""
     runs-on: ${{ matrix.os }}
     # A hung run bills until something kills it, and macOS minutes bill at ten
-    # times the rate of Linux ones. The whole suite is about five minutes.
-    timeout-minutes: 20
+    # times the rate of Linux ones. The Linux job is the long one, about twenty
+    # minutes, since it runs every project.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7

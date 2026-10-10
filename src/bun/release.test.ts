@@ -144,3 +144,16 @@ describe("signing", () => {
     expect(mac.notarize).toBe(false);
   });
 });
+
+// esbuild 0.25 drops a `let` when it rewrites `x ||= y` for an older target
+// and minifies in the same pass. In a released build xterm's mode-query
+// handler then throws, and a terminal running vim stops drawing. The e2e
+// suite runs Vite's dev server, which does not minify, so it cannot see this.
+describe("the view build", () => {
+  test("targets a syntax level that keeps ||=", () => {
+    const source = readFileSync(join(ROOT, "vite.config.ts"), "utf8");
+    const target = source.match(/^\s*target:\s*(\[[^\]]*\])/m);
+    expect(target).not.toBeNull();
+    expect(JSON.parse(target![1]!)).toEqual(["es2021", "chrome87", "safari14"]);
+  });
+});

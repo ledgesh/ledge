@@ -27,6 +27,12 @@ export default defineConfig({
   build: {
     outDir: "../../dist",
     emptyOutDir: true,
+    // Vite's default target also names es2020, which makes esbuild rewrite
+    // `x ||= y`. esbuild 0.25 gets that wrong when it minifies: xterm's
+    // requestMode lost a `let` and threw on the mode query vim sends at
+    // startup, which froze the terminal. Both engines the view runs in
+    // support the operator. release.test.ts pins this.
+    target: ["es2021", "chrome87", "safari14"],
   },
   server: {
     port: 5173,
