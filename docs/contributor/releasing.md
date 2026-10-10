@@ -39,6 +39,25 @@ Consequences of that design worth knowing: the app a user launches on day two
 is not the bundle they installed on day one, and the extraction leaves its
 `.tar` behind in Application Support.
 
+The wrapper's extractor shows a Ledge Setup panel while it works. It then opens
+the app and, by default, keeps the panel up on "Installation complete" until
+someone clicks Close. The app's window covers the panel and the extractor has no
+Dock icon, so nobody clicks it, and the process stays running until logout.
+macOS counts that process as the running Ledge:
+
+| With the extractor still running | What happens |
+| --- | --- |
+| Ledge is opened again from the Dock, Finder or Spotlight | the Setup panel comes forward and the app does not start |
+| `ledge <title>` with the app closed | `open -b` exits 0 and the app does not start |
+| An update restarts the app (§7) | the update is applied, and its `open` raises the panel instead of the new app |
+| A new Ledge is dragged to `/Applications` | Finder refuses: "the item Ledge is in use" |
+
+`scripts/stamp-version.ts` therefore writes `LSEnvironment` into the wrapper's
+plist with `ELECTROBUN_INSTALLER_UI_AUTOCLOSE=1`, which the extractor reads and
+which makes it close the panel and exit as soon as the app is opened. The cost
+is that a failed install closes its panel too, so a failure shows no message.
+Releases 0.0.1 to 0.1.7 shipped without the variable.
+
 Arm64 only, and a decision rather than a default: an x86_64 slice would ship
 with the PTY dylib and the whole native seam untested, because there is no
 Intel Mac here to run it on. Electrobun 2.x builds for the build host and has
@@ -176,6 +195,8 @@ that all other testing uses:
   expected on first launch, and it does not appear again. The failure to watch
   for is the other dialog, the one that says the developer cannot be verified
   and offers no Open button: that is Gatekeeper refusing the signature.
+- Once the app is up, `pgrep -fl Ledge.app/Contents/MacOS/launcher` prints one
+  line. A second one is the extractor waiting on its Setup panel (§1).
 - A shell block runs, and Ctrl-C stops it. This is `dlopen` of the PTY dylib
   under library validation.
 - ⌘V of a screenshot embeds an image. This is `osascript` as a child process,

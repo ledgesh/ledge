@@ -9,6 +9,9 @@
 // launch replaces it. Both hooks land after their plist is written and before
 // it is signed. A plist edited after signing breaks the signature, which
 // surfaces as Gatekeeper refusing the app on someone else's Mac.
+//
+// The wrapper's plist also gets the variable that makes its Setup panel close
+// without a click (releasing.md §1).
 import { readdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
@@ -52,4 +55,20 @@ for (const bundlePath of bundles) {
     process.exit(1);
   }
   console.log(`[version] ${bundle} is version ${version}`);
+
+  // The extractor ends on a panel that waits for its Close button, and the app
+  // it has just opened covers that panel. While it waits it is the running
+  // "Ledge" to macOS, which then raises the panel instead of starting the app.
+  // LaunchServices hands LSEnvironment to the extractor when Finder opens it.
+  if (wrapper) {
+    const e = Bun.spawnSync(["plutil", "-replace", "LSEnvironment", "-json", JSON.stringify({ ELECTROBUN_INSTALLER_UI_AUTOCLOSE: "1" }), plist], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (e.exitCode !== 0) {
+      console.error(`[version] could not set the Setup panel to close itself in ${bundle}:\n` + e.stderr.toString().trim());
+      process.exit(1);
+    }
+    console.log(`[version] ${bundle} closes its Setup panel without a click`);
+  }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import config, { UPDATE_BASE_URL } from "../../electrobun.config";
 import { BUILD_VERSION } from "../shared/version";
@@ -142,6 +143,53 @@ describe("signing", () => {
     const mac = macConfigWith({ LEDGE_UNSIGNED: "1" });
     expect(mac.codesign).toBe(false);
     expect(mac.notarize).toBe(false);
+  });
+});
+
+// scripts/stamp-version.ts edits the two generated plists, and only a release
+// build runs it. The DMG's wrapper waits on a Setup panel that the new app
+// covers, and while it waits macOS will not start Ledge again (releasing.md
+// §1). The hook's LSEnvironment entry is what makes the panel close itself.
+// plutil is a Mac tool, so these run on a Mac only.
+describe.skipIf(process.platform !== "darwin")("the plist stamp", () => {
+  function stamped(hook: "postBuild" | "postWrap"): Record<string, unknown> {
+    const buildDir = mkdtempSync(join(tmpdir(), "ledge-stamp-"));
+    try {
+      const bundle = join(buildDir, "Ledge.app");
+      const plist = join(bundle, "Contents", "Info.plist");
+      mkdirSync(join(bundle, "Contents"), { recursive: true });
+      writeFileSync(plist, JSON.stringify({ CFBundleIdentifier: "sh.ledge.app", CFBundleVersion: "1.2.3" }));
+      const p = Bun.spawnSync([process.execPath, join(ROOT, "scripts", "stamp-version.ts")], {
+        env: {
+          ...process.env,
+          ELECTROBUN_BUILD_DIR: buildDir,
+          ELECTROBUN_APP_VERSION: "1.2.3",
+          ELECTROBUN_WRAPPER_BUNDLE_PATH: hook === "postWrap" ? bundle : undefined,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (p.exitCode !== 0) throw new Error(p.stderr.toString());
+      const json = Bun.spawnSync(["plutil", "-convert", "json", "-o", "-", plist], { stdout: "pipe", stderr: "pipe" });
+      if (json.exitCode !== 0) throw new Error(json.stderr.toString());
+      return JSON.parse(json.stdout.toString()) as Record<string, unknown>;
+    } finally {
+      rmSync(buildDir, { recursive: true, force: true });
+    }
+  }
+
+  test("the wrapper is told to close its Setup panel", () => {
+    const plist = stamped("postWrap");
+    expect(plist["CFBundleShortVersionString"]).toBe("1.2.3");
+    expect(plist["LSEnvironment"]).toEqual({ ELECTROBUN_INSTALLER_UI_AUTOCLOSE: "1" });
+  });
+
+  // The app shows no Setup panel, and LSEnvironment there would reach every
+  // launch of Ledge for no reason.
+  test("the app gets the version and nothing else", () => {
+    const plist = stamped("postBuild");
+    expect(plist["CFBundleShortVersionString"]).toBe("1.2.3");
+    expect(plist["LSEnvironment"]).toBeUndefined();
   });
 });
 
