@@ -147,8 +147,9 @@ Bun. `src/mainview/harness.tsx` boots the entire view exactly as `main.tsx`
 does, but binds the `configureX` seams (architecture.md §5) to an in-memory
 store instead of the live RPC. Everything above the seams — the command
 registry, dispatch, focus, lists, dialogs, CodeMirror — runs for real. Vite
-serves `harness.html` in dev only; the production build's input is
-`index.html`, so none of it ships.
+serves `harness.html` in dev, and `vite.harness.config.ts` builds it for the
+`minified` project below; the app's build takes `index.html` as its input, so
+none of it ships.
 
 Rules:
 
@@ -188,6 +189,20 @@ Rules:
   rather than driven: Playwright's touchscreen taps and does nothing else, so
   the spec sends `pointerdown`, waits for the menu, then sends the `pointerup`
   and the `click` WebKit really would.
+- **The `minified` project runs a production build.** The four projects above
+  load Vite's dev server, which does not minify, so a bug the minifier adds
+  passes all of them. One shipped that way: esbuild dropped a `let` from
+  xterm's mode-query handler, and vim froze the terminal in every release
+  build. `vite.harness.config.ts` builds `harness.html` with the app's own
+  build options into `dist-harness/`, the config starts `vite preview` on port
+  5198 for it, and `minified` runs the specs named in `MINIFIED_SMOKE`
+  (`playwright.config.ts`) against that in WebKit. The build is fresh on every
+  run and takes four seconds. `LEDGE_E2E_MINIFIED=all bun run test:e2e
+  --project=minified` runs every desktop spec against it, in under two minutes
+  on a Mac, and a release does that before it builds (releasing.md §4). A spec
+  that covers a code path only a library reaches, such as a terminal query,
+  belongs in `MINIFIED_SMOKE`. The phones build from configs of their own;
+  `vite.target.ts` is what all of them share, and `release.test.ts` pins it.
 - The fake store mirrors `bun/notes.ts` semantics (naming-by-heading,
   enumeration on collision, move-don't-unlink). If a spec needs behavior the
   fake lacks, extend the fake to match the real store — never the reverse.

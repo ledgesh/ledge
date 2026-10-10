@@ -141,6 +141,9 @@ preflight first for that reason.
 1. Set the version in both files (§2). Commit.
 2. Run the green bar (`testing.md` §7). CI runs it too, but a release should not
    be the first time it ran.
+   Then run every desktop spec against the minified view, which the green bar
+   only smokes (`testing.md` §5):
+   `LEDGE_E2E_MINIFIED=all bun run test:e2e --project=minified`.
 3. `bun run release`. Expect several minutes: the tarball compresses for about
    ten seconds and notarization is two round trips to Apple.
 4. Verify the artifact (§5).

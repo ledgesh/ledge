@@ -8,7 +8,8 @@
 # two jobs are the same four steps; what differs is the PTY library each
 # compiles, the bundle each assembles, and the WebKit each drives. Chromium,
 # the engine Android's WebView is, runs on the Linux job only: it is the same
-# engine on both runners, and macOS minutes bill at ten times the rate.
+# engine on both runners, and macOS minutes bill at ten times the rate. Both
+# jobs run the smoke of the minified build (testing.md §5).
 # Windows, the third desktop, has a smaller job of its own below.
 name: CI
 
@@ -38,7 +39,7 @@ jobs:
         include:
           - os: macos-latest
             browsers: webkit
-            projects: --project=webkit --project=phone
+            projects: --project=webkit --project=phone --project=minified
           - os: ubuntu-24.04
             browsers: webkit chromium
             projects: ""

@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { UserConfig } from "vite";
 import config, { UPDATE_BASE_URL } from "../../electrobun.config";
+import android from "../../vite.android.config";
+import desktop from "../../vite.config";
+import harness from "../../vite.harness.config";
+import ios from "../../vite.ios.config";
 import { BUILD_VERSION } from "../shared/version";
 import { manifest } from "./npmPackage";
 
@@ -195,13 +200,25 @@ describe.skipIf(process.platform !== "darwin")("the plist stamp", () => {
 
 // esbuild 0.25 drops a `let` when it rewrites `x ||= y` for an older target
 // and minifies in the same pass. In a released build xterm's mode-query
-// handler then throws, and a terminal running vim stops drawing. The e2e
-// suite runs Vite's dev server, which does not minify, so it cannot see this.
-describe("the view build", () => {
-  test("targets a syntax level that keeps ||=", () => {
-    const source = readFileSync(join(ROOT, "vite.config.ts"), "utf8");
-    const target = source.match(/^\s*target:\s*(\[[^\]]*\])/m);
-    expect(target).not.toBeNull();
-    expect(JSON.parse(target![1]!)).toEqual(["es2021", "chrome87", "safari14"]);
+// handler then throws, and a terminal running vim stops drawing. The phones
+// have a config each, and the first fix reached only the desktop's. The e2e
+// suite's `minified` project runs the harness config's output (testing.md §5).
+describe("the view builds", () => {
+  const configs: Record<string, UserConfig> = { desktop, ios, android, harness };
+
+  for (const [name, config] of Object.entries(configs)) {
+    test(`the ${name} build targets a syntax level that keeps ||=`, () => {
+      expect(config.build?.target).toEqual(["es2021", "chrome87", "safari14"]);
+    });
+  }
+
+  // The harness build stands in for the app's, so it may differ in what it
+  // reads and where it writes, and in nothing else.
+  test("the harness build is the desktop build with another input", () => {
+    const { outDir: _o, rollupOptions: _r, ...shipping } = desktop.build ?? {};
+    const { outDir, rollupOptions, ...smoked } = harness.build ?? {};
+    expect(smoked).toEqual(shipping);
+    expect(outDir).toBe("../../dist-harness");
+    expect(String(rollupOptions?.input)).toEndWith("harness.html");
   });
 });

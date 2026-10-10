@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { VIEW_BUILD_TARGET } from "./vite.target";
 
 // The same view, built for the iOS bundle. A second config rather than a
 // second input on the first one, because dist/ is copied wholesale into the
@@ -21,6 +22,7 @@ export default defineConfig({
   build: {
     outDir: "../../dist-ios",
     emptyOutDir: true,
+    target: VIEW_BUILD_TARGET,
     rollupOptions: { input: resolve(__dirname, "src/mainview/ios.html") },
   },
 });

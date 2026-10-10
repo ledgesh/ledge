@@ -8,6 +8,7 @@ node_modules/
 # package's hand-written half lives in npm/ and is committed; dist-npm/ is
 # what scripts/build-npm.ts assembles out of it.
 dist/
+dist-harness/
 dist-cli/
 dist-native/
 dist-ios/

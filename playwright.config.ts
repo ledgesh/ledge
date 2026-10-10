@@ -10,6 +10,22 @@ import { defineConfig, devices } from "@playwright/test";
 
 const ci = !!process.env["CI"];
 
+const MINIFIED_URL = "http://localhost:5198";
+// What the `minified` project runs unless told to run everything: boot, the
+// editor's rendering and commands, a run block's panel and the terminal
+// drawer. Between them they load CodeMirror, xterm and the paste converter.
+const MINIFIED_SMOKE = [
+  "welcome",
+  "live-preview",
+  "fences",
+  "paste-html",
+  "list-verbs",
+  "wikilinks",
+  "inline-focus",
+  "terminal-escape",
+  "terminal-replay",
+].map((name) => `${name}.spec.ts`);
+
 export default defineConfig({
   testDir: "e2e",
   projects: [
@@ -43,6 +59,16 @@ export default defineConfig({
       use: { ...devices["Pixel 7"], viewport: { width: 390, height: 844 } },
       testMatch: "phone.spec.ts",
     },
+    // The desktop view from a production build (vite.harness.config.ts). The
+    // other projects load Vite's dev server, which does not minify, so a
+    // minifier bug passes all of them (testing.md §5). A smoke by default.
+    // LEDGE_E2E_MINIFIED=all runs every desktop spec, which a release does
+    // before it builds (releasing.md §4).
+    {
+      name: "minified",
+      use: { ...devices["Desktop Safari"], baseURL: MINIFIED_URL },
+      ...(process.env["LEDGE_E2E_MINIFIED"] === "all" ? { testIgnore: "phone.spec.ts" } : { testMatch: MINIFIED_SMOKE }),
+    },
   ],
   // A committed `test.only` silently reduces the suite to one test, and the run
   // still goes green. That is the failure mode CI exists to prevent.
@@ -57,9 +83,19 @@ export default defineConfig({
   // `github` annotates the failing lines in the PR diff; `html` is what the
   // workflow uploads when the run goes red.
   reporter: ci ? [["github"], ["html", { open: "never" }]] : "list",
-  webServer: {
-    command: "bunx vite --port 5199",
-    url: "http://localhost:5199/harness.html",
-    reuseExistingServer: true,
-  },
+  webServer: [
+    {
+      command: "bunx vite --port 5199",
+      url: "http://localhost:5199/harness.html",
+      reuseExistingServer: true,
+    },
+    // Built on every run and never reused: a preview server left over from
+    // another run would serve that run's bundle. The build takes four seconds.
+    {
+      command:
+        "bunx vite build --config vite.harness.config.ts && bunx vite preview --config vite.harness.config.ts --port 5198 --strictPort",
+      url: `${MINIFIED_URL}/harness.html`,
+      reuseExistingServer: false,
+    },
+  ],
 });

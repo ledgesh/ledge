@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { VIEW_BUILD_TARGET } from "./vite.target";
 
 // The same view, built for the Android app, for vite.ios.config.ts's reason:
 // dist/ ships wholesale in the Mac app. The Gradle build packages dist-android/
@@ -16,6 +17,7 @@ export default defineConfig({
   build: {
     outDir: "../../dist-android",
     emptyOutDir: true,
+    target: VIEW_BUILD_TARGET,
     rollupOptions: { input: resolve(__dirname, "src/mainview/android.html") },
   },
 });
