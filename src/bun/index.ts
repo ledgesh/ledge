@@ -44,6 +44,7 @@ import { ensureWslServer, explainWsl, recordWindowsApp, stopWslDaemon, wslFolder
 import { readWindowsClipboardHtml, readWindowsClipboardImage } from "./winclip";
 import { installShims, SERVE_ENTRY, tildify } from "./cliShim";
 import { checkWord, hasDictionary, learnWord } from "./spelling";
+import { DMABUF_VAR, disableDmabufRenderer } from "./linuxWebkit";
 import { BUILD_VERSION, versionLine, type AppInfo } from "../shared/version";
 import type { LedgeRPC, UpdateState } from "../shared/rpc-schema";
 
@@ -92,6 +93,11 @@ const APP_INFO: AppInfo = {
 };
 console.log(`[bun] ${versionLine(APP_INFO)}`);
 if (claim instanceof Error) console.error("[bun] could not take the one-app lock, so a second launch will not be stopped:", claim);
+// Ahead of the first window, because WebKitGTK reads the variable when it
+// builds its first view (bun/linuxWebkit.ts).
+if (disableDmabufRenderer()) {
+  console.log(`[bun] NVIDIA driver in an X11 session: WebKitGTK's DMA-BUF renderer is off (launch with ${DMABUF_VAR}=0 to keep it on)`);
+}
 
 // Deletes the previous versions' extraction tars, at 80MB each
 // (bun/updateCache.ts for what is kept and why). Not awaited and never fatal:
