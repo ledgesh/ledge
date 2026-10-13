@@ -105,6 +105,10 @@ type NativeMessage =
 interface BridgeHandlers {
   runInline: (sessionId: string, id: string, code: string, language: string | null, host: string | null) => void;
   toggleTerminal: () => void;
+  // Run a registry command by id, for a chord the `keys` setting assigned
+  // (editor/setup.ts userKeymap). False when the command does not fire in the
+  // editor, so the chord stays with whatever else binds it there.
+  runCommand: (id: string) => boolean;
   runInTerminal: (
     sessionId: string,
     code: string,
@@ -221,6 +225,12 @@ export function openWikiNote(docId: string, target: string): void {
 // Empty when unconfigured, wikiNotes' stance: no popup rather than a throw.
 export function workspaceTags(docId: string): TagInfo[] {
   return handlers.workspaceTags?.(docId) ?? [];
+}
+
+// Run the command a user-assigned chord names. False with no handler wired
+// (an editor outside the app), like every refusal here.
+export function runCommand(id: string): boolean {
+  return handlers.runCommand?.(id) ?? false;
 }
 
 // Follow a #tag in `docId`'s note (livePreview.ts click/hotspot, the "Open

@@ -71,6 +71,10 @@ describe("matchesKey", () => {
     expect(matchesKey("Mod-d", shifted)).toBe(false);
   });
 
+  test("Space is spelled out in a binding and arrives as a space", () => {
+    expect(matchesKey("Ctrl-Space", eventToChord(ev({ key: " ", ctrlKey: true })))).toBe(true);
+  });
+
   test("modifier spelling order does not matter", () => {
     const c = parseKey("Shift-Mod-w");
     expect(c).toEqual(parseKey("Mod-Shift-w"));
@@ -120,6 +124,15 @@ describe("resolveChord", () => {
   test("a modal layer suppresses everything", () => {
     const c = chord("w", { meta: true });
     expect(resolveChord(commands, c, { domain: "page", modalOpen: true })).toBeNull();
+  });
+
+  test("a function key is a chord with nothing held", () => {
+    const fn = [...commands, { id: "block.runInline", keys: ["F5", "Shift-F6"] }];
+    expect(resolveChord(fn, chord("F5"), { domain: "page", modalOpen: false })?.id).toBe("block.runInline");
+    expect(resolveChord(fn, chord("F6", { shift: true }), { domain: "editor", modalOpen: false })?.id).toBe("block.runInline");
+    expect(resolveChord(fn, chord("F6"), { domain: "page", modalOpen: false })).toBeNull();
+    // On a focused row too, where every other unmodified key is a row verb.
+    expect(resolveChord(fn, chord("F5"), { domain: "list", modalOpen: false, targetKind: "note" })?.id).toBe("block.runInline");
   });
 
   test("bare keys and shift-only are typing, not chords", () => {
@@ -180,6 +193,17 @@ describe("resolveChord in the list domain", () => {
     expect(resolveChord(commands, chord("Backspace", { meta: true }), on("note"))?.id).toBe(
       "note.deleteCurrent",
     );
+  });
+
+  test("a chord on a row verb resolves off its row; the bare key still does not", () => {
+    // The `keys` setting can give a row verb a chord. The chord works from
+    // anywhere, like every chord, and the dispatcher decides whether a focused
+    // row is its target (CommandProvider.tsx).
+    const withChord = [...commands, { id: "note.favorite", keys: ["Mod-Shift-s"], listKeys: ["f"], targetKind: "note" }];
+    const pressed = chord("s", { meta: true, shift: true });
+    expect(resolveChord(withChord, pressed, { domain: "editor", modalOpen: false })?.id).toBe("note.favorite");
+    expect(resolveChord(withChord, pressed, on("workspace"))?.id).toBe("note.favorite");
+    expect(resolveChord(withChord, chord("f"), on("workspace"))).toBeNull();
   });
 
   test("a modal layer suppresses row verbs too", () => {

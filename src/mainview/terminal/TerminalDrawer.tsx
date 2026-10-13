@@ -20,7 +20,7 @@ import { activeConnection, labelFor, linkState, subscribeConnections } from "../
 import { settings } from "../lib/settings";
 import { isDarkAppearance, onAppearanceChange } from "../lib/theme";
 import { eventToChord, matchesKey, terminalChord } from "../commands/keymap";
-import { keyOf } from "../commands/keys";
+import { keysOf } from "../commands/keys";
 import { escapeLeaves } from "../editor/inlineTerm";
 
 function xtermTheme(dark: boolean) {
@@ -154,7 +154,8 @@ export function TerminalDrawer({
       // drawer from inside it too, and the shell never sees the chord. Without
       // this, the key that opens the terminal does nothing while the terminal
       // has focus.
-      if (matchesKey(keyOf("terminal.toggle")!, eventToChord(e))) {
+      const chord = eventToChord(e);
+      if (keysOf("terminal.toggle").some((key) => matchesKey(key, chord))) {
         e.preventDefault();
         onCloseRef.current?.();
         return false;

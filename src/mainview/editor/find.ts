@@ -14,7 +14,7 @@ import {
   selectMatches,
   setSearchQuery,
 } from "@codemirror/search";
-import { COMMANDS, keyOf } from "../commands/keys";
+import { keysOf } from "../commands/keys";
 import { modKey } from "../commands/modKey";
 
 // Find and replace on top of @codemirror/search. The stock panel always shows
@@ -285,20 +285,18 @@ export function openReplace(view: EditorView): boolean {
 // (commands/CommandProvider.tsx), and CodeMirror does not stop the keydown
 // propagating, so binding Mod-d here would fire both. These bindings act when
 // focus is in the editor body; the panel handles its own keys once focused.
-const findKeymap = Prec.highest(
-  keymap.of([
-    // ⇧⌘F expands the replace row through the `shift` handler, not through a
-    // "Mod-Shift-f" key: a shifted letter arrives as key "F", which
-    // CodeMirror's name matching does not resolve to that binding. Mod-g below
-    // takes its shifted variant the same way. ⇧⌘F backs up ⌥⌘F, which cmux
-    // takes as a system-global hotkey (commands/keys.ts, interactions.md §2).
-    { key: keyOf("editor.find")!, run: openSearchPanel, shift: openReplace },
-    { key: COMMANDS["editor.replace"].keys[0], run: openReplace },
-    { key: keyOf("editor.findNext")!, run: findNext, shift: findPrevious, preventDefault: true },
-    { key: COMMANDS["editor.findNext"].keys[1], run: findNext, shift: findPrevious, preventDefault: true },
-    { key: "Escape", run: closeSearchPanel },
-  ]),
-);
+// Every chord of each command is bound, so the aliases (⇧⌘F, F3) and whatever
+// the `keys` setting assigns all arrive here.
+const findKeymap = () =>
+  Prec.highest(
+    keymap.of([
+      ...keysOf("editor.find").map((key) => ({ key, run: openSearchPanel })),
+      ...keysOf("editor.replace").map((key) => ({ key, run: openReplace })),
+      ...keysOf("editor.findNext").map((key) => ({ key, run: findNext, preventDefault: true })),
+      ...keysOf("editor.findPrev").map((key) => ({ key, run: findPrevious, preventDefault: true })),
+      { key: "Escape", run: closeSearchPanel },
+    ]),
+  );
 
 export function findReplace() {
   return [
@@ -310,6 +308,6 @@ export function findReplace() {
     // Dim-highlight other occurrences of the selected text. An empty selection
     // highlights nothing, since highlightWordAroundCursor defaults to off.
     highlightSelectionMatches(),
-    findKeymap,
+    findKeymap(),
   ];
 }

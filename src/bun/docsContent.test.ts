@@ -7,6 +7,7 @@
 // example on an old one.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { respellChords } from "../mainview/commands/format";
+import { COMMANDS, defaultKeysOf, takesChord, titleOf, type CommandId } from "../mainview/commands/keys";
 import { configureModKey } from "../mainview/commands/modKey";
 import { noRun, parseFenceInfo } from "../shared/fenceInfo";
 import { DEFAULT_SETTINGS } from "../shared/settings";
@@ -76,5 +77,35 @@ describe("the manual's chords", () => {
         });
     }
     expect(left).toEqual([]);
+  });
+});
+
+// The Keyboard Shortcuts page is where a reader finds the id a `keys` entry
+// names (shared/settings.ts), so its table is the key table: one row for every
+// command a chord can run, with the title and default chords it ships with.
+describe("the manual's shortcut table", () => {
+  const page = DOC_PAGES.find((p) => p.name === "23-keyboard-shortcuts.md")!;
+  const rows = new Map<string, { title: string; chords: string[] }>();
+  const twice: string[] = [];
+  for (const line of page.text.split("\n")) {
+    const m = /^\| (.+) \| `([A-Za-z.]+)` \| (.*) \|$/.exec(line);
+    if (!m) continue;
+    const chords = [...m[3]!.matchAll(/``? ?(.+?) ?`?`(?:, |$)/g)].map((c) => c[1]!);
+    if (rows.has(m[2]!)) twice.push(m[2]!);
+    rows.set(m[2]!, { title: m[1]!, chords });
+  }
+  const ids = (Object.keys(COMMANDS) as CommandId[]).filter(takesChord);
+
+  test("lists every command a chord can run, and nothing else", () => {
+    expect([...rows.keys()].sort()).toEqual([...ids].sort());
+    expect(twice).toEqual([]);
+  });
+
+  test("each row carries the command's title and default chords", () => {
+    for (const id of ids) {
+      // Reveal Log is titled for the platform it runs on, and the row names both.
+      if (id !== "log.reveal") expect(`${id}: ${rows.get(id)?.title}`).toBe(`${id}: ${titleOf(id)}`);
+      expect(`${id}: ${rows.get(id)?.chords.join(" ")}`).toBe(`${id}: ${defaultKeysOf(id).join(" ")}`);
+    }
   });
 });

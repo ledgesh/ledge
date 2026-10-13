@@ -77,6 +77,7 @@ Notes are ordinary `.md` files in ordinary folders, so git, agents, and shell to
 - **Your phone.** The same app on an iPhone, an iPad or an Android phone, reading and running the notes on that server. See [[Ledge on Your Phone]].
 - **Appearance.** Ledge follows the system's light or dark setting. To pin one instead, set `appearance.theme` to `"light"` or `"dark"` under This app in Settings (⌘,) and relaunch.
 - **Fonts.** `editor.fontSize` sizes note text and `terminal.fontSize` sizes the terminal, both under This app in Settings (⌘,). Relaunch to apply.
+- **Keyboard shortcuts.** Every command's shortcut can be changed with the `keys` setting, under This app in Settings (⌘,). See [[Keyboard Shortcuts]].
 
 ## Ledge on Linux
 

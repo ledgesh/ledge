@@ -88,7 +88,11 @@ export function CommandProvider({ children }: { children: ReactNode }) {
         modalOpen: modalOpen(),
         targetKind: target?.kind,
       });
-      const c: CommandCtx = { ...ctxRef.current, target };
+      // A chord on a row verb (the `keys` setting can give one) takes the
+      // focused row only when the row is its kind. From anywhere else it acts
+      // on the current note, as its palette entry does.
+      const aimed = hit?.targetKind && hit.targetKind !== target?.kind ? undefined : target;
+      const c: CommandCtx = { ...ctxRef.current, target: aimed };
       // A disabled command lets the key fall through untouched, matching the
       // old behavior of ⌘7 with six workspaces: nothing, no beep-guard.
       // Backspace is the exception. The dispatcher consumes a bare ⌫ in the

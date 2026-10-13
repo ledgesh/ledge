@@ -526,7 +526,9 @@ out, one of which is typing in the note.
   `RESERVED_KEYS` (now empty) and its `keys.test.ts` guard remain the
   mechanism for holding a chord on purpose. ⌘D is the split key (iTerm/cmux
   muscle memory); `editor/find.ts` deliberately omits Mod-d
-  select-next-occurrence for the same reason.
+  select-next-occurrence for the same reason. Select Next Occurrence is a
+  command with no chord (`editor.selectNextOccurrence`), so a user who wants
+  it back on ⌘D can say so (§2a).
 - **Off macOS, Mod is Ctrl** (`commands/modKey.ts`, read from
   `navigator.platform`, the fact CodeMirror reads for the same decision). Every
   binding above is spelled with Mod, so a Linux desktop gets Ctrl+N, Ctrl+Shift+P
@@ -558,10 +560,66 @@ out, one of which is typing in the note.
     reach the app from the palette there. The chords stay allocated: the
     ⌥-tier is one rule, and a desktop that has rebound those keys gets them.
 
+## 2a. Rebinding: the `keys` setting
+
+A client's `keys` setting maps a command id to the chords that run it
+(architecture.md §6 argues the knob). `commands/bindings.ts` resolves it
+against `keys.ts` once at boot, before the registry, the menu bar or any
+editor reads the table, and `keysOf` answers with the result from then on.
+With no `keys` section the table is the shipped one. §2 stays the allocation
+policy for the chords Ledge ships; this section is what a user may do to them.
+
+- **An entry replaces a command's chords, and takes each chord from its
+  holder.** One chord, one command, as `keys.test.ts` requires of the shipped
+  table: the default holder loses that chord and keeps its others. When two
+  entries ask for one chord, the first in the file keeps it and the second is
+  reported. An empty list leaves a command with no chord.
+- **A problem costs one chord or one entry.** The stance is settings' own
+  (architecture.md §6): reported, never blocking. An entry with no usable
+  chord leaves its command on its defaults, so a typo cannot unbind anything.
+  `shared/settings.ts` checks the shape. Ids and chords are the view's
+  knowledge, so the settings dialog adds `resolveKeys`' problems to its live
+  preview and boot logs them.
+- **What a chord is.** Modifiers and one key, in `keys.ts` spelling. `+` as a
+  separator and the modifier names people write (Cmd, Option, Control) are
+  normalized. Refused: a key with no Mod, Ctrl or Alt, which is typing (§2's
+  bare-key rule; a function key is exempt, and the resolver dispatches one
+  with nothing held); a shifted character, since `eventToChord` reports the
+  key it is on; Escape (§6); and on a Mac, ⌥ with only a character key, since
+  the event carries the character ⌥ typed.
+- **What cannot be taken.** The indexed jumps, which are generated per slot
+  and have no id to rebind. On a Mac, the menu bar's `role` chords (`menu.ts`
+  roleChords), which AppKit answers before the view sees a key. The row verbs
+  are not chords and are not in the setting: `listKeys` stays R6's row
+  grammar.
+- **What cannot be given a chord.** A command marked `pointer` in `keys.ts`.
+  It acts on the hovered block or the right-clicked word, and a chord has
+  neither. `registry.test.ts` checks that every other id has something to run.
+- **An assigned chord outranks CodeMirror.** Bubbling to the window is enough
+  for the shipped table, which avoids every chord CodeMirror binds. A user's
+  table need not: ⌘/ is CodeMirror's toggle-comment. So each editor binds the
+  assigned chords first (`editor/setup.ts` userKeymap, ahead of every other
+  `Prec.highest` keymap) and runs the command through the bridge and the same
+  `exec` the palette uses (§7). It declines a command whose domains exclude
+  the editor, and the chord then stays with whatever else binds it there.
+- **A chord on a row verb works from anywhere**, which is what §8 already says
+  of a command with both. The resolver applies `targetKind` to bare keys only.
+  The dispatcher hands the command the focused row when the row is its kind,
+  and no target otherwise, which is how the palette invokes it. A verb that
+  only ever acts on a row still needs one: its `when` says so.
+- **Domains do not move.** A command keeps the domains it declares, so a
+  rebound chord fires where the old one did, and the shell's claim on Ctrl in
+  the terminal (§2) holds for assigned chords too.
+- **A keymap that reads the table is built per editor, and binds every
+  chord.** A module-level keymap captures the table at import, before boot
+  has applied the setting. And `keyOf(id)!` is no longer safe in a binding: a
+  command can have no chord at all.
+
 ## 3. Keymap
 
 The full table lives in code as `src/mainview/commands/keys.ts`; this is the
-human-readable mirror. Domains: where the *window* dispatcher fires the
+human-readable mirror. Both are the table as shipped: a user's `keys` setting
+can move any chord in it (§2a). Domains: where the *window* dispatcher fires the
 command (`page` | `editor` | `terminal` | `list`, by focus). `list` is a
 focused row and sits inside `page`, so page commands fire there too — focusing
 a note row must not cost you ⌘N. Editor-internal commands are bound inside
@@ -615,6 +673,7 @@ chords as Ctrl+Shift (§2).
 | Save                  | ⌘S                        | notes autosave; this skips the debounce |
 | Find / Replace        | ⌘F / ⌥⌘F (fallback ⇧⌘F)   | editor only; ⌥⌘F may be swallowed by cmux |
 | Find Next / Previous  | ⌘G / ⇧⌘G (also F3 / ⇧F3)  | editor only |
+| Select Next Occurrence / Duplicate Line | — (palette) | editor only; CodeMirror's `selectNextOccurrence` and `copyLineDown`. No chord: ⌘D, where CodeMirror's stock keymap puts the first, is Split Right (§2). They are commands so that the `keys` setting has an id to give a chord to (§2a) |
 | Run Block Inline      | ⌘↩                        | cursor inside a runnable block whose fence is CLOSED (§4c: an unterminated one has no agreed body, draws no run pair, and answers the chord with a notice); the run takes the keyboard when it first prints, and gives it back when it ends (§6a) |
 | Run Block in Terminal | ⇧⌘↩                       | |
 | Bold / Italic         | ⌘B / ⌘I                   | editor only (editor/formatting.ts); toggles `**`/`*` around the selection or the word at the caret — a bare caret drops an empty marker pair to type into. Run-based so the chords compose: ⌘I on `**bold**` stacks to `***both***` and ⌘I again peels only its own star |
@@ -1409,7 +1468,13 @@ secret written to a synced file — because focus never moved.
   unhandled ⌘-chord reaches AppKit's key-equivalent path and rings the system
   alert.
 - Key strings live only in `commands/keys.ts`; CodeMirror keymaps, xterm
-  handlers, and the window dispatcher all import from it.
+  handlers, and the window dispatcher all import from it. A user's `keys`
+  setting is folded in there too (`keysOf`), so no reader of the table knows
+  whether a chord was shipped or assigned.
+- A chord the `keys` setting assigned is bound in each editor ahead of every
+  other keymap, and consumed there (§2a). It is an inner handler under the
+  consume rule above, not a second dispatcher: it calls the same `exec`, and
+  the window listener then sees `defaultPrevented`.
 - A list consumes only the pure navigation keys (↑/↓/Home/End) locally; every
   other key, row verbs included, falls through to the window dispatcher. Lists
   do not run commands — they publish which row is focused (as data attributes,
@@ -1620,6 +1685,13 @@ through the same dispatcher the palette uses.
     focus, which is exactly the window-level Ctrl dispatch the policy forbids,
     so ⌃` is left to the editor keymap and the xterm handler that already
     route it.
+
+  The claim is decided when the bar is built, not when the spec is written,
+  because the `keys` setting moves chords afterwards (§2a). `claimOf` takes
+  the command's first chord that can be spelled as an accelerator and that
+  neither an inner handler nor the shell owns, and it honors the spec's `key`
+  only while the command still holds that chord. A command left with no such
+  chord shows none, and the window dispatcher still runs it.
 
   ⌘Z is the deliberate counter-example: WebKit turns the native undo selector
   into a `beforeinput` of type `historyUndo`, which `@codemirror/commands`

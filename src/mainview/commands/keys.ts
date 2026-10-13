@@ -1,5 +1,6 @@
 // Every user-facing command's identity lives here: its title and its key
-// bindings. Pure data, with no imports from app code, so the editor's
+// bindings. Data and the one setting laid over it (configureKeys, at the foot
+// of the table), with no imports from app code, so the editor's
 // CodeMirror keymaps, the terminals' xterm handlers, the window dispatcher,
 // tooltips, menu chips, and the palette can all read it without pulling React
 // or the store into pure modules.
@@ -21,6 +22,10 @@ export interface KeySpec {
   // are not chords: they are typing anywhere else, and the resolver only
   // consults them in the list domain (interactions.md §2).
   listKeys?: readonly string[];
+  // The command acts on what the pointer is over (a hovered block, a
+  // right-clicked word), so no chord can run it and the `keys` setting refuses
+  // one (bindings.ts).
+  pointer?: true;
 }
 
 export const COMMANDS = {
@@ -318,6 +323,12 @@ export const COMMANDS = {
   "editor.replace": { title: "Find and Replace", keys: ["Mod-Alt-f", "Mod-Shift-f"] },
   "editor.findNext": { title: "Find Next", keys: ["Mod-g", "F3"] },
   "editor.findPrev": { title: "Find Previous", keys: ["Mod-Shift-g", "Shift-F3"] },
+  // Two editing verbs with no chord of their own, there for the `keys`
+  // setting to give one. Select Next Occurrence is the meaning ⌘D has in
+  // CodeMirror's stock search keymap, which Split Right displaced
+  // (editor/find.ts). Duplicate Line is CodeMirror's copyLineDown.
+  "editor.selectNextOccurrence": { title: "Select Next Occurrence" },
+  "editor.duplicateLine": { title: "Duplicate Line" },
   "block.runInline": { title: "Run Block Inline", keys: ["Mod-Enter"] },
   "block.runInTerminal": { title: "Run Block in Terminal", keys: ["Mod-Shift-Enter"] },
   // Markdown formatting (editor/formatting.ts). RESERVED_KEYS held these
@@ -358,15 +369,15 @@ export const COMMANDS = {
   // The editor menu's spelling group (interactions.md §12). Replace is shown
   // under the guess it puts in place, so this title is the palette-less
   // command's name rather than anything a menu prints.
-  "spelling.replace": { title: "Replace Misspelled Word" },
-  "spelling.learn": { title: "Learn Spelling" },
+  "spelling.replace": { title: "Replace Misspelled Word", pointer: true },
+  "spelling.learn": { title: "Learn Spelling", pointer: true },
 
   // Per-block hover buttons (editor/blocks.ts). They act on the hovered block,
   // so they are not palette commands, but their tooltips derive from here like
   // every other icon button.
-  "block.copy": { title: "Copy" },
-  "block.copyOutput": { title: "Copy Output" },
-  "block.dismissOutput": { title: "Dismiss" },
+  "block.copy": { title: "Copy", pointer: true },
+  "block.copyOutput": { title: "Copy Output", pointer: true },
+  "block.dismissOutput": { title: "Dismiss", pointer: true },
 } as const satisfies Record<string, KeySpec>;
 
 export type CommandId = keyof typeof COMMANDS;
@@ -391,11 +402,42 @@ export function tabSelectKey(n: number): string {
   return modKey() === "Meta" ? `Ctrl-${n}` : `Alt-${n}`;
 }
 
-// Every binding for a command; empty when it is menu-only. (The lookup goes
-// through KeySpec because COMMANDS is a literal union and not every entry
+// The chords the user's `keys` setting changed, by command: the ones it
+// assigned and the ones a default holder lost to them (bindings.ts). `bound`
+// lists the commands the setting named. Empty until boot configures it, and
+// read at call time, so a keymap must be built after boot, never at load.
+let changed: Partial<Record<CommandId, readonly string[]>> = {};
+let bound: readonly CommandId[] = [];
+
+export function configureKeys(next: {
+  changed: Partial<Record<CommandId, readonly string[]>>;
+  bound: readonly CommandId[];
+}): void {
+  changed = next.changed;
+  bound = next.bound;
+}
+
+// A command's chords as shipped, whatever the `keys` setting says. (The lookup
+// goes through KeySpec because COMMANDS is a literal union and not every entry
 // carries a keys field.)
-export function keysOf(id: CommandId): readonly string[] {
+export function defaultKeysOf(id: CommandId): readonly string[] {
   return (COMMANDS[id] as KeySpec).keys ?? [];
+}
+
+// Every binding for a command; empty when it is menu-only.
+export function keysOf(id: CommandId): readonly string[] {
+  return changed[id] ?? defaultKeysOf(id);
+}
+
+// The chords the `keys` setting assigned, each with its command. The editor
+// binds these ahead of CodeMirror's own keymaps (editor/setup.ts userKeymap).
+export function userChords(): Array<{ id: CommandId; key: string }> {
+  return bound.flatMap((id) => keysOf(id).map((key) => ({ id, key })));
+}
+
+// Whether a chord can run the command at all (KeySpec.pointer).
+export function takesChord(id: CommandId): boolean {
+  return (COMMANDS[id] as KeySpec).pointer !== true;
 }
 
 // Every bare row verb for a command; empty when it has none.

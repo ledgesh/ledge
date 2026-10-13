@@ -4,6 +4,7 @@ import { initialState, reducer, type Action, type AppState } from "@/workspace/s
 import { buildCommands, paletteItems } from "./registry";
 import { EDITOR_MENU_COMMANDS } from "./editorMenu";
 import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./keymap";
+import { COMMANDS, takesChord, type CommandId } from "./keys";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
 import { configureShell } from "@/lib/shell";
 import { recordWindowRole } from "@/lib/windows";
@@ -102,6 +103,8 @@ function stubDeps(
       paste: record("paste"),
       pastePlain: record("pastePlain"),
       selectAll: record("selectAll"),
+      selectNextOccurrence: record("selectNextOccurrence"),
+      duplicateLine: record("duplicateLine"),
       runInline: record("runInline"),
       runInTerminal: record("runInTerminal"),
       openLink: record("openLink"),
@@ -165,6 +168,19 @@ describe("registry", () => {
         }
       }
     }
+  });
+
+  test("every id the keys setting accepts has something a chord can run", () => {
+    // A chord given to an id with no command behind it would show in a tooltip
+    // and do nothing. The registry runs most; Find Next and Find Previous are
+    // CodeMirror's alone (editor/find.ts); the rest are marked `pointer` and
+    // refused (commands/bindings.ts).
+    const built = new Set(commands.map((c) => c.id));
+    const orphans = (Object.keys(COMMANDS) as CommandId[]).filter((id) => takesChord(id) && !built.has(id));
+    expect(orphans).toEqual(["editor.findNext", "editor.findPrev"]);
+    // And a command that only a pointer target can run is marked so.
+    const pointerOnly = commands.filter((c) => c.targetKind === "misspelling").map((c) => c.id);
+    expect(pointerOnly.filter((id) => takesChord(id as CommandId))).toEqual([]);
   });
 
   test("no two commands claim the same row verb on the same row kind", () => {

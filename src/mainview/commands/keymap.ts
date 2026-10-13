@@ -125,7 +125,8 @@ export function parseKey(binding: string): Chord {
   const key = parts[parts.length - 1] === "" ? "-" : parts.pop()!;
   const mod = parts.includes("Mod");
   return {
-    key: /^[A-Z]$/.test(key) ? key.toLowerCase() : key,
+    // "Space" is the binding's spelling of the key an event reports as " ".
+    key: key === "Space" ? " " : /^[A-Z]$/.test(key) ? key.toLowerCase() : key,
     meta: parts.includes("Meta") || (mod && modKey() === "Meta"),
     ctrl: parts.includes("Ctrl") || (mod && modKey() === "Ctrl"),
     alt: parts.includes("Alt"),
@@ -144,6 +145,16 @@ export function matchesKey(binding: string, chord: Chord): boolean {
   );
 }
 
+// One string per chord on this platform, so two spellings of a chord compare
+// equal: "Mod-Shift-w" and "Shift-Mod-w", and "Ctrl-w" too where Mod is Ctrl.
+export function chordId(binding: string): string {
+  const c = parseKey(binding);
+  return `${c.ctrl}|${c.alt}|${c.shift}|${c.meta}|${c.key}`;
+}
+
+// A function key is a chord with no modifier: nothing types with it.
+export const FUNCTION_KEY = /^F([1-9]|1[0-9]|2[0-4])$/;
+
 // The first command whose binding matches the chord and whose domains include
 // the focus domain. Null while a modal layer is open (a menu, a dialog, or an
 // overlay): the window dispatcher is suppressed there (interactions.md §6).
@@ -153,7 +164,7 @@ export function resolveChord<T extends KeyedCommand>(
   flags: ContextFlags,
 ): T | null {
   if (flags.modalOpen) return null;
-  const bare = !chord.meta && !chord.ctrl && !chord.alt;
+  const bare = !chord.meta && !chord.ctrl && !chord.alt && !FUNCTION_KEY.test(chord.key);
   // Bare keys (no ⌘/⌃/⌥) are typing everywhere except on a focused list row,
   // where they are the row's verbs. Shift alone doesn't make a chord either.
   if (bare && flags.domain !== "list") return null;
@@ -166,9 +177,11 @@ export function resolveChord<T extends KeyedCommand>(
     if (modKey() === "Meta" || (!chord.shift && !chord.alt)) return null;
   }
   for (const cmd of commands) {
-    // A row verb only resolves on the kind of row it acts on.
-    if (cmd.targetKind && cmd.targetKind !== flags.targetKind) continue;
     if (bare) {
+      // A row verb only resolves on the kind of row it acts on. A chord on the
+      // same command resolves anywhere, and the dispatcher decides whether the
+      // focused row is its target (CommandProvider.tsx).
+      if (cmd.targetKind && cmd.targetKind !== flags.targetKind) continue;
       if (cmd.listKeys?.some((k) => matchesKey(k, chord))) return cmd;
       continue;
     }

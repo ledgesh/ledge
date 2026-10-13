@@ -2,7 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { initialState, type Action, type AppState } from "@/workspace/store";
 import { firstLeaf } from "@/workspace/tree";
 import { buildCommands } from "./registry";
-import { INNER_OWNED_CHORDS, MENU, acceleratorOf, buildMenu, shellOwnsChord, windowMenu, type MenuItem } from "./menu";
+import {
+  INNER_OWNED_CHORDS,
+  MENU,
+  acceleratorOf,
+  buildMenu,
+  roleChords,
+  shellOwnsChord,
+  windowMenu,
+  type MenuItem,
+} from "./menu";
+import { applyKeys } from "./bindings";
+import { configureKeys } from "./keys";
 import { configureShell } from "@/lib/shell";
 import type { AppMenuItem } from "../../shared/rpc-schema";
 import type { Command, CommandCtx, CommandTarget, RegistryDeps } from "./types";
@@ -64,6 +75,8 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
       paste: noop,
       pastePlain: noop,
       selectAll: noop,
+      selectNextOccurrence: noop,
+      duplicateLine: noop,
       runInline: noop,
       runInTerminal: noop,
       openLink: noop,
@@ -282,6 +295,63 @@ describe("windowMenu", () => {
   test("About Ledge is a command in the Ledge menu on every desktop", () => {
     const ledge = windowMenu(commands, makeCtx())[0]!;
     expect(!("type" in ledge) && ledge.submenu?.[0]).toMatchObject({ label: "About Ledge", action: "app.about" });
+  });
+});
+
+// The `keys` setting moves chords after the spec was written, so what the spec
+// tests above prove about the shipped table has to hold at build time too
+// (interactions.md §10: an accelerator is a claim).
+describe("buildMenu under the keys setting", () => {
+  const accelerators = (keys: Record<string, string[]>): Map<string, string | undefined> => {
+    expect(applyKeys(keys)).toEqual([]);
+    try {
+      const built = flatten(buildMenu(buildCommands(stubDeps()), makeCtx()));
+      return new Map(built.flatMap((i) => ("type" in i || !i.action ? [] : [[i.action, i.accelerator]])));
+    } finally {
+      configureKeys({ changed: {}, bound: [] });
+    }
+  };
+
+  test("an item follows its command to the chord it was given", () => {
+    const menu = accelerators({ "pane.splitRight": ["Mod-Alt-d"] });
+    expect(menu.get("pane.splitRight")).toBe("option+command+d");
+  });
+
+  test("a command left with no chord claims none", () => {
+    expect(accelerators({ "note.new": [] }).get("note.new")).toBeUndefined();
+  });
+
+  test("the spec's alias is dropped once the command no longer holds it", () => {
+    // tab.next advertises ⇧⌘], an alias. Rebound, a stale claim on ⇧⌘] would
+    // keep running Next Tab on a chord the user took away.
+    const menu = accelerators({ "tab.next": ["Mod-Alt-ArrowRight"], "note.new": ["Mod-Shift-]"] });
+    expect(menu.get("tab.next")).toBe("option+command+right");
+    expect(menu.get("note.new")).toBe("shift+command+]");
+  });
+
+  test("a chord an inner handler or the shell owns is never claimed", () => {
+    // ⌘C taken from Copy still means copy in the terminal, and a ⌃ chord is the
+    // shell's. The window dispatcher still runs both commands; the bar does not.
+    const menu = accelerators({ "note.new": ["Mod-c"], "daily.open": ["Ctrl-j"] });
+    expect(menu.get("note.new")).toBeUndefined();
+    expect(menu.get("daily.open")).toBeUndefined();
+  });
+
+  test("a claimable chord behind an unclaimable one is the one claimed", () => {
+    const menu = accelerators({ "note.new": ["Ctrl-n", "Mod-Alt-n"] });
+    expect(menu.get("note.new")).toBe("option+command+n");
+  });
+});
+
+describe("roleChords", () => {
+  test("names every role accelerator in the table's spelling", () => {
+    const chords = Object.fromEntries(roleChords().map((r) => [r.label, r.key]));
+    expect(chords["Quit Ledge"]).toBe("Mod-q");
+    expect(chords["Hide Others"]).toBe("Mod-Alt-h");
+    expect(chords["Redo"]).toBe("Mod-Shift-z");
+    expect(chords["Enter Full Screen"]).toBe("Ctrl-Mod-f");
+    // And back: each one is an accelerator the bar really carries.
+    for (const role of roleChords()) expect(acceleratorOf(role.key)).not.toBeNull();
   });
 });
 

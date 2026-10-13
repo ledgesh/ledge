@@ -10,7 +10,8 @@
 // each section is a fact about one of two things: the machine holding the
 // notes (which shell to spawn, how long the trash keeps things, what a
 // ```python fence runs) or the app in front of the user (font sizes, the
-// theme, whether markdown syntax is concealed, whether it checks for updates).
+// theme, whether markdown syntax is concealed, keyboard shortcuts, whether it
+// checks for updates).
 // The first kind lives in the server's settings.jsonc, the second in the
 // client's, and SETTINGS_HOMES below is the only place that mapping is written
 // down. A phone's font size
@@ -49,6 +50,12 @@ export interface Settings {
   // at launch like every setting, but "system" keeps tracking the OS
   // afterwards: that is the OS changing, not the setting.
   appearance: { theme: Theme };
+  // Keyboard shortcuts the user changed: command id -> the chords that run it.
+  // An entry replaces that command's default chords, and an empty list leaves
+  // it with none. Only the shape is checked here: which ids and chords are
+  // usable is the view's knowledge (mainview/commands/bindings.ts,
+  // interactions.md §2a). Why the knob is earned: architecture.md §6.
+  keys: Record<string, string[]>;
   // `automatic` checks for a newer version at launch and once a day
   // (bun/updates.ts). False stops only those checks: Check for Updates… still
   // asks, and still downloads what it finds. Why the knob is earned:
@@ -173,6 +180,7 @@ export const SETTINGS_HOMES = {
   editor: "client",
   terminal: "client",
   appearance: "client",
+  keys: "client",
   updates: "client",
   trash: "server",
   blocks: "server",
@@ -195,6 +203,7 @@ export function mergeSettings(server: Settings, client: Settings): Settings {
     editor: client.editor,
     terminal: client.terminal,
     appearance: client.appearance,
+    keys: client.keys,
     updates: client.updates,
     trash: server.trash,
     blocks: server.blocks,
@@ -221,6 +230,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   editor: { fontSize: 14, livePreview: true, spellCheck: true },
   terminal: { fontSize: 12 },
   appearance: { theme: "system" as Theme },
+  keys: {},
   updates: { automatic: true },
   trash: { ttlDays: 30 },
   blocks: {
@@ -270,10 +280,10 @@ export function settingsTemplate(shellPath: string): string {
 // falls back to its default with a warning in the launch log; it never takes
 // the rest of the file down.
 //
-// Font sizes, the theme, live preview, and update checks are NOT here. Those
-// describe this app and the screen you are reading this on, not the machine
-// the notes are stored on, so they live in this app's own settings file: the
-// This app tab in the ⌘, dialog.
+// Font sizes, the theme, live preview, keyboard shortcuts, and update checks
+// are NOT here. Those describe this app and the screen you are reading this
+// on, not the machine the notes are stored on, so they live in this app's own
+// settings file: the This app tab in the ⌘, dialog.
 {
   // The login shell every terminal drawer and inline run spawns. Seeded with
   // this machine's own, if that is zsh or bash: the shells Ledge can read.
@@ -415,6 +425,20 @@ export function clientSettingsTemplate(s: Settings): string {
     "theme": ${JSON.stringify(s.appearance.theme)}
   },
 
+  // Keyboard shortcuts you want changed: a command's id, then the chords that
+  // run it. An entry replaces that command's default chords, and a chord you
+  // assign is taken from the command that had it. An empty list leaves the
+  // command with no chord. Write a chord as its modifiers and then the key:
+  // "Mod-Shift-d", "Ctrl-Alt-ArrowUp", "F5". Mod is ⌘ on a Mac and Ctrl
+  // everywhere else. The Keyboard Shortcuts page of the manual lists every
+  // command id beside its default.
+  //
+  //   "keys": {
+  //     "pane.splitRight": ["Mod-Alt-d"],
+  //     "terminal.toggle": []
+  //   }
+  "keys": ${JSON.stringify(s.keys)},
+
   "updates": {
     // Check ledge.sh for a newer version when Ledge starts and once a day,
     // and download it in the background. Set false to check only when you
@@ -462,6 +486,7 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
   const editor = mine("editor");
   const terminal = mine("terminal");
   const appearance = mine("appearance");
+  const keys = mine("keys");
   const updates = mine("updates");
   const trash = mine("trash");
   const blocks = mine("blocks");
@@ -489,6 +514,7 @@ export function parseSettings(raw: unknown, home: SettingsHome): { settings: Set
       appearance: {
         theme: oneOf(appearance, "theme", "appearance.theme", THEMES, d.appearance.theme, problems),
       },
+      keys: chordLists(keys, problems),
       updates: { automatic: bool(updates, "automatic", "updates.automatic", d.updates.automatic, problems) },
       trash: { ttlDays: num(trash, "ttlDays", "trash.ttlDays", d.trash.ttlDays, 1, 36500, problems) },
       blocks: {
@@ -528,6 +554,19 @@ function hostMaps(blocks: Record<string, unknown>, problems: string[]): Record<s
   const out: Record<string, Record<string, string>> = {};
   for (const host of Object.keys(v)) {
     out[host] = stringMap(v, host, `blocks.hostInterpreters.${host}`, problems);
+  }
+  return out;
+}
+
+// Validates the shape of `keys`: each entry one chord or a list of them. One
+// chord alone is accepted as a list of one, since most entries are. An entry
+// of any other shape costs that command alone, which keeps its defaults.
+function chordLists(keys: Record<string, unknown>, problems: string[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [id, v] of Object.entries(keys)) {
+    if (typeof v === "string") out[id] = [v];
+    else if (Array.isArray(v) && v.every((x) => typeof x === "string")) out[id] = v;
+    else problems.push(`"keys.${id}" must be a chord or a list of chords`);
   }
   return out;
 }

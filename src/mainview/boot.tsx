@@ -45,7 +45,8 @@ import { configureUpdates, loadUpdateState, recordUpdateState } from "./lib/upda
 import { captureFailures, configureLog } from "./lib/log";
 import { hideBooting, showBooting } from "./lib/booting";
 import { configureAssets } from "./lib/assets";
-import { configureSettings } from "./lib/settings";
+import { configureSettings, settings as settingsSnapshot } from "./lib/settings";
+import { applyKeys } from "./commands/bindings";
 import { configureConnections, reconnectLink, recordLinkState, recordPresence, type ConnectionStatus } from "./lib/connections";
 import { holdSaves } from "./notes/store";
 import { resolveStrandedNotes } from "./workspace/editorPool";
@@ -469,6 +470,10 @@ async function boot(requests: RequestClient): Promise<void> {
       await requests.profileWrite({ name, text });
     },
   }, staleSettings);
+  // The `keys` setting, before anything reads the key table: the registry,
+  // the menu bar and every editor's keymaps are built from it below
+  // (commands/bindings.ts). A view's warnings reach the app's log.
+  for (const problem of applyKeys(settingsSnapshot().keys)) console.warn(`[settings] ${problem}`);
   // Straight after the settings snapshot lands and before the first render. A
   // theme setting can override what index.html stamped, and every editor and
   // terminal built below reads the resolved appearance (lib/theme.ts).

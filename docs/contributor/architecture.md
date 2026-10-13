@@ -699,9 +699,9 @@ There are TWO of them, split by machine rather than by lifetime (remote.md
 §5). `settings.jsonc` in the app home is the SERVER's: the shell every PTY
 spawns, the trash TTL, what a code fence runs, where daily notes live — facts
 about the machine holding the notes. `.client/settings.jsonc` is the CLIENT's:
-font sizes, the theme, live preview, automatic update checks — facts about the
-app and the screen in front of you, which follow the app to whichever machine's
-notes it is showing.
+font sizes, the theme, live preview, keyboard shortcuts, automatic update
+checks — facts about the app and the screen in front of you, which follow the
+app to whichever machine's notes it is showing.
 `SETTINGS_HOMES` in `shared/settings.ts` is the only place that mapping is
 written down, and it is `satisfies Record<keyof Settings, SettingsHome>`, so a
 section added without a home does not compile. Everything below applies to
@@ -771,7 +771,19 @@ snapshot at construction time through `lib/settings.ts`.
   the verb: Check for Updates… still checks and downloads, so turning checks
   off never strands an install on a known bug. It is a client setting because
   the update belongs to the app, and a server's file must not switch off a
-  Mac's checks), trash TTL, runnable fence languages, and the fence-language → interpreter
+  Mac's checks), keyboard shortcuts (`keys`: command id to the chords that
+  run it, resolved view-side by `commands/bindings.ts`; interactions.md §2a
+  has the rules. The shipped table demonstrably fails three groups. A keyboard
+  layout with no plain key for a default chord: ⌃` on a German or Nordic
+  layout, where the backtick is a dead key behind Shift. A desktop that takes a chord
+  before the app sees it: GNOME's Ctrl+Alt+T and Ctrl+Alt+L, which
+  interactions.md §2 already records as unreachable there, and cmux's ⌥⌘F.
+  And every Ctrl desktop, where Mod is Ctrl and the app's chords land on keys
+  that have meant something else in an editor for decades, which is the
+  Ctrl+D of issue #17. It is a client setting because the keyboard, its
+  layout and the desktop around it are this machine's, and a phone, which
+  reads every section from its server, gets none), trash TTL, runnable fence
+  languages, and the fence-language → interpreter
   map (`blocks.interpreters`, applied Bun-side by `bun/runner.ts`; it exists
   because "which python" has no universal answer — the default resolves via
   the login shell's PATH, and a venv or pinned toolchain demonstrably needs

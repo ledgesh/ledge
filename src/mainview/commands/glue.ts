@@ -3,9 +3,9 @@
 // bridge's configureBridge pattern: Shell registers the chrome toggles, Sidebar
 // the rename field, NoteBrowser the delete-with-undo strip and the empty-trash
 // confirmation. Commands reach them through ctx.ui, not by importing one.
-import { openSearchPanel } from "@codemirror/search";
+import { openSearchPanel, selectNextOccurrence } from "@codemirror/search";
 import { startCompletion } from "@codemirror/autocomplete";
-import { indentLess, indentMore, selectAll } from "@codemirror/commands";
+import { copyLineDown, indentLess, indentMore, selectAll } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { focusEditor, getEditorView, requestReveal, requestTitleCaret } from "@/workspace/editorPool";
 import { revealSelection } from "@/workspace/reveal";
@@ -219,5 +219,7 @@ export const registryDeps: RegistryDeps = {
     replaceWord: (docId, from, to, word, guess) => withView(docId, (view) => void replaceWord(view, from, to, word, guess)),
     learnWord: (docId, word) => withView(docId, (view) => void learnWord(view, word)),
     selectAll: (docId) => withView(docId, (view) => void selectAll(view)),
+    selectNextOccurrence: (docId) => withView(docId, (view) => void selectNextOccurrence(view)),
+    duplicateLine: (docId) => withView(docId, (view) => void copyLineDown(view)),
   },
 };

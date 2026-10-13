@@ -23,6 +23,7 @@ import { readSettingsFile, settings, writeSettingsFile } from "@/lib/settings";
 import { highlight } from "@/editor/setup";
 import { stripJsonc } from "../../shared/jsonc";
 import { parseSettings, type SettingsHome } from "../../shared/settings";
+import { resolveKeys } from "@/commands/bindings";
 
 // Clipboard, routed through the native bridge like the note editor's
 // (editor/setup.ts): the browser's clipboard events do not work in this
@@ -77,7 +78,11 @@ function problemsOf(text: string, home: SettingsHome): string[] {
   } catch (err) {
     return [`Not valid JSONC (the app would run on defaults): ${err instanceof Error ? err.message : String(err)}`];
   }
-  return parseSettings(parsed, home).problems;
+  const { settings: parsedSettings, problems } = parseSettings(parsed, home);
+  // The `keys` section's ids and chords are checked against the command table,
+  // which only the view has (commands/bindings.ts). Resolving changes nothing
+  // in force.
+  return home === "client" ? [...problems, ...resolveKeys(parsedSettings.keys).problems] : problems;
 }
 
 // The two tabs, in the words the manual's table of what lives where uses

@@ -31,7 +31,7 @@ import { sessionIdFacet } from "./session";
 import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
 import { copyText } from "../lib/clipboard";
 import { settings } from "../lib/settings";
-import { keyOf, type CommandId } from "../commands/keys";
+import { keysOf, type CommandId } from "../commands/keys";
 import { modChord } from "../commands/keymap";
 import { tooltip } from "../commands/format";
 
@@ -1356,22 +1356,16 @@ export function ledgeBlocks(): Extension {
     // client can run blocks and still have nowhere to put one in a terminal.
     keymap.of([
       ...(runsBlocks()
-        ? [
-            {
-              key: keyOf("block.runInline")!,
-              run: (view: EditorView) =>
-                runBlock(view, view.state.selection.main.head, "inline"),
-            },
-          ]
+        ? keysOf("block.runInline").map((key) => ({
+            key,
+            run: (view: EditorView) => runBlock(view, view.state.selection.main.head, "inline"),
+          }))
         : []),
       ...(runsBlocks() && hasTerminal()
-        ? [
-            {
-              key: keyOf("block.runInTerminal")!,
-              run: (view: EditorView) =>
-                runBlock(view, view.state.selection.main.head, "terminal"),
-            },
-          ]
+        ? keysOf("block.runInTerminal").map((key) => ({
+            key,
+            run: (view: EditorView) => runBlock(view, view.state.selection.main.head, "terminal"),
+          }))
         : []),
     ]),
   ];

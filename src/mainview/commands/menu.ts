@@ -17,6 +17,7 @@
 //      inner handler owns the chord for a different meaning, the item carries
 //      `accelerator: false` with a reason.
 import type { AppMenuItem } from "../../shared/rpc-schema";
+import { chordId } from "./keymap";
 import type { Command, CommandCtx } from "./types";
 
 // One entry in a menu. A `command` item runs a registry command in the view.
@@ -284,6 +285,7 @@ const ACCEL_KEYS: Record<string, string> = {
   Backspace: "backspace",
   Escape: "escape",
   " ": "space",
+  Space: "space",
   ArrowUp: "up",
   ArrowDown: "down",
   ArrowLeft: "left",
@@ -306,6 +308,39 @@ export function acceleratorOf(binding: string): string | null {
   if (!named && key.length !== 1) return null;
   const ordered = ACCEL_ORDER.filter((m) => mods.includes(m)).map((m) => ACCEL_MODS[m]!);
   return [...ordered, named ?? key.toLowerCase()].join("+");
+}
+
+// The chords the bar's `role` items claim, in keys.ts spelling. AppKit answers
+// them before the view sees a key, so the `keys` setting cannot hand one to a
+// command (bindings.ts).
+export function roleChords(): Array<{ key: string; label: string }> {
+  const names = Object.fromEntries(Object.entries(ACCEL_MODS).map(([mod, name]) => [name, mod]));
+  const out: Array<{ key: string; label: string }> = [];
+  const walk = (items: readonly MenuItem[]) => {
+    for (const item of items) {
+      if (item === "---") continue;
+      if ("items" in item) walk(item.items);
+      else if ("role" in item && item.accelerator) {
+        const parts = item.accelerator.split("+");
+        const key = parts.pop()!;
+        out.push({ key: [...parts.map((p) => names[p]!), key].join("-"), label: item.label });
+      }
+    }
+  };
+  for (const section of MENU) walk(section.items);
+  return out;
+}
+
+// The chord a command item claims as its key equivalent: the spec's own pick
+// while the command still holds it, else the command's first chord a key
+// equivalent may take. The `keys` setting can leave a command holding a chord
+// an inner handler or the shell owns, and those are never claimed (rule 2).
+function claimOf(item: { key?: string; accelerator?: false }, keys: readonly string[]): string | null {
+  if (item.accelerator === false) return null;
+  const owned = INNER_OWNED_CHORDS.map(chordId);
+  const free = keys.filter((k) => acceleratorOf(k) && !owned.includes(chordId(k)) && !shellOwnsChord(k));
+  const pick = item.key && free.find((k) => chordId(k) === chordId(item.key!));
+  return pick || free[0] || null;
 }
 
 function titleOfCommand(cmd: Command, ctx: CommandCtx): string {
@@ -341,7 +376,7 @@ export function buildMenu(commands: readonly Command[], ctx: CommandCtx): AppMen
       const enabled = !cmd.when || cmd.when(ctx);
       if (!enabled && item.hideWhenDisabled) continue;
       const title = titleOfCommand(cmd, ctx);
-      const binding = item.accelerator === false ? null : (item.key ?? cmd.keys?.[0] ?? null);
+      const binding = claimOf(item, cmd.keys ?? []);
       out.push({
         label: item.labelAfterColon ? (title.split(": ")[1] ?? title) : title,
         action: cmd.id,

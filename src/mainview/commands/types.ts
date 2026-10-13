@@ -388,6 +388,10 @@ export interface RegistryDeps {
     // CodeMirror's own selectAll, the ⌘A its defaultKeymap already binds.
     // Named here so the context menu has something to render.
     selectAll(docId: string): void;
+    // CodeMirror's selectNextOccurrence and copyLineDown, which ship with no
+    // chord here (commands/keys.ts).
+    selectNextOccurrence(docId: string): void;
+    duplicateLine(docId: string): void;
     // The spelling group's two verbs (editor/spelling.ts): put a guess in
     // place of the misspelled word, or add the word to this device's
     // dictionary.

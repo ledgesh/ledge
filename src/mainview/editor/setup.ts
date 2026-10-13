@@ -7,7 +7,7 @@ import type { MarkdownConfig } from "@lezer/markdown";
 import { languages } from "@codemirror/language-data";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { styleTags, Tag, tags } from "@lezer/highlight";
-import { toNative } from "./bridge";
+import { runCommand, toNative } from "./bridge";
 import { dispatchDocChanged } from "./docEvents";
 import { ledgeBlocks } from "./blocks";
 import { ledgeFrontmatter } from "./frontmatter";
@@ -29,7 +29,7 @@ import { noteChanged, saveNow } from "../notes/store";
 import { copySelection, cutSelection, pasteEvent, pasteHere, pastePlain } from "./clipboard";
 import { settings } from "../lib/settings";
 import { softKeyboard } from "../lib/shell";
-import { keyOf } from "../commands/keys";
+import { keysOf, userChords } from "../commands/keys";
 
 // Inline code gets a tag nothing else uses. @lezer/markdown gives `InlineCode`
 // and a fence's `CodeText` the same tags.monospace, so styling that tag would
@@ -115,30 +115,41 @@ const reporting = EditorView.updateListener.of((update) => {
   noteChanged(update.state.facet(sessionIdFacet), update.state.doc.toString());
 });
 
+// Chords the user's `keys` setting assigned, routed to the command they name
+// (interactions.md §2a). First among the Prec.highest keymaps, so an assigned
+// chord outranks every binding below, CodeMirror's own included. `runCommand`
+// answers false for a command that does not fire in the editor, and the chord
+// then falls through to whatever else holds it.
+const userKeymap = () =>
+  Prec.highest(keymap.of(userChords().map(({ id, key }) => ({ key, run: () => runCommand(id) }))));
+
 // App-level shortcuts that bridge out, with key strings sourced from the
 // command table (commands/keys.ts) so the editor can never drift from the
 // advertised bindings. High precedence so they win over CodeMirror's own.
-const appKeymap = Prec.highest(
-  keymap.of([
-    {
-      key: keyOf("terminal.toggle")!,
-      run: () => {
-        toNative({ type: "toggleTerminal" });
-        return true;
-      },
-    },
-    {
+// Built per editor, like every keymap that reads the table: the `keys` setting
+// is in force only once boot has run.
+const appKeymap = () =>
+  Prec.highest(
+    keymap.of([
+      ...keysOf("terminal.toggle").map((key) => ({
+        key,
+        run: () => {
+          toNative({ type: "toggleTerminal" });
+          return true;
+        },
+      })),
       // Notes autosave, so Cmd+S only skips the debounce. The binding stays
       // because the habit is universal, and an unhandled Cmd key rings the
       // AppKit alert.
-      key: keyOf("editor.save")!,
-      run: (view) => {
-        void saveNow(view.state.facet(sessionIdFacet));
-        return true;
-      },
-    },
-  ]),
-);
+      ...keysOf("editor.save").map((key) => ({
+        key,
+        run: (view: EditorView) => {
+          void saveNow(view.state.facet(sessionIdFacet));
+          return true;
+        },
+      })),
+    ]),
+  );
 
 // Clipboard, routed through the native bridge (pbcopy/pbpaste). CodeMirror's
 // built-ins rely on browser clipboard events, which do not work in this
@@ -150,14 +161,15 @@ const appKeymap = Prec.highest(
 //
 // ⌘A is absent: `editor.selectAll` exists for the menu, and the key it
 // advertises is already bound by CodeMirror's own defaultKeymap.
-const clipboardKeymap = Prec.highest(
-  keymap.of([
-    { key: keyOf("editor.copy")!, run: copySelection },
-    { key: keyOf("editor.cut")!, run: cutSelection },
-    { key: keyOf("editor.paste")!, run: pasteHere },
-    { key: keyOf("editor.pastePlain")!, run: pastePlain },
-  ]),
-);
+const clipboardKeymap = () =>
+  Prec.highest(
+    keymap.of([
+      ...keysOf("editor.copy").map((key) => ({ key, run: copySelection })),
+      ...keysOf("editor.cut").map((key) => ({ key, run: cutSelection })),
+      ...keysOf("editor.paste").map((key) => ({ key, run: pasteHere })),
+      ...keysOf("editor.pastePlain").map((key) => ({ key, run: pastePlain })),
+    ]),
+  );
 
 // Tab indents and ⇧Tab outdents: the line the caret is on, or every line the
 // selection touches. On a list item, indenting nests it (the marker moves with
@@ -425,6 +437,8 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
               softKeyboard() ? EditorView.editable.of(false) : [],
             ]
           : [],
+        // Ahead of findReplace() and everything else that binds a chord.
+        userKeymap(),
         history(),
         drawSelection(),
         lineNumbers(),
@@ -441,8 +455,8 @@ export function createEditor(parent: HTMLElement, doc: string, sessionId: string
         // CodeMirror's spellcheck="false": iOS underlines only where it also
         // autocorrects, code blocks included (ios.md §7).
         readOnly || softKeyboard() || !settings().editor.spellCheck ? [] : spelling(),
-        appKeymap,
-        clipboardKeymap,
+        appKeymap(),
+        clipboardKeymap(),
         // The platform's paste event, which a phone's callout Paste raises and
         // which carries nothing on a Mac (editor/clipboard.ts pasteEvent).
         pasteEvent,

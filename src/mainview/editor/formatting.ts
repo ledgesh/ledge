@@ -9,7 +9,7 @@
 // markers are always `*`, never `_`.
 import { EditorSelection, Prec, type EditorState, type TransactionSpec } from "@codemirror/state";
 import { keymap, type Command } from "@codemirror/view";
-import { keyOf } from "../commands/keys";
+import { keysOf } from "../commands/keys";
 
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 
@@ -147,9 +147,9 @@ export const insertLink: Command = (view) => {
 export function formatting() {
   return Prec.highest(
     keymap.of([
-      { key: keyOf("format.bold")!, run: toggleBold },
-      { key: keyOf("format.italic")!, run: toggleItalic },
-      { key: keyOf("format.link")!, run: insertLink },
+      ...keysOf("format.bold").map((key) => ({ key, run: toggleBold })),
+      ...keysOf("format.italic").map((key) => ({ key, run: toggleItalic })),
+      ...keysOf("format.link").map((key) => ({ key, run: insertLink })),
     ]),
   );
 }

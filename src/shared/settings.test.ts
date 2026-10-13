@@ -62,6 +62,38 @@ describe("parseSettings", () => {
     expect(problems).toEqual([]);
   });
 
+  test("keys: one chord or a list of them per command, in the client's file", () => {
+    const { settings, problems } = parseSettings(
+      { keys: { "pane.splitRight": "Mod-Alt-d", "note.new": ["Mod-e", "Mod-t"], "terminal.toggle": [] } },
+      "client",
+    );
+    expect(problems).toEqual([]);
+    expect(settings.keys).toEqual({
+      "pane.splitRight": ["Mod-Alt-d"],
+      "note.new": ["Mod-e", "Mod-t"],
+      "terminal.toggle": [],
+    });
+  });
+
+  test("keys: an entry of another shape costs that command alone", () => {
+    const { settings, problems } = parseSettings(
+      { keys: { "pane.splitRight": 4, "note.new": ["Mod-e", 2], "daily.open": "Mod-e" } },
+      "client",
+    );
+    expect(problems).toEqual([
+      '"keys.pane.splitRight" must be a chord or a list of chords',
+      '"keys.note.new" must be a chord or a list of chords',
+    ]);
+    expect(settings.keys).toEqual({ "daily.open": ["Mod-e"] });
+  });
+
+  test("keys: the section is the app's, so the server's file does not read it", () => {
+    const { settings, problems } = parseSettings({ keys: { "note.new": ["Mod-e"] } }, "server");
+    expect(settings.keys).toEqual({});
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("belongs to this app");
+  });
+
   test("a partial file keeps defaults for everything unmentioned", () => {
     const { settings, problems } = parseSettings({ editor: { fontSize: 18 } }, "client");
     expect(settings.editor.fontSize).toBe(18);
@@ -424,9 +456,11 @@ describe("the seeded templates", () => {
       terminal: { fontSize: 11 },
       appearance: { theme: "dark" },
       updates: { automatic: false },
+      keys: { "pane.splitRight": ["Mod-Alt-d"] },
     });
     const { settings, problems } = parseSettings(JSON.parse(stripJsonc(text)), "client");
     expect(problems).toEqual([]);
+    expect(settings.keys).toEqual({ "pane.splitRight": ["Mod-Alt-d"] });
     expect(settings.editor).toEqual({ fontSize: 17, livePreview: false, spellCheck: false });
     expect(settings.terminal).toEqual({ fontSize: 11 });
     expect(settings.appearance).toEqual({ theme: "dark" });

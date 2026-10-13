@@ -128,7 +128,7 @@ function Drawer({
 
 function Shell() {
   const { state, dispatch, selected } = useWorkspace();
-  const { exec } = useCommands();
+  const { exec, commands } = useCommands();
   // Whether the side panels take width or cover the editor (lib/viewport.ts).
   // Live rather than boot-static, so a window dragged across the breakpoint
   // lands in the arrangement that fits. A phone is one pane either way up.
@@ -498,6 +498,15 @@ function Shell() {
   useEffect(() => {
     configureBridge({
       toggleTerminal: () => exec("terminal.toggle"),
+      // A chord the `keys` setting assigned, pressed in a note. Refused for a
+      // command the window dispatcher would not fire from the editor either
+      // (page-only ones); `domains: []` is the editor's own commands.
+      runCommand: (id) => {
+        const cmd = commands.find((c) => c.id === id);
+        if (!cmd || (cmd.domains?.length && !cmd.domains.includes("editor"))) return false;
+        exec(id);
+        return true;
+      },
       runInTerminal,
       // Shell renders the host picker, as it does every dialog. The editor
       // asks for one through the bridge (blocks.ts requestHostPick).

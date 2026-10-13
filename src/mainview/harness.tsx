@@ -46,6 +46,7 @@ import { configureUpdates, loadUpdateState, recordUpdateState } from "./lib/upda
 import { configureWindows, dispatchDocsShow, recordWindowRole } from "./lib/windows";
 import { configureAssets } from "./lib/assets";
 import { configureSettings } from "./lib/settings";
+import { applyKeys } from "./commands/bindings";
 import { configureConnections, recordLinkState, recordPresence } from "./lib/connections";
 import { hideBooting, showBooting } from "./lib/booting";
 import {
@@ -1171,8 +1172,12 @@ configureAssets({
 // `?spellCheck=off` does the same for editor.spellCheck.
 const themeParam = new URLSearchParams(window.location.search).get("theme");
 const spellCheckOff = new URLSearchParams(window.location.search).get("spellCheck") === "off";
+// `?keys=` is a `keys` section as JSON, for the specs that rebind a chord
+// (e2e/keys.spec.ts).
+const keysParam = new URLSearchParams(window.location.search).get("keys");
 const HARNESS_SETTINGS = {
   ...DEFAULT_SETTINGS,
+  keys: keysParam ? (JSON.parse(keysParam) as Record<string, string[]>) : DEFAULT_SETTINGS.keys,
   editor: { ...DEFAULT_SETTINGS.editor, fontSize: 18, spellCheck: !spellCheckOff },
   appearance: {
     theme: THEMES.includes(themeParam as Theme) ? (themeParam as Theme) : DEFAULT_SETTINGS.appearance.theme,
@@ -1213,6 +1218,8 @@ configureSettings(
   // after it read it (rpc-schema `settingsGet`).
   new URLSearchParams(window.location.search).has("staleSettings") ? staleSettingsNotice(true) : null,
 );
+// As boot.tsx does, before anything reads the key table.
+applyKeys(HARNESS_SETTINGS.keys);
 // The connection list, in memory. Two entries so the picker has something to
 // switch between, and on the Mac one of them refuses to open: falling back to
 // this Mac with the reason showing is a state the chrome has to render, and a
