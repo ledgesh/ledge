@@ -80,6 +80,16 @@ beforeEach(async () => {
 });
 
 describe("createNote / writeNote / readNote", () => {
+  test("Korean headings name files and duplicate headings enumerate without clobbering", async () => {
+    const a = await createNote(ROOT, "# 한국어 제목\n\n첫 번째");
+    const b = await createNote(ROOT, "# 한국어 제목\n\n두 번째");
+    expect(a.path).toBe(join(ROOT, "한국어-제목.md"));
+    expect(b.path).toBe(join(ROOT, "한국어-제목-2.md"));
+    expect(a.title).toBe("한국어 제목");
+    expect(await textAt(a.path)).toBe("# 한국어 제목\n\n첫 번째");
+    expect(await textAt(b.path)).toBe("# 한국어 제목\n\n두 번째");
+  });
+
   test("names the file from the note's H1 and round-trips its text", async () => {
     const note = await createNote(ROOT, "# Shipping Notes\n\nhello");
     expect(note.path).toBe(join(ROOT, "shipping-notes.md"));
@@ -476,6 +486,14 @@ describe("notesTagged", () => {
 });
 
 describe("retitleNote", () => {
+  test("an untitled note can be renamed to a Korean heading", async () => {
+    const note = await createNote(ROOT, "본문");
+    const moved = await retitleNote(note.path, "# 한국어 제목\n\n본문");
+    expect(moved.path).toBe(join(ROOT, "한국어-제목.md"));
+    expect(await textAt(moved.path)).toBe("본문");
+    expect(await textAt(note.path)).toBeNull();
+  });
+
   test("moves the file to match its heading", async () => {
     const note = await createNote(ROOT, "# Draft\n");
     const moved = await retitleNote(note.path, "# Final\n");

@@ -98,6 +98,10 @@ describe("createManaged", () => {
     expect(rules).toEqual([".ledge-trash/", ".*.md.tmp-*", ".DS_Store"]);
   });
 
+  test("a Korean display name creates a Korean workspace folder", async () => {
+    expect(await createManaged("한국어 노트")).toBe(join(resolve(APP_HOME), "한국어-노트"));
+  });
+
   test("a name that slugs to nothing falls back rather than failing", async () => {
     const root = await createManaged("???");
     expect(root).toBe(join(resolve(APP_HOME), "workspace"));

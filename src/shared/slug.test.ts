@@ -103,7 +103,28 @@ describe("slugify", () => {
     // The caller falls back to the enumerated "untitled" name.
     expect(slugify("!!!")).toBeNull();
     expect(slugify("   ")).toBeNull();
-    expect(slugify("日本語")).toBeNull();
+    expect(slugify("🎉")).toBeNull();
+  });
+
+  test("Korean and mixed-language headings keep their letters", () => {
+    expect(slugify("한국어 제목")).toBe("한국어-제목");
+    expect(slugify("Ledge 한국어 노트 2026")).toBe("ledge-한국어-노트-2026");
+    expect(slugify("日本語")).toBe("日本語");
+  });
+
+  test("decomposed Hangul produces the same composed filename", () => {
+    expect(slugify("한국어 제목".normalize("NFD"))).toBe("한국어-제목");
+  });
+
+  test("Unicode headings still remove unsafe path characters", () => {
+    expect(slugify("../../한국어/제목\\초안:메모\u0000")).toBe("한국어-제목-초안-메모");
+  });
+
+  test("long Unicode headings fit the filename limit without splitting a letter", () => {
+    expect(slugify("한".repeat(200))).toBe("한".repeat(60));
+    const slug = slugify("𠀀".repeat(200))!;
+    expect(slug).toBe("𠀀".repeat(60));
+    expect(new TextEncoder().encode(`${slug}-2.md`).length).toBeLessThan(255);
   });
 
   test("the slug is safe by construction: no dots, separators, or leading dot", () => {
@@ -130,6 +151,7 @@ describe("slugify", () => {
 describe("slugOf", () => {
   test("a titled note asks for its heading's slug", () => {
     expect(slugOf("# Shipping Notes\n\nbody")).toBe("shipping-notes");
+    expect(slugOf("# 한국어 제목\n\n본문")).toBe("한국어-제목");
   });
 
   test("an untitled note asks for nothing", () => {
