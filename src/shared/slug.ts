@@ -10,9 +10,8 @@
 // Renaming is safe only while a note's identity is its docId and not its path
 // (architecture.md §4).
 
-// Long enough for a real heading, short enough to stay clear of the 255-byte
-// filename limit every filesystem here shares, with room for a "-2" suffix and
-// the extension.
+// At most 60 Unicode code points (240 UTF-8 bytes), leaving room under the
+// 255-byte filename limit for an enumerated suffix and the extension.
 const MAX_SLUG = 60;
 
 // Far longer than any real heading, short enough that a runaway one cannot
@@ -44,25 +43,27 @@ export function headingOf(text: string): string | null {
 }
 
 // Turns a heading into a filesystem-safe slug, or null if nothing usable is
-// left. Everything outside [a-z0-9] becomes a separator, which makes the
-// result safe by construction: no dots, no slashes, no colons, no control
-// characters, no leading dot. This is the whole trust boundary for a name
-// arriving from the view (architecture.md §2).
+// left. Everything outside Unicode letters and numbers becomes a separator:
+// no dots, no slashes, no colons, no control characters, no leading dot.
+// This is the whole trust boundary for a name arriving from the view
+// (architecture.md §2).
 export function slugify(heading: string): string | null {
   // Fold accents first ("Café" -> "cafe"). Otherwise each accented letter
   // becomes a separator and breaks the word into pieces.
-  const folded = heading.normalize("NFD").replace(/\p{M}/gu, "");
+  // Recompose Hangul after folding so filenames keep syllables, not jamo.
+  const folded = heading.normalize("NFD").replace(/\p{M}/gu, "").normalize("NFC");
   const slug = folded
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "");
-  if (!slug) return null; // a heading of pure punctuation or non-latin script
-  if (slug.length <= MAX_SLUG) return slug;
+  if (!slug) return null; // a heading of pure punctuation
+  const characters = Array.from(slug);
+  if (characters.length <= MAX_SLUG) return slug;
   // Truncate on a word boundary when one is near the end, so a long heading is
   // cut at "shipping-notes" rather than "shipping-note".
-  const cut = slug.slice(0, MAX_SLUG);
+  const cut = characters.slice(0, MAX_SLUG);
   const lastDash = cut.lastIndexOf("-");
-  const trimmed = lastDash >= MAX_SLUG / 2 ? cut.slice(0, lastDash) : cut;
+  const trimmed = (lastDash >= MAX_SLUG / 2 ? cut.slice(0, lastDash) : cut).join("");
   return trimmed.replace(/-+$/, "");
 }
 

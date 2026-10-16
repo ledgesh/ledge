@@ -74,9 +74,8 @@ export { titleOf };
 
 // The filename a note's text asks for: its first-line H1 as a slug, or
 // "untitled" when the note has no usable heading. Bun slugs the heading itself
-// rather than taking a name from the view. slugify emits only [a-z0-9-], so
-// there is no name to validate and no way for the view to ask for a path
-// (architecture.md §2).
+// rather than taking a name from the view. slugify emits only Unicode letters,
+// numbers and hyphens, so the view cannot ask for a path (architecture.md §2).
 function baseFor(text: string): string {
   return slugOf(text) ?? "untitled";
 }

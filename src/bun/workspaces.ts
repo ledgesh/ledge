@@ -32,7 +32,7 @@ export const WORKSPACES_PATH = join(APP_HOME, ".workspaces.json");
 // .workspaces.json, and every mutating seam in notes.ts and assets.ts refuses
 // it by calling assertWritableRoot below. The name is dotted and
 // .ledge-prefixed like every app-owned entry, so it cannot collide with a
-// managed workspace slug (slugify emits only [a-z0-9-], never a leading dot).
+// managed workspace slug (slugify never emits a leading dot).
 export const DOCS_ROOT = join(APP_HOME, ".ledge-docs");
 
 // The ignore file a new managed workspace is seeded with, so that `git init`
@@ -349,11 +349,10 @@ export async function ensureDefault(): Promise<string | null> {
 }
 
 // Creates a managed workspace folder from a display name. Bun slugs the name
-// itself, the same trust move as noteCreate: slugify emits only [a-z0-9-], so
-// the view has no path to smuggle through. uniqueName allocates the folder name
-// against a readdir snapshot of APP_HOME, so the mkdir cannot land on something
-// that exists. settings.jsonc, dot-entries, and squatting files all count as
-// taken.
+// itself, the same trust move as noteCreate: slugify emits only Unicode letters,
+// numbers and hyphens, so the view has no path to smuggle through. uniqueName
+// allocates against a readdir snapshot of APP_HOME, including settings.jsonc,
+// dot-entries and squatting files, so mkdir cannot land on something that exists.
 export async function createManaged(name: string): Promise<string> {
   await ensureAppHome();
   const base = slugify(name) ?? "workspace";
