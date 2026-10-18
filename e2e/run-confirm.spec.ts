@@ -84,6 +84,15 @@ test("the marker also gates the terminal destination", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__harness.termPastes())).toHaveLength(1);
 });
 
+test("a sudo: note's dialog names the user the block runs as", async ({ page }) => {
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.insertText("---\nsudo: root\n---\n# Untitled\n\n```sh confirm\nrm -rf ./cache\n```\n");
+  await expect(page.locator(".cm-line", { hasText: "rm -rf ./cache" })).toBeVisible();
+  await page.locator(".cm-line", { hasText: "rm -rf ./cache" }).click();
+  await page.keyboard.press("Meta+Enter");
+  await expect(page.getByRole("alertdialog")).toContainText("this note's inline shell as root.");
+});
+
 test("an unmarked fence still runs straight through", async ({ page }) => {
   await write(page, BLOCK("sh"));
   await page.keyboard.press("Meta+Enter");

@@ -20,7 +20,10 @@ export type MarkerEvent =
   // The init line's acknowledgement: this shell can now end a block. It
   // carries no id because it is about the shell, not about a run. See
   // markerInit for what a shell that never sends it costs.
-  | { type: "ready" };
+  | { type: "ready" }
+  // A shell spawned through sudo has started (markerUp). Like "ready" it is
+  // about the shell rather than a run, and carries no id.
+  | { type: "up" };
 
 /**
  * Install the end-marker hook. `inlinePool.ts` prepends this line to a block's
@@ -85,6 +88,18 @@ export function markerInit(nonce: string): string {
 }
 
 /**
+ * The command a sudo spawn runs once sudo has let it through, just before it
+ * execs the note's shell (bun/sudoSpawn.ts). Until the parser reports it,
+ * `inlinePool.ts` writes nothing into that shell: anything written earlier
+ * would be read by sudo's password prompt. The nonce is the whole payload, as
+ * in the `R` ack, so a banner or a prompt printed before it cannot claim the
+ * shell is up.
+ */
+export function markerUp(nonce: string): string {
+  return `printf '\\033]133;U;ledge=${nonce}\\a'`;
+}
+
+/**
  * Build the line submitted to the shell for one block: name the block, mark its
  * start, run it. The end marker comes from the precmd hook above.
  */
@@ -98,6 +113,7 @@ type Parsed =
   | { kind: "began"; id: string }
   | { kind: "ended"; id: string; code: number }
   | { kind: "ready" }
+  | { kind: "up" }
   | { kind: "unknown" };
 
 export class MarkerParser {
@@ -153,6 +169,8 @@ export class MarkerParser {
         events.push({ type: "ended", blockId: marker.id, exitCode: marker.code });
       } else if (marker.kind === "ready") {
         events.push({ type: "ready" });
+      } else if (marker.kind === "up") {
+        events.push({ type: "up" });
       }
       // unknown: a stray ESC, or an OSC 133 sequence this parser does not
       // accept (another program's, or one that fails the nonce or field
@@ -233,6 +251,9 @@ export class MarkerParser {
     // that does not know the nonce cannot claim to have installed the hook.
     if (kind === "R" && fields.length >= 2 && fields[1] === `ledge=${this.nonce}`) {
       return [{ kind: "ready" }, consumed];
+    }
+    if (kind === "U" && fields.length >= 2 && fields[1] === `ledge=${this.nonce}`) {
+      return [{ kind: "up" }, consumed];
     }
     if (kind === "D" && fields.length >= 3) {
       const code = parseInt(fields[1], 10);

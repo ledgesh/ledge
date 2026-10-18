@@ -1197,6 +1197,7 @@ describe("frontmatter the note's shells are not running", () => {
     envFile: null,
     env: {},
     hosts: [],
+    sudo: null,
     tags: [],
     template: false as const,
     confirm: false,

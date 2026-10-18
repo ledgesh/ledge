@@ -1118,6 +1118,9 @@ redis-cli -n 0 flushdb
   part of "run this" is *which machine*, so the question has to be able to name
   it. Past a live drawer shell the dialog claims no host at all — the badge is
   what says where that shell is.
+- **It names the user too.** A note with a `sudo:` line (architecture.md §6a)
+  runs every block as that user, so the body says "as root" after the
+  machine. Past a live drawer shell it claims no user, for the host's reason.
 - **Always-ask, no "don't ask again."** §4a's reasoning exactly: a remembered
   yes is the state the marker exists to prevent. Cancelling remembers nothing.
 - **On touch, size carries what focus was carrying.** Focus lands on Cancel on

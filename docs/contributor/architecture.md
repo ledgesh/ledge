@@ -947,6 +947,7 @@ env:                         # inline non-secret vars
 profile: petstore            # named secrets scope (see below)
 envFile: ./.env              # project-owned dotenv, resolved against cwd
 host: web1 deploy@prod       # machines blocks may run on (ssh destinations / "local")
+sudo: root                   # user the note's shells run as, through sudo
 template: true               # this note is a template: offered by ⌥⌘N, marker stripped at instantiation
                              # (value `daily` additionally claims the ⌘J role for ITS OWN workspace: per-workspace, never borrowed across roots)
 ---
@@ -1054,6 +1055,29 @@ alike, which is what keeps all three telling one story about the note.
   shown as a badge. Known limits, accepted: a non-POSIX remote *login*
   shell (fish, csh) works only for notes with no cwd/env preamble, and
   inline runs need bash on the remote.
+- **`sudo:` runs a note's shells as another user, with sudo as the spawn.**
+  The shell is never started and switched afterwards: `sudo -i` typed into a
+  live shell replaces the shell the marker hook was installed in, and its
+  blocks never end. sudo is the pty's child locally (`Bun.which` on the login
+  PATH) and the last word of the ssh preamble remotely (`bun/sudoSpawn.ts`),
+  and it runs `/bin/sh -c` with a script that exports the inline `env`, prints
+  an up marker (`markerUp`, OSC 133 `U` with the nonce) and execs the shell.
+  sudo resets the environment, and the script is argv any user can read with
+  `ps`, so the remote rule applies on both: cwd and inline `env` cross,
+  `profile` and `envFile` warn and are skipped (cwd needs no line, since sudo
+  runs its command where it started). Two things follow from sudo sitting
+  between the pty and the shell. *Nothing is written before the up marker*
+  (`announces` in `bun/inlinePool.ts`): sudo reads its password from the same
+  tty, so a block line written at spawn is read as the password and the run
+  fails with sudo's "Sorry". The pool holds the run's line, shows what sudo
+  prints at once (there is no echo to wait out, since nothing was typed) and
+  writes the line when the marker arrives. The drawer needs no gate, because
+  it already waits for the shell's prompt. *Interrupt travels as ^C*, ssh's
+  rule for a different reason: the foreground job belongs to another user,
+  whom this process may not signal. The value is re-checked Bun-side with
+  `isSudoUser` (option injection, as for hosts) and keys the restart hint.
+  The account needs sudo rights to run a shell, and a sudoers entry limited
+  to named commands does not grant that. `ledge run` refuses such a note.
 - **The pty's child is ssh, and three rules follow from that.** They are
   easy to get wrong because each looks right until a real connection is on
   the other end (all three were live-tested into existence; testing.md §6).
@@ -1109,7 +1133,8 @@ alike, which is what keeps all three telling one story about the note.
   button on the frontmatter's closing fence, labelled with its reason rather
   than only its verb, running the same restart. Three
   properties make it advisory rather than nagging, and each is a test:
-  - **Only the keys that feed a spawn.** `cwd`, `profile`, `envFile`, `env`.
+  - **Only the keys that feed a spawn.** `cwd`, `profile`, `envFile`, `env`,
+    `sudo`.
     The rest of `NoteParams` rides in the block because the block has one
     parser, and every one of them applies as it is typed. A key over the
     whole object would put "restart to apply" on screen when a note is

@@ -36,6 +36,7 @@ const params = (p: Partial<NoteParams>): NoteParams => ({
   favorite: false,
   locked: null,
   hosts: [],
+  sudo: null,
   tags: [],
   template: false,
   confirm: false,
@@ -414,6 +415,16 @@ describe("spawnKeyOf", () => {
     expect(spawnKeyOf(params({ template: "daily" }))).toBe(base);
     expect(spawnKeyOf(params({ confirm: true }))).toBe(base);
     expect(spawnKeyOf(params({ locked: "v1:abc" }))).toBe(base);
+  });
+
+  test("sudo moves it, and under sudo the two keys sudo skips do not", () => {
+    expect(spawnKeyOf(params({ sudo: "root" }))).not.toBe(spawnKeyOf(params({})));
+    expect(spawnKeyOf(params({ sudo: "root" }))).not.toBe(spawnKeyOf(params({ sudo: "postgres" })));
+    const root = spawnKeyOf(params({ sudo: "root" }));
+    expect(spawnKeyOf(params({ sudo: "root", profile: "work" }))).toBe(root);
+    expect(spawnKeyOf(params({ sudo: "root", envFile: "./.env" }))).toBe(root);
+    expect(spawnKeyOf(params({ sudo: "root", env: { A: "1" } }))).not.toBe(root);
+    expect(spawnKeyOf(params({ sudo: "root" }), "web1")).not.toBe(spawnKeyOf(params({}), "web1"));
   });
 
   test("hosts are left out: a new host spawns its own shell", () => {

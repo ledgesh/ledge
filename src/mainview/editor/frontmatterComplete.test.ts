@@ -28,7 +28,7 @@ describe("frontmatterCompletionSource: keys", () => {
   test("typing at the start of a body line offers the params keys, hinted", () => {
     const r = complete("---\ncw\n---\n", 6);
     expect(r?.from).toBe(4);
-    expect(labels(r)).toEqual(["cwd", "profile", "envFile", "env", "host", "tags", "template", "confirm", "favorite"]);
+    expect(labels(r)).toEqual(["cwd", "profile", "envFile", "env", "host", "sudo", "tags", "template", "confirm", "favorite"]);
     // Every key carries a one-line hint in `detail`.
     expect(r?.options.every((o) => typeof o.detail === "string" && o.detail.length > 0)).toBe(true);
     // Accepting a key writes the colon too, so the caret lands at the value.
@@ -44,7 +44,7 @@ describe("frontmatterCompletionSource: keys", () => {
 
   test("an empty line pops only on an explicit ask", () => {
     expect(complete("---\n\n---\n", 4)).toBeNull();
-    expect(labels(complete("---\n\n---\n", 4, true))).toHaveLength(9);
+    expect(labels(complete("---\n\n---\n", 4, true))).toHaveLength(10);
   });
 
   test("silent on the fences, outside the block, and without a block", () => {
@@ -109,6 +109,10 @@ describe("frontmatterCompletionSource: values", () => {
   test("host: teaches the reserved word local, once", () => {
     expect(labels(complete("---\nhost: l\n---\n", 11))).toEqual(["local"]);
     expect(complete("---\nhost: local, x\n---\n", 18)).toBeNull();
+  });
+
+  test("sudo: offers root, the one user every machine has", () => {
+    expect(labels(complete("---\nsudo: r\n---\n", 11))).toEqual(["root"]);
   });
 
   test("profile: completes nothing — the view holds no profile list", () => {

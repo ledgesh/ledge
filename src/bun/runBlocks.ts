@@ -9,7 +9,7 @@ import { codeBlocksOf, type CodeBlock } from "../shared/codeBlocks";
 import { blockName, confirmFor, noRun, type ConfirmSpec } from "../shared/fenceInfo";
 import { LOCAL_HOST, parseFrontmatter, type NoteParams } from "../shared/frontmatter";
 import { headingSection, headingsOf } from "../shared/wikilinks";
-import { shellQuote } from "./remoteSpawn";
+import { shellQuote } from "./shellQuote";
 import type { RunnerSpec } from "./runner";
 
 /** A block `ledge run` can run, as the list shows it. */
@@ -132,6 +132,20 @@ export function hostRefusal(params: NoteParams): string | null {
   return (
     `this note runs its blocks on ${params.hosts.join(", ")} (its host: line), ` +
     `and ledge run only runs blocks on this machine so far. Run it from the app.`
+  );
+}
+
+/**
+ * Why this note's blocks cannot run from the CLI under its `sudo:` line, or
+ * null when it has none. `ledge run` runs blocks as the account that typed it,
+ * so a note that names another account is refused rather than run as the
+ * wrong one.
+ */
+export function sudoRefusal(params: NoteParams): string | null {
+  if (params.sudo === null) return null;
+  return (
+    `this note runs its blocks as ${params.sudo} (its sudo: line), ` +
+    `and ledge run only runs blocks as you so far. Run it from the app.`
   );
 }
 

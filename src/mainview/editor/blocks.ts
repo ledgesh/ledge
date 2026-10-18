@@ -25,7 +25,7 @@ import {
 import { confirmFor, fenceCloser, fenceOpener, noRun, parseFenceInfo, type ConfirmSpec } from "../../shared/fenceInfo";
 import { hasTerminal, runsBlocks, softKeyboard } from "../lib/shell";
 import { activeConnection, linkState, subscribeConnections } from "../lib/connections";
-import { declaredHosts, frontmatterRange, profileChipAnchor } from "./frontmatter";
+import { declaredHosts, declaredSudo, frontmatterRange, profileChipAnchor } from "./frontmatter";
 import { LOCAL_HOST, parseFrontmatter } from "../../shared/frontmatter";
 import { sessionIdFacet } from "./session";
 import { acquireInlineTerm, getInlineTerm, releaseInlineTerm } from "./inlineTerm";
@@ -433,12 +433,12 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
     requestHostPick(sessionId, {
       hosts,
       anchor: pickerAnchor(view, block.from),
-      onPick: (host) => confirmThen(block, host, () => startInlineRun(view, sessionId, block, host)),
+      onPick: (host) => confirmThen(view, block, host, () => startInlineRun(view, sessionId, block, host)),
     });
     return true;
   }
   const host = hosts[0] ?? null;
-  confirmThen(block, host, () => startInlineRun(view, sessionId, block, host));
+  confirmThen(view, block, host, () => startInlineRun(view, sessionId, block, host));
   return true;
 }
 
@@ -446,7 +446,7 @@ export function runBlock(view: EditorView, pos: number, destination: RunDestinat
 // an inline run is gated, so the chord, the palette, and the run button cannot
 // diverge into an unconfirmed path (interactions.md §4b). The terminal
 // destination is gated in App, after its own host question settles.
-function confirmThen(block: Block, host: string | null, proceed: () => void): void {
+function confirmThen(view: EditorView, block: Block, host: string | null, proceed: () => void): void {
   if (!block.confirm) {
     proceed();
     return;
@@ -456,6 +456,7 @@ function confirmThen(block: Block, host: string | null, proceed: () => void): vo
     code: block.code,
     lang: block.lang,
     host,
+    sudo: declaredSudo(view.state),
     destination: "inline",
     onConfirm: proceed,
   });

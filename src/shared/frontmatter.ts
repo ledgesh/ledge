@@ -44,6 +44,11 @@ export interface NoteParams {
   // existed. More than one entry means every run asks which member to target.
   // The list is an allowlist, enforced Bun-side (bun/index.ts resolveHost).
   hosts: string[];
+  // The account the note's shells run as, through sudo, on whichever machine
+  // they spawn on. null means the account Ledge runs as, with no sudo. The
+  // name becomes sudo's argv, so Bun re-checks it with isSudoUser
+  // (bun/sudoSpawn.ts).
+  sudo: string | null;
   // The note's declared tags, spelled as written (leading "#" stripped;
   // identity is case-folded at comparison time, shared/tags.ts normalizeTag).
   // Never feeds a spawn. It lives here, and rides sessionConfigure inertly,
@@ -145,6 +150,14 @@ export function isHostName(name: string): boolean {
   return /^[A-Za-z0-9_.@:-]+$/.test(name) && !name.startsWith("-");
 }
 
+// A user name for `sudo:`, in the charset useradd and macOS accept. The name
+// becomes `sudo -u <name>` argv, so a leading "-" is refused as option
+// injection, as in isHostName. The parser's check is the typo message and Bun
+// re-applies it at spawn (bun/sudoSpawn.ts).
+export function isSudoUser(name: string): boolean {
+  return /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(name) && name.length <= 64;
+}
+
 // What both tag grammars accept: letters (any script), digits, "_", "-" and
 // "/", plus at least one letter or "_", so an issue number like `#123` or a
 // year like `#2024` stays plain text. "/" is an accepted spelling
@@ -214,7 +227,7 @@ export function frontmatterEnd(text: string): number {
 /** Parse a note's frontmatter into spawn params (see the header for grammar). */
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
-  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, favorite: false, locked: null };
+  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, locked: null };
   const problems: FrontmatterProblem[] = [];
   if (end === 0) return { params, problems, end };
 
@@ -300,6 +313,14 @@ export function parseFrontmatter(text: string): Frontmatter {
         }
         break;
       }
+      case "sudo":
+        // A user name. `true` and `yes` pass as user names, so they get their
+        // own message here rather than sudo's "unknown user" at the first run.
+        if (!value) problem(`"sudo" must name the user to run as, such as root`);
+        else if (value === "true" || value === "yes") problem(`"sudo" names the user to run as, such as root: "${value}"`);
+        else if (!isSudoUser(value)) problem(`"sudo" is not a user name: "${value}"`);
+        else params.sudo = value;
+        break;
       case "tags": {
         // One line, space- or comma-separated, brackets optional:
         // `tags: work, #project/ledge` and `tags: [work, project/ledge]` are

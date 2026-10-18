@@ -303,7 +303,7 @@ function mergeDotenv(env: Record<string, string>, path: string, label: string, d
  * note's current one, and a difference is exactly the case where a restart
  * would change something.
  *
- * It covers the spawn-feeding keys and no others. `tags:`, `template:`,
+ * It covers the spawn-feeding keys and no others, `sudo:` among them. `tags:`, `template:`,
  * `confirm:`, `favorite:` and `locked:` ride in NoteParams because the block
  * has one parser (shared/frontmatter.ts), and every one of them already
  * applies the moment it is typed. A key over the whole object would raise the
@@ -319,7 +319,8 @@ function mergeDotenv(env: Record<string, string>, path: string, label: string, d
  * A remote spawn carries only `cwd:` and `env:` down the ssh command, and warns
  * that `profile:` and `envFile:` stay on this machine (bun/remoteSpawn.ts). So
  * on a remote shell those two change nothing, and the key ignores them rather
- * than asking for a restart that would spawn the same shell again.
+ * than asking for a restart that would spawn the same shell again. A local
+ * shell under `sudo:` skips them too (bun/sudoSpawn.ts), and so does its key.
  */
 export function spawnKeyOf(params: NoteParams | undefined, host: string = LOCAL_HOST): string {
   // Sorted, so two notes that list the same vars in a different order key the
@@ -327,6 +328,7 @@ export function spawnKeyOf(params: NoteParams | undefined, host: string = LOCAL_
   const env = Object.keys(params?.env ?? {})
     .sort()
     .map((key) => [key, params!.env[key]]);
-  if (host !== LOCAL_HOST) return JSON.stringify([env, params?.cwd ?? null]);
+  const sudo = params?.sudo ?? null;
+  if (host !== LOCAL_HOST || sudo !== null) return JSON.stringify([env, params?.cwd ?? null, sudo]);
   return JSON.stringify([env, params?.cwd ?? null, params?.profile ?? null, params?.envFile ?? null]);
 }

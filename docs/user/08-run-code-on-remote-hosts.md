@@ -42,10 +42,11 @@ Ledge does not manage connections. If they feel slow to start, use `ControlMaste
 
 ## What travels to the host
 
-Two things, and no more:
+Three things, and no more:
 
 - The note's `cwd` becomes a `cd` on the far side. `~` means the remote home folder, and a missing directory falls back to the remote home with a message.
 - The inline `env:` lines are exported there.
+- A `sudo:` line's user. The remote shell runs as that user, through sudo on the host ([[Frontmatter and Environments]]).
 
 `profile:` and `envFile:` stay local and are skipped with a warning. A secret sent along an ssh command line would sit in the host's process table for anyone to read ([[Profiles and Secrets]]). If a remote run needs configuration, put it on the host.
 

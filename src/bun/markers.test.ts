@@ -237,6 +237,15 @@ describe("MarkerParser", () => {
     expect(p.feed(bytes(`\x1b]133;R;ledge=someone-else\x07`))).toEqual([]);
   });
 
+  test("reports a sudo shell coming up, and only for our own nonce", () => {
+    const p = new MarkerParser(NONCE);
+    expect(p.feed(bytes(`\x1b]133;U;ledge=${NONCE}\x07`))).toEqual([{ type: "up" }]);
+    // A banner or a prompt that prints a marker without the nonce is not sudo
+    // letting the shell through.
+    expect(p.feed(bytes(`\x1b]133;U;ledge=someone-else\x07`))).toEqual([]);
+    expect(p.feed(bytes(`\x1b]133;U\x07`))).toEqual([]);
+  });
+
   test("the ack is not output, and does not open or close a block", () => {
     const p = new MarkerParser(NONCE);
     p.feed(bytes(`\x1b]133;R;ledge=${NONCE}\x07`));

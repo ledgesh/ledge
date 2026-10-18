@@ -16,7 +16,7 @@ sudo adduser --disabled-password --gecos "" ledge
 
 The account has no password and no `sudo`. Everything Ledge does on this machine runs as this account: the server, the shells, and every block in every note. A key for it that is ever stolen cannot become root.
 
-If your notes need `sudo`, that is a decision for later, made with `visudo` and as narrow as you can make it.
+If your notes need `sudo`, that is a decision for later, made with `visudo` and as narrow as you can make it. A note's `sudo:` line needs the right to run a shell as that user, which is as wide as sudo gets ([[Frontmatter and Environments]]).
 
 `adduser` gives the account bash as its login shell, which is one of the two shells Ledge runs blocks in.
 

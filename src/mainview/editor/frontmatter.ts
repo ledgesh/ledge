@@ -166,6 +166,12 @@ export function declaredHosts(state: EditorState): string[] {
   return parseFrontmatter(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length))).params.hosts;
 }
 
+/** The user this note's `sudo:` line names, read like declaredHosts, for the
+ * run confirmation to name. */
+export function declaredSudo(state: EditorState): string | null {
+  return parseFrontmatter(state.sliceDoc(0, Math.min(HEAD_BYTES, state.doc.length))).params.sudo;
+}
+
 const FENCE = Decoration.line({ class: "ledge-fm ledge-fm-fence" });
 const BODY = Decoration.line({ class: "ledge-fm" });
 // The cursor stays an I-beam whatever this says: WebKit forces it inside the

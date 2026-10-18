@@ -1,8 +1,8 @@
 # Frontmatter and Environments
 
-A note can declare how its shells spawn: which directory they start in, which environment variables they carry, and which machine they run on. Those declarations live in a frontmatter block at the top of the note.
+A note can declare how its shells spawn: which directory they start in, which environment variables they carry, which machine they run on, and which user they run as. Those declarations live in a frontmatter block at the top of the note.
 
-This page covers the block itself and the directory and environment keys. Secrets have their own page ([[Profiles and Secrets]]), as does running on other machines ([[Run Code on Remote Hosts]]).
+This page covers the block itself and the directory, environment and user keys. Secrets have their own page ([[Profiles and Secrets]]), as does running on other machines ([[Run Code on Remote Hosts]]).
 
 ## The frontmatter block
 
@@ -42,6 +42,35 @@ Three keys feed the environment, layered in this order, with later layers overri
 
 `TERM` is protected. A layer that sets it is overridden back, because the built-in terminal is the terminal whatever the note claims.
 
+## sudo: run as another user
+
+`sudo:` names a user, and every shell the note spawns runs as that user through sudo. That covers the inline shell and the terminal drawer, on this computer or on the machine the note's `host:` line names ([[Run Code on Remote Hosts]]).
+
+```
+---
+host: web1
+sudo: root
+---
+```
+
+With this block, every run in the note goes to web1 and runs as root there.
+
+The first run asks for your password, unless sudo is set not to. sudo's prompt appears in the block's output panel, and the block runs once you answer it. The shell stays open after that, so the blocks that follow run without asking. The terminal drawer is a separate shell and asks for itself, and so does the extra shell a block gets when it starts while another block is still running.
+
+sudo resets the environment, so the note's keys arrive differently:
+
+| Key | Under `sudo:` |
+| --- | --- |
+| `cwd:` | Applies. The shell starts in that directory. |
+| `env:` | Applies. The values are exported in the new shell. |
+| `profile:`, `envFile:` | Not read, with a warning in the launch log. Their values would sit on sudo's command line, where every user on the machine can read them. |
+
+Every other variable is what sudo gives that user. A PATH set in your own login profile is not there.
+
+Your account needs the right to run a shell as that user. A sudoers entry that allows only particular commands is not enough, because Ledge runs a shell and the blocks run inside it.
+
+A block that asks before it runs ([[Running Code]]) names the user in its dialog. `ledge run` refuses a note with a `sudo:` line for now ([[The ledge CLI]]).
+
 ## When changes apply
 
 Frontmatter is read when a shell spawns, and a note's running shells keep the settings they started with.
@@ -52,7 +81,7 @@ The block says when that has happened. Edit a key that feeds a shell while the n
 
 The same command is in the palette (⇧⌘P) and the Note menu. Use it when an experiment leaves a shell in a strange state, too.
 
-The button is about the four keys a shell is spawned with: `cwd`, `profile`, `envFile`, and `env`. The rest of the block applies as you type it, so tagging or favoriting a note never raises it. Typing the old value back takes it down again, and so does the shell exiting on its own.
+The button is about the five keys a shell is spawned with: `cwd`, `profile`, `envFile`, `env`, and `sudo`. The rest of the block applies as you type it, so tagging or favoriting a note never raises it. Typing the old value back takes it down again, and so does the shell exiting on its own.
 
 ## Every key
 
@@ -63,6 +92,7 @@ The button is about the four keys a shell is spawned with: `cwd`, `profile`, `en
 | `envFile:` | Dotenv file to load, resolved against `cwd`. |
 | `profile:` | Named env file outside the notes folder, for secrets. See [[Profiles and Secrets]]. |
 | `host:` | Machines the note's blocks run on. See [[Run Code on Remote Hosts]]. |
+| `sudo:` | User the note's shells run as, through sudo. |
 | `tags:` | Tags, the same vocabulary as inline `#hashtags`. See [[Finding Things]]. |
 | `template:` | `true` lists the note in the New Note from Template picker; `daily` makes it the daily template. See [[Daily Notes and Templates]]. |
 | `favorite:` | `true` keeps the note in the Favorites section at the top of the note list. Usually written for you by the Favorite command. See [[Notes and Workspaces]]. |

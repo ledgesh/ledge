@@ -39,6 +39,10 @@ export interface InlineShellIO {
   resize(cols: number, rows: number): void;
   interrupt(): void;
   close(): void;
+  /** The shell prints markerUp when it is ready for input, and nothing may be
+   * written before then. A sudo spawn sets it (bun/server.ts): until sudo has
+   * let the shell through, a write would be read by its password prompt. */
+  readonly announces?: boolean;
 }
 
 /**
@@ -95,6 +99,10 @@ interface Slot {
   // Cancel arrived for a run that never began: close it out and discard the
   // shell (see cancel).
   abandoned: boolean;
+  // False while an announcing shell has not printed markerUp. `held` is the
+  // run's line, written when it does.
+  up: boolean;
+  held: string | null;
   // Whether this shell has acknowledged the end-marker hook (markers.ts `R`).
   // False means either that the init line is still in flight or that it never
   // landed, and the pool cannot tell those apart. Both get the same answer:
@@ -231,6 +239,10 @@ export class InlinePool {
     // later one reads that guard and returns. It stops for good once an ack
     // arrives, one round trip after the shell is up.
     const line = (slot.hooked ? "" : markerInit(this.nonce)) + markerCommand(runner, this.nonce, id);
+    if (!slot.up) {
+      slot.held = line;
+      return;
+    }
     slot.echo += line;
     slot.shell.write(line);
   }
@@ -321,6 +333,10 @@ export class InlinePool {
               slot.hooked = true;
               continue;
             }
+            if (ev.type === "up") {
+              this.shellUp(slot, emit);
+              continue;
+            }
             if (ev.type === "began" && ev.blockId === slot.activeRun) {
               // The block is running: its own output starts here, and the
               // preamble held so far was the echo of what the pool typed.
@@ -344,6 +360,12 @@ export class InlinePool {
           slot.spoke = true;
           this.flushPreamble(slot, emit);
         }
+        // Before markerUp, what the shell says is sudo's, or ssh's ahead of
+        // it: a password prompt, a refusal. Nothing has been typed for the tty
+        // to echo, so there is no noise to wait out and it is shown as it
+        // comes. It goes out after the parser has read the chunk, so the
+        // marker and whatever followed it in the same read are never shown.
+        if (slot.activeRun !== null && !slot.up) this.flushPreamble(slot, emit);
         // Stopped, and no marker is coming: the run never started (see cancel)
         // or it started on a shell whose hook never landed (see interrupt).
         // The shell cannot close this run and nothing else will, so the pool
@@ -487,7 +509,7 @@ export class InlinePool {
   // block. The end of that stream is the informative part, so the oldest chunk
   // is dropped first.
   private holdOrShow(slot: Slot, data: Uint8Array, emit: InlineEmit): void {
-    if (slot.spoke) {
+    if (slot.spoke && slot.up) {
       emit({ type: "output", blockId: slot.activeRun!, data }, slot.client);
       return;
     }
@@ -508,8 +530,41 @@ export class InlinePool {
     }
     slot.preamble = [];
     slot.preambleLen = 0;
-    const out = stripEcho(joined, slot.echo);
+    // Nothing is typed before markerUp, so there is no echo to strip, and
+    // stripping would take the newline that starts sudo's next line.
+    let out = slot.up ? stripEcho(joined, slot.echo) : joined;
+    if (!slot.up) {
+      // A marker cut in two by the read is held back with its first half, so
+      // the panel never gets an escape sequence it would wait to see closed.
+      const esc = out.lastIndexOf(0x1b);
+      if (esc !== -1 && out.indexOf(0x07, esc) === -1) {
+        slot.preamble = [out.slice(esc)];
+        slot.preambleLen = out.length - esc;
+        out = out.subarray(0, esc);
+      }
+    }
     if (out.length > 0) emit({ type: "output", blockId: slot.activeRun, data: out }, slot.client);
+  }
+
+  // An announcing shell printed markerUp: write the line its run left waiting.
+  // What sudo said ahead of the marker in the same read is shown, and what
+  // followed it is the shell's own noise. The run then starts over from here:
+  // its clock, its silence rule and its echo all describe this write.
+  private shellUp(slot: Slot, emit: InlineEmit): void {
+    const held = Buffer.concat(slot.preamble);
+    const at = held.indexOf(`\x1b]133;U;ledge=${this.nonce}\x07`);
+    if (at > 0 && slot.activeRun !== null) {
+      emit({ type: "output", blockId: slot.activeRun, data: held.subarray(0, at) }, slot.client);
+    }
+    slot.up = true;
+    slot.preamble = [];
+    slot.preambleLen = 0;
+    if (slot.held === null) return;
+    slot.echo += slot.held;
+    slot.shell.write(slot.held);
+    slot.held = null;
+    slot.spoke = false;
+    slot.startedAt = this.now();
   }
 
   private newSlot(sessionId: string, host: string, persistent: boolean): Slot {
@@ -532,6 +587,8 @@ export class InlinePool {
       startedAt: 0,
       spoke: false,
       abandoned: false,
+      up: !shell.announces,
+      held: null,
       hooked: false,
     };
   }

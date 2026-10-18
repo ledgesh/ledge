@@ -377,8 +377,9 @@ function Shell() {
       // the picker, so the question can name the machine. `named` is the host
       // the dialog may claim. Past a live shell it is null, because that shell
       // runs wherever it already is. The dialog then says "this note's
-      // terminal" rather than guessing the list's first entry.
-      const gate = (named: string | null, run: () => void) => {
+      // terminal" rather than guessing the list's first entry. `live` drops
+      // the sudo user for the same reason.
+      const gate = (named: string | null, run: () => void, live = false) => {
         if (!confirm) {
           run();
           return;
@@ -388,6 +389,7 @@ function Shell() {
           code,
           lang: language,
           host: named,
+          sudo: live ? null : (paramsOf(sessionId)?.sudo ?? null),
           destination: "terminal",
           onConfirm: run,
         });
@@ -397,7 +399,7 @@ function Shell() {
       // is what moves the shell to another machine.
       void terminalStatus(sessionId).then(({ live }) => {
         const first = hosts[0] ?? null;
-        if (live) gate(null, () => proceed(first));
+        if (live) gate(null, () => proceed(first), true);
         else if (hosts.length <= 1) gate(first, () => proceed(first));
         else {
           requestHostPick(sessionId, {
@@ -1138,5 +1140,6 @@ function runConfirmTitle(lang: string | null): string {
 function runConfirmBody(req: RunConfirmRequest): string {
   const where = req.destination === "terminal" ? "this note's terminal" : "this note's inline shell";
   const on = req.host && req.host !== LOCAL_HOST ? ` on ${req.host}` : "";
-  return `It will run in ${where}${on}. Nothing has run yet.`;
+  const as = req.sudo ? ` as ${req.sudo}` : "";
+  return `It will run in ${where}${on}${as}. Nothing has run yet.`;
 }

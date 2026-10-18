@@ -1,7 +1,8 @@
 // Completion inside the frontmatter block, the `[[` and `#` picker stance:
 // three closed vocabularies the view already holds. The params keys at line
 // start; the values of `template:`, `confirm:` and `favorite:`; the tags after
-// `tags:` (the `#tag` vocabulary, same bridge) and "local" after `host:`.
+// `tags:` (the `#tag` vocabulary, same bridge), "local" after `host:` and
+// "root" after `sudo:`.
 // `profile:` completes nothing: the view holds no profile list. Profiles live
 // outside the notes root, on the Bun side. The `profile` hint says so.
 import type { Completion, CompletionContext, CompletionResult } from "@codemirror/autocomplete";
@@ -28,6 +29,7 @@ const KEY_OPTIONS = (): readonly Completion[] => (keyOptions ??= [
   { label: "envFile", apply: "envFile: ", detail: "project dotenv file, resolved against cwd" },
   { label: "env", apply: "env:\n  ", detail: "inline vars (indented NAME: value lines)" },
   { label: "host", apply: "host: ", detail: "machines blocks run on (ssh targets, or local)" },
+  { label: "sudo", apply: "sudo: ", detail: "user this note's shells run as, through sudo" },
   { label: "tags", apply: "tags: ", detail: "this note's tags (also spelled inline as #tag)" },
   { label: "template", apply: "template: ", detail: `true joins the ${keyChip("note.fromTemplate")} picker; daily seeds ${keyChip("daily.open")}` },
   { label: "confirm", apply: "confirm: ", detail: "true makes every block here ask before it runs" },
@@ -98,7 +100,7 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
     return { from: line.from, options, validFor: /^[A-Za-z]*$/ };
   }
 
-  const value = /^(template|confirm|favorite|tags|host)[ \t]*:([^]*)$/.exec(before);
+  const value = /^(template|confirm|favorite|tags|host|sudo)[ \t]*:([^]*)$/.exec(before);
   if (!value) return null;
   // "[" ends the token, the way a separator does: it opens a `tags:` flow
   // sequence (shared/frontmatter.ts unbracket), so the completion inserts
@@ -111,6 +113,16 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
     const options =
       value[1] === "template" ? TEMPLATE_VALUES() : value[1] === "confirm" ? CONFIRM_VALUES : FAVORITE_VALUES;
     return { from: pos - token.length, options, validFor: /^[A-Za-z]*$/ };
+  }
+
+  if (value[1] === "sudo") {
+    // Any account on the machine is a valid value, and the view holds no list
+    // of them, so root, the one every machine has, is the only option.
+    return {
+      from: pos - token.length,
+      options: [{ label: "root", detail: "the superuser" }],
+      validFor: /^[A-Za-z]*$/,
+    };
   }
 
   if (value[1] === "host") {

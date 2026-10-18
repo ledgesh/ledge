@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildRemoteSpawn, shellQuote, SSH_PATH } from "./remoteSpawn";
+import { buildRemoteSpawn, SSH_PATH } from "./remoteSpawn";
+import { shellQuote } from "./shellQuote";
 import type { NoteParams } from "../shared/frontmatter";
 
 const noParams = (over: Partial<NoteParams> = {}): NoteParams => ({
@@ -10,6 +11,7 @@ const noParams = (over: Partial<NoteParams> = {}): NoteParams => ({
   favorite: false,
   locked: null,
   hosts: ["web1"],
+  sudo: null,
   tags: [],
   template: false,
   confirm: false,
@@ -29,26 +31,26 @@ describe("shellQuote", () => {
 
 describe("buildRemoteSpawn", () => {
   test("a bare terminal session is plain ssh: no command, sshd runs the login shell", () => {
-    const { executable, args } = buildRemoteSpawn("web1", "terminal", noParams(), quiet);
+    const { executable, args } = buildRemoteSpawn("web1", "terminal", noParams(), quiet, "n0nce");
     expect(executable).toBe(SSH_PATH);
     expect(args).toEqual(["-t", "web1"]);
   });
 
   test("an inline shell is always bash, because the marker hook must land", () => {
-    const { args } = buildRemoteSpawn("web1", "inline", noParams(), quiet);
+    const { args } = buildRemoteSpawn("web1", "inline", noParams(), quiet, "n0nce");
     expect(args).toEqual(["-t", "web1", "exec bash -l"]);
   });
 
   test("cwd rides as a cd that degrades to the remote home, like the local fallback", () => {
-    const { args } = buildRemoteSpawn("web1", "terminal", noParams({ cwd: "/srv/app" }), quiet);
+    const { args } = buildRemoteSpawn("web1", "terminal", noParams({ cwd: "/srv/app" }), quiet, "n0nce");
     expect(args[2]).toContain(`cd -- '/srv/app' 2>/dev/null ||`);
     expect(args[2]).toContain(`exec "$SHELL" -l`);
   });
 
   test("~ paths anchor to the REMOTE home: a quoted tilde would never expand", () => {
-    const { args } = buildRemoteSpawn("web1", "terminal", noParams({ cwd: "~/proj x" }), quiet);
+    const { args } = buildRemoteSpawn("web1", "terminal", noParams({ cwd: "~/proj x" }), quiet, "n0nce");
     expect(args[2]).toContain(`cd -- "$HOME"/'proj x'`);
-    const home = buildRemoteSpawn("web1", "terminal", noParams({ cwd: "~" }), quiet);
+    const home = buildRemoteSpawn("web1", "terminal", noParams({ cwd: "~" }), quiet, "n0nce");
     expect(home.args[2]).toContain(`cd -- "$HOME" 2>/dev/null`);
   });
 
@@ -59,6 +61,7 @@ describe("buildRemoteSpawn", () => {
       "inline",
       noParams({ env: { NODE_ENV: "dev", "BAD NAME": "x" } }),
       (m) => warns.push(m),
+      "n0nce",
     );
     expect(args[2]).toContain(`export NODE_ENV='dev'`);
     expect(args[2]).not.toContain("BAD NAME");
@@ -72,6 +75,7 @@ describe("buildRemoteSpawn", () => {
       "terminal",
       noParams({ profile: "petstore", envFile: "./.env" }),
       (m) => warns.push(m),
+      "n0nce",
     );
     // Neither value appears anywhere in the argv.
     expect(args.join(" ")).not.toContain("petstore");
@@ -82,9 +86,9 @@ describe("buildRemoteSpawn", () => {
   });
 
   test("a host that is not an ssh destination throws: degrading would run code elsewhere", () => {
-    expect(() => buildRemoteSpawn("-oProxyCommand=x", "inline", noParams(), quiet)).toThrow();
-    expect(() => buildRemoteSpawn("local", "inline", noParams(), quiet)).toThrow();
-    expect(() => buildRemoteSpawn("a b", "inline", noParams(), quiet)).toThrow();
+    expect(() => buildRemoteSpawn("-oProxyCommand=x", "inline", noParams(), quiet, "n0nce")).toThrow();
+    expect(() => buildRemoteSpawn("local", "inline", noParams(), quiet, "n0nce")).toThrow();
+    expect(() => buildRemoteSpawn("a b", "inline", noParams(), quiet, "n0nce")).toThrow();
   });
 
   test("the preamble is one argv element, joined with semicolons", () => {
@@ -93,6 +97,7 @@ describe("buildRemoteSpawn", () => {
       "inline",
       noParams({ cwd: "/srv", env: { A: "1" } }),
       quiet,
+      "n0nce",
     );
     expect(args.length).toBe(3);
     expect(args[2]).toMatch(/; export A='1'; exec bash -l$/);

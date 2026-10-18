@@ -103,6 +103,8 @@ import {
   type SpawnDeps,
 } from "./spawnParams";
 import { buildRemoteSpawn } from "./remoteSpawn";
+import { shellQuote } from "./shellQuote";
+import { sudoArgs } from "./sudoSpawn";
 import { resolveLoginEnv, resolveUtf8Locale } from "./loginEnv";
 import { readFileSync, statSync } from "node:fs";
 import { isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
@@ -566,8 +568,12 @@ export async function createServer(deps: { push: Audience; exitsWhenIdle?: boole
       queueMicrotask(() => refreshStale(sessionId));
     }
     if (host !== LOCAL_HOST) {
-      const remote = buildRemoteSpawn(host, kind, sessionParams.get(sessionId), (msg) =>
-        console.warn("[session]", msg),
+      const remote = buildRemoteSpawn(
+        host,
+        kind,
+        sessionParams.get(sessionId),
+        (msg) => console.warn("[session]", msg),
+        NONCE,
       );
       return new PtyProcess({
         executable: remote.executable,
@@ -578,7 +584,9 @@ export async function createServer(deps: { push: Audience; exitsWhenIdle?: boole
         interruptViaChar: true,
       });
     }
-    const { cwd, env } = resolveSpawn(sessionParams.get(sessionId), shellEnv, spawnDeps);
+    const params = sessionParams.get(sessionId);
+    if (params?.sudo) return spawnSudo(sessionId, params, params.sudo, kind);
+    const { cwd, env } = resolveSpawn(params, shellEnv, spawnDeps);
     // Local spawns only: on a remote host the note's local path names nothing.
     stampSessionFacts(env, sessionFacts.get(sessionId) ?? null);
     // Check the configured shell before the fork, because after it there is
@@ -602,13 +610,45 @@ export async function createServer(deps: { push: Audience; exitsWhenIdle?: boole
     });
   }
 
+  // A local shell for a note with a `sudo:` line: the pty's child is sudo,
+  // which execs the configured shell as `user` (bun/sudoSpawn.ts). sudo
+  // resets the environment, so the note's inline env and session facts are
+  // exported by sudo's script, and `profile` and `envFile` are not read. The
+  // interrupt travels as ^C for the reason it does over ssh: the foreground
+  // job belongs to another user, whom this process cannot signal.
+  function spawnSudo(sessionId: string, params: NoteParams, user: string, kind: "inline" | "terminal"): PtyProcess {
+    const warn = (msg: string) => console.warn("[session]", msg);
+    if (params.profile) warn(`profile "${params.profile}" is not passed through sudo; not read`);
+    if (params.envFile) warn(`envFile "${params.envFile}" is not passed through sudo; not read`);
+    const { cwd, env } = resolveSpawn({ ...params, profile: null, envFile: null, env: {} }, shellEnv, spawnDeps);
+    const refusal = shellRefusal(settings.shell.path, isExecutableFile);
+    if (refusal) throw new Error(refusal);
+    const sudo = Bun.which("sudo", { PATH: env["PATH"] ?? "" });
+    if (!sudo) throw new Error(`this note's sudo: line needs sudo, and it is not on this machine's PATH`);
+    const exported = { ...params.env };
+    stampSessionFacts(exported, sessionFacts.get(sessionId) ?? null);
+    const shell = [settings.shell.path, ...resolveShellArgs(settings.shell.path, settings.shell.args)];
+    return new PtyProcess({
+      executable: sudo,
+      args: sudoArgs(user, exported, shell.map(shellQuote).join(" "), kind === "inline" ? NONCE : null, warn),
+      env,
+      cwd,
+      interruptViaChar: true,
+    });
+  }
+
   // --- per-note inline-run shells -------------------------------------------
   // Block bodies are sourced into shells with OSC 133 markers so output can be
   // sliced per block. inlinePool.ts owns the policy: a persistent shell per
   // note, spawned on its first runBlock, so cwd and env carry across blocks,
   // plus an ephemeral overflow shell for each additional concurrent run.
   const inlinePool = new InlinePool(
-    (sessionId, host, persistent) => spawnShell(sessionId, host, "inline", persistent),
+    (sessionId, host, persistent) => {
+      const shell = spawnShell(sessionId, host, "inline", persistent);
+      // A sudo spawn prints markerUp once sudo has let it through, and the
+      // pool writes nothing into it before then (inlinePool.ts `announces`).
+      return sessionParams.get(sessionId)?.sudo ? Object.assign(shell, { announces: true }) : shell;
+    },
     NONCE,
   );
 

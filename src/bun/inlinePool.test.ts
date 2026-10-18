@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { InlinePool, type InlineEvent, type InlineShellIO } from "./inlinePool";
-import { markerCommand, markerInit } from "./markers";
+import { markerCommand, markerInit, markerUp } from "./markers";
 
 const NONCE = "testnonce";
 
@@ -30,6 +30,7 @@ class FakeShell implements InlineShellIO {
   interrupts = 0;
   closed = false;
   exited = false;
+  announces = false;
   // What a real pty reports when the tty would not take all of a write
   // (pty.ts `pending`). Tests set it directly: a fake has no tty to refuse.
   pending = false;
@@ -58,7 +59,7 @@ class FakeShell implements InlineShellIO {
   }
 }
 
-function makePool() {
+function makePool(opts: { announces?: boolean } = {}) {
   const shells: FakeShell[] = [];
   // What each spawn was asked for. server.ts reads `persistent` to decide
   // whether to record the shell's birth params (the stale-frontmatter hint),
@@ -68,6 +69,7 @@ function makePool() {
   const pool = new InlinePool(
     (sessionId, host, persistent) => {
       const s = new FakeShell();
+      s.announces = opts.announces ?? false;
       shells.push(s);
       spawns.push({ sessionId, host, persistent });
       return s;
@@ -979,5 +981,101 @@ describe("primaryHosts", () => {
     expect(pool.primaryHosts("note")).toEqual([]);
     pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
     expect(pool.primaryHosts("note")).toEqual(["local"]);
+  });
+});
+
+describe("a shell spawned through sudo", () => {
+  // What the sudo script prints before it execs the shell (markers.ts).
+  const up = `\x1b]133;U;ledge=${NONCE}\x07`;
+
+  test("markerUp is the printf that prints the up marker", () => {
+    const out = Bun.spawnSync(["/bin/sh", "-c", markerUp(NONCE)]).stdout.toString();
+    expect(out).toBe(up);
+  });
+
+  test("nothing is written until the shell is up, then the line goes out in one write", () => {
+    const { pool, shells, drained } = makePool({ announces: true });
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    // sudo is reading a password: a write now would be taken as one.
+    expect(shells[0].writes).toEqual([]);
+    shells[0].emit("Password:");
+    drained();
+    expect(shells[0].writes).toEqual([]);
+
+    shells[0].emit(up);
+    drained();
+    expect(shells[0].writes).toEqual([markerInit(NONCE) + markerCommand("source /tmp/a.sh", NONCE, "a")]);
+
+    shells[0].emit(began("a") + "hi\r\n" + ended("a"));
+    const events = drained();
+    expect(textOf(events)).toBe("hi\r\n");
+    expect(events.at(-1)).toMatchObject({ type: "ended", blockId: "a", exitCode: 0 });
+  });
+
+  test("sudo's prompt reaches the panel at once, and the answer reaches sudo", () => {
+    const { pool, shells, drained } = makePool({ announces: true });
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    // No silence to wait out: nothing was typed, so nothing is echo.
+    shells[0].emit("[sudo] password for dan: ");
+    expect(textOf(drained())).toBe("[sudo] password for dan: ");
+    // The newline that starts sudo's next line is kept.
+    shells[0].emit("\r\nSorry, try again.\r\n[sudo] password for dan: ");
+    expect(textOf(drained())).toBe("\r\nSorry, try again.\r\n[sudo] password for dan: ");
+    pool.input("note", "a", new TextEncoder().encode("hunter2\r"));
+    expect(shells[0].written).toBe("hunter2\r");
+  });
+
+  test("the up marker and what follows it in the same read are not shown", () => {
+    const { pool, shells, drained, clock } = makePool({ announces: true });
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit("Password:\r\n" + up + "root# ");
+    expect(textOf(drained())).toBe("Password:\r\n");
+    // From here the ordinary rules apply: the prompt and the echo of the
+    // line are noise, held for the silence period of a fresh run.
+    shells[0].emit("root# __ledge_id=a; ...");
+    clock.t += 1000;
+    expect(textOf(drained())).toBe("");
+  });
+
+  test("an up marker cut in two by a read never reaches the panel", () => {
+    const { pool, shells, drained } = makePool({ announces: true });
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit("lecture\r\n" + up.slice(0, 10));
+    expect(textOf(drained())).toBe("lecture\r\n");
+    shells[0].emit(up.slice(10));
+    expect(textOf(drained())).toBe("");
+    expect(shells[0].writes.length).toBe(1);
+  });
+
+  test("a sudo that gives up ends the run with its reason, and the line is never written", () => {
+    const { pool, shells, drained } = makePool({ announces: true });
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit("sudo: 3 incorrect password attempts\r\n");
+    shells[0].exited = true;
+    const events = drained();
+    expect(textOf(events)).toBe("sudo: 3 incorrect password attempts\r\n");
+    expect(events.at(-1)).toMatchObject({ type: "ended", blockId: "a", exitCode: null });
+    expect(shells[0].writes).toEqual([]);
+  });
+
+  test("stopping a run at the password prompt interrupts sudo and closes the run out", () => {
+    const { pool, shells, drained } = makePool({ announces: true });
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    pool.cancel("note", "a");
+    expect(shells[0].interrupts).toBe(1);
+    expect(drained().at(-1)).toMatchObject({ type: "ended", blockId: "a", exitCode: null });
+    expect(shells[0].closed).toBe(true);
+  });
+
+  test("once up, the next run is written straight away", () => {
+    const { pool, shells, drained } = makePool({ announces: true });
+    pool.run("note", "a", "source /tmp/a.sh", { client: MAC });
+    shells[0].emit(up);
+    drained();
+    shells[0].emit(began("a") + ended("a"));
+    drained();
+    pool.run("note", "b", "source /tmp/b.sh", { client: MAC });
+    expect(shells.length).toBe(1);
+    expect(shells[0].writes.at(-1)).toBe(markerCommand("source /tmp/b.sh", NONCE, "b"));
   });
 });

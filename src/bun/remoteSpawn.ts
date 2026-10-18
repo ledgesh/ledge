@@ -22,6 +22,8 @@
 // note with no cwd or env preamble. §6a records that as an accepted limit.
 // This file adds no shell-compatibility layer for it.
 import { isEnvName, isHostName, LOCAL_HOST, type NoteParams } from "../shared/frontmatter";
+import { shellQuote } from "./shellQuote";
+import { sudoArgs } from "./sudoSpawn";
 
 // Fixed, not PATH-resolved: PtyProcess spawns via posix_spawn (no PATH
 // search), and every macOS ships ssh here.
@@ -32,18 +34,16 @@ export interface RemoteSpawn {
   args: string[];
 }
 
-// Wraps `v` in single quotes so a POSIX shell interprets nothing inside it.
-// A single quote inside `v` is escaped as '\''.
-export function shellQuote(v: string): string {
-  return `'${v.replace(/'/g, `'\\''`)}'`;
-}
-
 /**
  * The ssh argv for one remote shell. `kind` picks the shell that runs over
  * there. "inline" execs `bash -l` every time: the marker protocol needs a
  * shell whose prompt hook markerInit can install (zsh or bash, bun/markers.ts)
  * and bash is the one ~every server has. "terminal" leaves the user's own
  * remote login shell alone, prompt and rc files intact.
+ *
+ * A `sudo:` line makes the preamble end in `exec sudo` (bun/sudoSpawn.ts),
+ * and the env exports move inside sudo's script, past its env reset. `nonce`
+ * is for that script's markerUp, which only an inline shell prints.
  *
  * Throws when `host` fails isHostName or names the local host. The host
  * becomes argv for ssh, and an invalid one arriving here means the caller's
@@ -55,6 +55,7 @@ export function buildRemoteSpawn(
   kind: "inline" | "terminal",
   params: NoteParams | undefined,
   warn: (msg: string) => void,
+  nonce: string,
 ): RemoteSpawn {
   if (!isHostName(host) || host === LOCAL_HOST) {
     throw new Error(`not an ssh destination: "${host}"`);
@@ -68,6 +69,13 @@ export function buildRemoteSpawn(
 
   const parts: string[] = [];
   if (params?.cwd) parts.push(remoteCd(params.cwd));
+  if (params?.sudo) {
+    // "$SHELL" is expanded by sudo's script, where it is the target user's.
+    const exec = kind === "inline" ? "bash -l" : `"$SHELL" -l`;
+    const args = sudoArgs(params.sudo, params.env ?? {}, exec, kind === "inline" ? nonce : null, warn);
+    parts.push(`exec sudo ${args.map(shellQuote).join(" ")}`);
+    return { executable: SSH_PATH, args: ["-t", host, parts.join("; ")] };
+  }
   for (const [key, value] of Object.entries(params?.env ?? {})) {
     // Same guard as the local merge (spawnParams.ts). Re-checked here, not
     // just in the parser: these entries reach Bun over sessionConfigure from

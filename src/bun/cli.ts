@@ -53,7 +53,7 @@ import {
   stampSessionFacts,
   type SpawnDeps,
 } from "./spawnParams";
-import { blockLabel, confirmQuestion, driverScript, formatBlockList, hostRefusal, planRun, runOutcome } from "./runBlocks";
+import { blockLabel, confirmQuestion, driverScript, formatBlockList, hostRefusal, planRun, runOutcome, sudoRefusal } from "./runBlocks";
 import { LOCAL_HOST } from "../shared/frontmatter";
 
 export { tildify }; // display formatting; defined in cliShim.ts so the app's install handler shares it
@@ -612,7 +612,7 @@ async function runVerb(arg: string, flags: CliFlags, scope: string | null, io: C
   }
   const blocks = plan.blocks;
 
-  const refusal = hostRefusal(plan.params) ?? shellRefusal(settings.shell.path, isExecutableFile);
+  const refusal = hostRefusal(plan.params) ?? sudoRefusal(plan.params) ?? shellRefusal(settings.shell.path, isExecutableFile);
   if (refusal) {
     io.err(`ledge: ${refusal}`);
     return 1;

@@ -5,6 +5,7 @@ import {
   driverScript,
   formatBlockList,
   hostRefusal,
+  sudoRefusal,
   planRun,
   runOutcome,
   type RunnableBlock,
@@ -212,5 +213,19 @@ describe("driverScript and runOutcome", () => {
     expect(runOutcome(two, 4, 3, false)).toBe("block 3 (sh, line 9) exited 4");
     expect(runOutcome(two, 0, 1, false)).toBe("block 1 (sh, line 3) exited the shell; the blocks after it did not run");
     expect(runOutcome([block({})], 1, 1, false)).toBeNull();
+  });
+});
+
+describe("sudoRefusal", () => {
+  test("a note with no sudo: line runs here", () => {
+    const p = plan("# T\n");
+    if (p.kind === "error") throw new Error(p.message);
+    expect(sudoRefusal(p.params)).toBeNull();
+  });
+
+  test("a note that runs as another user is refused", () => {
+    const p = plan("---\nsudo: root\n---\n");
+    if (p.kind === "error") throw new Error(p.message);
+    expect(sudoRefusal(p.params)).toContain("as root (its sudo: line)");
   });
 });

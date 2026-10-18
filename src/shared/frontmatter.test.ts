@@ -48,15 +48,15 @@ describe("frontmatterEnd", () => {
 describe("parseFrontmatter", () => {
   test("a note with no frontmatter yields empty params and no problems", () => {
     const { params, problems, end } = parseFrontmatter("# Title\nbody");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, favorite: false, locked: null });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBe(0);
   });
 
-  test("all ten keys parse together", () => {
+  test("all eleven keys parse together", () => {
     const { params, problems } = parseFrontmatter(
       fm(
-        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\ntags: work, ledge\ntemplate: true\nconfirm: true\nfavorite: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
+        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\nsudo: root\ntags: work, ledge\ntemplate: true\nconfirm: true\nfavorite: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
       ),
     );
     expect(params).toEqual({
@@ -65,6 +65,7 @@ describe("parseFrontmatter", () => {
       envFile: "./.env",
       env: { NODE_ENV: "development", PORT: "3000" },
       hosts: ["web1", "deploy@prod"],
+      sudo: "root",
       tags: ["work", "ledge"],
       template: true,
       confirm: true,
@@ -72,6 +73,18 @@ describe("parseFrontmatter", () => {
       locked: "v1.aa.bb.cc",
     });
     expect(problems).toEqual([]);
+  });
+
+  test("sudo takes a user name; a boolean or an option-shaped value costs the line", () => {
+    expect(parseFrontmatter(fm("sudo: postgres\n")).params.sudo).toBe("postgres");
+    expect(parseFrontmatter(fm("sudo: deploy.bot\n")).params.sudo).toBe("deploy.bot");
+    for (const bad of ["sudo:", "sudo: true", "sudo: yes", "sudo: -s", "sudo: a b", "sudo: root;id", "sudo: #0"]) {
+      const { params, problems } = parseFrontmatter(fm(`${bad}\n`));
+      expect(params.sudo).toBeNull();
+      expect(problems.length).toBe(1);
+      expect(problems[0]!.line).toBe(2);
+    }
+    expect(parseFrontmatter(fm("sudo: true\n")).problems[0]!.message).toContain("such as root");
   });
 
   test("locked carries its value opaquely; only an empty one costs the line", () => {
@@ -381,7 +394,7 @@ describe("parseFrontmatter", () => {
 
   test("an empty block is valid and empty", () => {
     const { params, problems, end } = parseFrontmatter("---\n---\n# Title\n");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], tags: [], template: false, confirm: false, favorite: false, locked: null });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBeGreaterThan(0);
   });

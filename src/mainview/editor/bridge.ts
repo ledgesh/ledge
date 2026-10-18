@@ -35,6 +35,9 @@ export interface RunConfirmRequest {
   code: string;
   lang: string | null;
   host: string | null;
+  // The user the note's `sudo:` line names, or null for none. Null too past
+  // the drawer's live shell, for the reason `host` is.
+  sudo: string | null;
   destination: RunDestination;
   onConfirm: () => void;
 }

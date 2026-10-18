@@ -97,7 +97,7 @@ The blocks run in the note's `cwd:`, or in the directory you ran `ledge run` fro
 
 A block marked `confirm` shows its code and asks before anything runs. With no terminal to ask in, as in CI, `ledge run` refuses such a block unless you pass `--yes`.
 
-A note whose `host:` line names another machine is refused for now ([[Run Code on Remote Hosts]]). Run it from the app.
+A note whose `host:` line names another machine is refused for now ([[Run Code on Remote Hosts]]), and so is a note whose `sudo:` line names a user ([[Frontmatter and Environments]]). Run it from the app.
 
 Inside a note's terminal drawer, `ledge run` with no title means that note.
 
