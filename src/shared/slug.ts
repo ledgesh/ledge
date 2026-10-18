@@ -10,9 +10,12 @@
 // Renaming is safe only while a note's identity is its docId and not its path
 // (architecture.md §4).
 
-// At most 60 Unicode code points (240 UTF-8 bytes), leaving room under the
-// 255-byte filename limit for an enumerated suffix and the extension.
+// A slug is at most 60 code points and at most 200 UTF-8 bytes. The longest
+// name built from one is a save's temp file (".<slug>-2.md.tmp-<pid>-<n>",
+// notes.ts writeNote), about 30 bytes more, and ext4 refuses a name over 255
+// bytes. Hangul and kanji fit all 60; 4-byte letters stop at 50.
 const MAX_SLUG = 60;
+const MAX_SLUG_BYTES = 200;
 
 // Far longer than any real heading, short enough that a runaway one cannot
 // bloat the store. Only the on-screen label is capped; the note's text is
@@ -43,28 +46,38 @@ export function headingOf(text: string): string | null {
 }
 
 // Turns a heading into a filesystem-safe slug, or null if nothing usable is
-// left. Everything outside Unicode letters and numbers becomes a separator:
-// no dots, no slashes, no colons, no control characters, no leading dot.
-// This is the whole trust boundary for a name arriving from the view
-// (architecture.md §2).
+// left. Everything outside Unicode letters, their combining marks and numbers
+// becomes a separator: no dots, no slashes, no colons, no control characters,
+// no leading dot. The result is NFC. This is the whole trust boundary for a
+// name arriving from the view (architecture.md §2).
 export function slugify(heading: string): string | null {
-  // Fold accents first ("Café" -> "cafe"). Otherwise each accented letter
-  // becomes a separator and breaks the word into pieces.
-  // Recompose Hangul after folding so filenames keep syllables, not jamo.
-  const folded = heading.normalize("NFD").replace(/\p{M}/gu, "").normalize("NFC");
-  const slug = folded
+  // Fold accents off Latin letters ("Café" -> "cafe"), so a Latin heading
+  // names an ASCII file. Other scripts keep their marks: が is not か, and a
+  // Devanagari vowel sign is part of the word. NFC recomposes what NFD split.
+  const folded = heading
+    .normalize("NFD")
+    .replace(/(\p{Script=Latin})\p{M}+/gu, "$1")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/^-+|-+$/g, "");
+    .normalize("NFC");
+  // A mark with no letter before it goes with the separator it follows.
+  const slug = folded.replace(/^\p{M}+|[^\p{L}\p{M}\p{N}]+\p{M}*/gu, "-").replace(/^-+|-+$/g, "");
   if (!slug) return null; // a heading of pure punctuation
-  const characters = Array.from(slug);
-  if (characters.length <= MAX_SLUG) return slug;
+  const chars = Array.from(slug);
+  if (chars.length <= MAX_SLUG && utf8Length(slug) <= MAX_SLUG_BYTES) return slug;
+  const cut = chars.slice(0, MAX_SLUG);
+  while (utf8Length(cut.join("")) > MAX_SLUG_BYTES) cut.pop();
+  // Never cut between a letter and its marks.
+  while (cut.length > 0 && /\p{M}/u.test(chars[cut.length] ?? "")) cut.pop();
   // Truncate on a word boundary when one is near the end, so a long heading is
   // cut at "shipping-notes" rather than "shipping-note".
-  const cut = characters.slice(0, MAX_SLUG);
   const lastDash = cut.lastIndexOf("-");
-  const trimmed = (lastDash >= MAX_SLUG / 2 ? cut.slice(0, lastDash) : cut).join("");
-  return trimmed.replace(/-+$/, "");
+  const trimmed = (lastDash >= cut.length / 2 ? cut.slice(0, lastDash) : cut).join("");
+  return trimmed.replace(/-+$/, "") || null;
+}
+
+const utf8 = new TextEncoder();
+function utf8Length(s: string): number {
+  return utf8.encode(s).length;
 }
 
 // The slug for a note's text, or null if it has no usable first-line H1. A note

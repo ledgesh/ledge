@@ -568,9 +568,9 @@ installed on sshd's own PATH, such as `/usr/local/bin` on Linux.
 **`.server` is inside the app home**, beside `.client` (§5), because both are
 this machine's role-specific state and one `~/.ledge` is the whole of Ledge on
 a disk. It is dotted because managed workspace folders are created directly in
-the app home under slugs of Unicode letters, numbers and hyphens, so `server/`
-or `bin/` could be a workspace. `backup.ts` excludes it, and the root watcher
-and note listing skip dotted entries already. The path is spelled literally in `SERVE_COMMAND` and
+the app home under slugs of their names, so `server/` or `bin/` could be a
+workspace. `backup.ts` excludes it, and the root watcher and note listing skip
+dotted entries already. The path is spelled literally in `SERVE_COMMAND` and
 in the forced command on every paired server, so `LEDGE_NOTES_ROOT` moves
 everything in the app home except this: a run with it set still finds its
 server under `$HOME/.ledge/.server`, which is why the install probe moves

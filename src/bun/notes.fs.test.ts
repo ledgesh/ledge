@@ -90,6 +90,16 @@ describe("createNote / writeNote / readNote", () => {
     expect(await textAt(b.path)).toBe("# 한국어 제목\n\n두 번째");
   });
 
+  // Finder writes Korean names decomposed (NFD). On APFS that is the same file
+  // as the composed name slugify emits, so writing there would replace it.
+  test("a note beside a decomposed same-titled file does not overwrite it", async () => {
+    const existing = join(ROOT, "회의록.md".normalize("NFD"));
+    await writeRaw(existing, "# 회의록\n\nolder");
+    const made = await createNote(ROOT, "# 회의록\n\nnewer");
+    expect(made.path).toBe(join(ROOT, "회의록-2.md"));
+    expect(await textAt(existing)).toBe("# 회의록\n\nolder");
+  });
+
   test("names the file from the note's H1 and round-trips its text", async () => {
     const note = await createNote(ROOT, "# Shipping Notes\n\nhello");
     expect(note.path).toBe(join(ROOT, "shipping-notes.md"));
@@ -492,6 +502,21 @@ describe("retitleNote", () => {
     expect(moved.path).toBe(join(ROOT, "한국어-제목.md"));
     expect(await textAt(moved.path)).toBe("본문");
     expect(await textAt(note.path)).toBeNull();
+  });
+
+  test("a retitle onto a decomposed file's name does not overwrite it", async () => {
+    const existing = join(ROOT, "회의록.md".normalize("NFD"));
+    await writeRaw(existing, "# 회의록\n\nolder");
+    const note = await createNote(ROOT, "draft");
+    const moved = await retitleNote(note.path, "# 회의록\n\ndraft");
+    expect(moved.path).toBe(join(ROOT, "회의록-2.md"));
+    expect(await textAt(existing)).toBe("# 회의록\n\nolder");
+  });
+
+  test("a decomposed file already named for its heading stays put", async () => {
+    const existing = join(ROOT, "회의록.md".normalize("NFD"));
+    await writeRaw(existing, "# 회의록\n");
+    expect((await retitleNote(existing, "# 회의록\n")).path).toBe(existing);
   });
 
   test("moves the file to match its heading", async () => {
