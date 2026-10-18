@@ -103,7 +103,53 @@ describe("slugify", () => {
     // The caller falls back to the enumerated "untitled" name.
     expect(slugify("!!!")).toBeNull();
     expect(slugify("   ")).toBeNull();
-    expect(slugify("日本語")).toBeNull();
+    expect(slugify("🎉")).toBeNull();
+  });
+
+  test("Korean and mixed-language headings keep their letters", () => {
+    expect(slugify("한국어 제목")).toBe("한국어-제목");
+    expect(slugify("Ledge 한국어 노트 2026")).toBe("ledge-한국어-노트-2026");
+    expect(slugify("日本語")).toBe("日本語");
+  });
+
+  test("decomposed Hangul produces the same composed filename", () => {
+    expect(slugify("한국어 제목".normalize("NFD"))).toBe("한국어-제목");
+  });
+
+  // Only Latin letters lose their accents. Elsewhere a mark changes the letter
+  // or is part of the word.
+  test("marks outside Latin script are kept, and the result is composed", () => {
+    expect(slugify("ガイド")).toBe("ガイド");
+    expect(slugify("ガイド".normalize("NFD"))).toBe("ガイド".normalize("NFC"));
+    expect(slugify("हिन्दी नोट्स")).toBe("हिन्दी-नोट्स");
+    expect(slugify("Мой план")).toBe("мой-план");
+    expect(slugify("Tiếng Việt")).toBe("tieng-viet");
+  });
+
+  test("a mark with no letter before it is dropped with the separator", () => {
+    expect(slugify("́abc")).toBe("abc");
+    expect(slugify("가 ́나")).toBe("가-나");
+  });
+
+  test("Unicode headings still remove unsafe path characters", () => {
+    expect(slugify("../../한국어/제목\\초안:메모\u0000")).toBe("한국어-제목-초안-메모");
+  });
+
+  // The temp file a save writes is the longest name a slug is part of
+  // (notes.ts writeNote), and ext4 refuses a name over 255 bytes.
+  test("long Unicode headings fit the filename limit without splitting a letter", () => {
+    expect(slugify("한".repeat(200))).toBe("한".repeat(60));
+    const slug = slugify("𠀀".repeat(200))!;
+    expect(slug).toBe("𠀀".repeat(50));
+    const temp = `.${slug}-99.md.tmp-4194304-4294967295`;
+    expect(new TextEncoder().encode(temp).length).toBeLessThanOrEqual(255);
+  });
+
+  test("truncation never separates a letter from its marks", () => {
+    // 60 code points end on ह, whose vowel sign ि is the 61st.
+    expect(slugify(`क${"हि".repeat(40)}`)).toBe(`क${"हि".repeat(29)}`);
+    // A letter buried under marks has nothing left once they are kept whole.
+    expect(slugify(`क${"́".repeat(150)}`)).toBeNull();
   });
 
   test("the slug is safe by construction: no dots, separators, or leading dot", () => {
@@ -130,6 +176,7 @@ describe("slugify", () => {
 describe("slugOf", () => {
   test("a titled note asks for its heading's slug", () => {
     expect(slugOf("# Shipping Notes\n\nbody")).toBe("shipping-notes");
+    expect(slugOf("# 한국어 제목\n\n본문")).toBe("한국어-제목");
   });
 
   test("an untitled note asks for nothing", () => {

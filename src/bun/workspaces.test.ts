@@ -19,6 +19,12 @@ describe("uniqueName", () => {
     expect(uniqueName("notes", new Set(["Notes.md", "notes-2.MD"]))).toBe("notes-3.md");
   });
 
+  // APFS also treats composed and decomposed spellings as one file, and Finder
+  // writes Korean names decomposed (NFD) while slugify emits NFC.
+  test("comparison ignores Unicode normalization, so an NFD name counts as taken", () => {
+    expect(uniqueName("회의록", new Set(["회의록.md".normalize("NFD")]))).toBe("회의록-2.md");
+  });
+
   test("suffixes from 2 upward, skipping every taken name", () => {
     const taken = new Set(["untitled.md", "untitled-2.md", "untitled-3.md"]);
     expect(uniqueName("untitled", taken)).toBe("untitled-4.md");

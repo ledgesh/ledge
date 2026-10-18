@@ -220,10 +220,12 @@ Bun therefore validates everything and derives anything derivable:
   requirement is load-bearing, not tidiness: an in-root write of any other
   file would be arbitrary-file storage in a folder the user syncs.
 - **The view never names a file.** It sends a note's *text*; Bun slugs the
-  heading itself (`slugOf` emits only `[a-z0-9-]`), so filenames are safe by
-  construction and there is no name parameter to validate or smuggle through.
-  Workspace folder names get the same treatment (`createManaged` slugs the
-  display name; renaming a workspace is display-only and touches no folder).
+  heading itself (`slugOf` emits only Unicode letters, their combining marks,
+  numbers and hyphens, in NFC). Filenames are safe by construction: no dots,
+  path separators or control characters, and no name parameter to validate or
+  smuggle through. Workspace folder names get the same treatment
+  (`createManaged` slugs the display name; renaming a workspace is
+  display-only and touches no folder).
 - **Paths are opaque handles.** The view holds only paths and roots it was
   handed by Bun (`workspaceList`, `noteList`, `noteCreate`, `noteDelete`'s
   trashed location) and passes them back unmodified. View code that
@@ -379,10 +381,11 @@ Bun therefore validates everything and derives anything derivable:
   purge, empty, or Trash listing can see them.
 - **A folder is the only name a caller chooses, so it is the only name
   validated.** Filenames never needed a guard: `slugOf` builds them from the
-  note's own heading and emits only `[a-z0-9-]`, so there is no name to check
-  and no way for the view to ask for a path. A folder has to match what is
-  already on disk, so it cannot be slugged into safety, and it arrives from
-  the view, from MCP and from the CLI alike. `folderPathOf` is the one gate:
+  note's own heading and emits only Unicode letters, their combining marks,
+  numbers and hyphens, so there is no name to check and no way for the view
+  to ask for a path. A folder has to match what is already on disk, so it
+  cannot be slugged into safety, and it arrives from the view, from MCP and
+  from the CLI alike. `folderPathOf` is the one gate:
   relative only, no backslashes, no `.` or `..` segment, no dot-entry, inside
   the root once resolved. `..` is rejected on the raw segments rather than
   left to the containment check, so `a/../b` cannot quietly mean `b` — the
@@ -459,7 +462,8 @@ Bun therefore validates everything and derives anything derivable:
   volume) degrades to focus-refresh only, warned, like every other
   unavailable-root path. `rename(2)` overwrites
   silently, so no call site may pick its own destination name: `uniqueName`
-  (case-insensitive, because APFS is) allocates against a `readdir` snapshot
+  (ignoring case and Unicode normalization, because APFS does) allocates
+  against a `readdir` snapshot
   plus the `reserved` set, and the rename that follows is safe *because* the
   allocation already skipped every taken name. A rename whose target didn't
   come from `uniqueName` is a latent data-loss bug.

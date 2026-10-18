@@ -21,7 +21,7 @@ import { collectHits, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { loadIgnore } from "./ignore";
-import { assertRegisteredRoot, assertWritableRoot, GITIGNORE, isInside, kindOf, rootContaining, uniqueName } from "./workspaces";
+import { assertRegisteredRoot, assertWritableRoot, GITIGNORE, isInside, kindOf, nameKey, rootContaining, uniqueName } from "./workspaces";
 import {
   beginPassphraseChange,
   commitPassphraseChange,
@@ -74,9 +74,8 @@ export { titleOf };
 
 // The filename a note's text asks for: its first-line H1 as a slug, or
 // "untitled" when the note has no usable heading. Bun slugs the heading itself
-// rather than taking a name from the view. slugify emits only [a-z0-9-], so
-// there is no name to validate and no way for the view to ask for a path
-// (architecture.md §2).
+// rather than taking a name from the view. slugify never emits a dot or a path
+// separator, so the view cannot ask for a path (architecture.md §2).
 function baseFor(text: string): string {
   return slugOf(text) ?? "untitled";
 }
@@ -1271,7 +1270,7 @@ export async function retitleNote(path: string, text: string): Promise<NoteMeta>
   for (const name of reserved) taken.add(name);
 
   const name = uniqueName(baseFor(text), taken);
-  if (name.toLowerCase() === current.toLowerCase()) {
+  if (nameKey(name) === nameKey(current)) {
     // Already correctly named, or uniqueName landed back on its own name.
     return metaFor(path, text);
   }

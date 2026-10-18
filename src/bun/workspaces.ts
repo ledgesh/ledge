@@ -32,7 +32,7 @@ export const WORKSPACES_PATH = join(APP_HOME, ".workspaces.json");
 // .workspaces.json, and every mutating seam in notes.ts and assets.ts refuses
 // it by calling assertWritableRoot below. The name is dotted and
 // .ledge-prefixed like every app-owned entry, so it cannot collide with a
-// managed workspace slug (slugify emits only [a-z0-9-], never a leading dot).
+// managed workspace slug (slugify never emits a leading dot).
 export const DOCS_ROOT = join(APP_HOME, ".ledge-docs");
 
 // The ignore file a new managed workspace is seeded with, so that `git init`
@@ -70,15 +70,21 @@ export function isInside(root: string, p: string): boolean {
 
 // Allocate a filename not already in `taken`: shipping-notes.md,
 // shipping-notes-2.md, and so on (with ext "", a workspace folder name).
-// Comparison is case-insensitive because macOS's default APFS is: "Foo.md" and
-// "foo.md" are one file there, so a case-sensitive check would return a name
-// whose rename overwrites the other note. On Linux it only means an extra
-// foo-2.md where foo.md was free.
+// Comparison ignores case and Unicode normalization because macOS's default
+// APFS does: "Foo.md" and "foo.md" are one file there, and so are a composed
+// "회의록.md" and the decomposed one Finder writes. A stricter check would
+// return a name whose rename overwrites the other note. On Linux it only means
+// an extra foo-2.md where foo.md was free.
 export function uniqueName(base: string, taken: Set<string>, ext = ".md"): string {
-  const lower = new Set([...taken].map((t) => t.toLowerCase()));
+  const keys = new Set([...taken].map(nameKey));
   let name = `${base}${ext}`;
-  for (let n = 2; lower.has(name.toLowerCase()); n += 1) name = `${base}-${n}${ext}`;
+  for (let n = 2; keys.has(nameKey(name)); n += 1) name = `${base}-${n}${ext}`;
   return name;
+}
+
+// The form two names share when APFS treats them as one file (uniqueName).
+export function nameKey(name: string): string {
+  return name.normalize("NFC").toLowerCase();
 }
 
 // The roots a loosely-spelled workspace name could mean: a root path (~
@@ -349,11 +355,10 @@ export async function ensureDefault(): Promise<string | null> {
 }
 
 // Creates a managed workspace folder from a display name. Bun slugs the name
-// itself, the same trust move as noteCreate: slugify emits only [a-z0-9-], so
-// the view has no path to smuggle through. uniqueName allocates the folder name
-// against a readdir snapshot of APP_HOME, so the mkdir cannot land on something
-// that exists. settings.jsonc, dot-entries, and squatting files all count as
-// taken.
+// itself, the same trust move as noteCreate: slugify never emits a dot or a
+// path separator, so the view has no path to smuggle through. uniqueName
+// allocates against a readdir snapshot of APP_HOME, including settings.jsonc,
+// dot-entries and squatting files, so mkdir cannot land on something that exists.
 export async function createManaged(name: string): Promise<string> {
   await ensureAppHome();
   const base = slugify(name) ?? "workspace";
