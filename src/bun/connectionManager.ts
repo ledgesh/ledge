@@ -100,12 +100,15 @@ export async function createConnectionManager(deps: {
    * window and must not rewrite the window list. */
   onName?(name: string): void;
   now?: () => number;
+  /** For a private store only (connectionStore.ts `hostKeyName`). */
+  hostKeyName?: (destination: string, port: number) => Promise<string>;
 }): Promise<ConnectionManager> {
   // Declared before the store, which closes over it. A private store's "what is
   // in use" is this one window. The shell's shared store is told about every
   // window instead (bun/index.ts).
   let active: Connection = LOCAL_CONNECTION;
-  const store = deps.store ?? (await createConnectionStore({ now: deps.now, inUse: () => [active.id] }));
+  const store =
+    deps.store ?? (await createConnectionStore({ now: deps.now, inUse: () => [active.id], hostKeyName: deps.hostKeyName }));
   let selected = deps.want ?? store.launchSelection();
 
   let live: Attached;

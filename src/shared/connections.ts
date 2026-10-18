@@ -2,8 +2,8 @@
 //
 // This file holds the facts about ssh itself, which both clients must answer
 // the same way. `bun/connections.ts` holds the facts about a Mac's files: the
-// stored list, Ledge's known_hosts, the argv, the keyscan. A phone has no ssh
-// binary, no known_hosts and no path to a key (ios.md §4).
+// stored list, Ledge's known_hosts, the argv, the host-key scan. A phone has no
+// ssh binary, no known_hosts and no path to a key (ios.md §4).
 import { isHostName } from "./frontmatter";
 
 /**
@@ -136,31 +136,26 @@ export function parsePort(text: string): number | null {
 }
 
 /**
- * How a host is spelled in `known_hosts`, which is not how it is spelled to
- * ssh: a non-default port makes the entry `[host]:port`.
- *
- * Two places fail silently on the wrong spelling (remote.md §4). `ssh-keyscan
- * -p` writes the bracketed form, so a pin taken from a host is compared
- * against that form. ssh looks the host up in the same shape at connect time,
- * so it finds nothing for a pin stored unbracketed at a non-default port and
- * refuses the connection as an unknown host.
+ * How a host is spelled in `known_hosts`: a non-default port makes the entry
+ * `[host]:port`, and a pin in any other shape matches nothing (remote.md §4).
+ * Right for a destination that is not a `~/.ssh/config` alias. The Mac asks
+ * ssh for the real spelling (bun/connections.ts hostKeyName).
  */
 export function knownHostsHost(destination: string, port: number): string {
   const host = hostPart(destination.trim());
   return port === PORT_UNSET || port === DEFAULT_PORT ? host : `[${host}]:${port}`;
 }
 
-// keyscan takes a host, not a destination. `deploy@prod` is a user and a host:
-// only the host half identifies the host key, and the user half stays in the
-// destination passed to ssh.
+// `deploy@prod` is a user and a host: only the host half identifies the host
+// key, and the user half stays in the destination passed to ssh.
 export function hostPart(destination: string): string {
   const at = destination.lastIndexOf("@");
   return at >= 0 ? destination.slice(at + 1) : destination;
 }
 
 /**
- * The host a pinned line belongs to: known_hosts' first field, which is what
- * `ssh-keyscan` printed when it was asked about that host.
+ * The host a pinned line belongs to: known_hosts' first field, which is the
+ * name ssh wrote the key under when it was scanned.
  *
  * Empty for a phone's pins, which carry the key's two fields and no hostname.
  * A phone has no known_hosts file for a hostname to index (ios.md §3), so the
@@ -172,7 +167,8 @@ export function pinnedHost(hostKeyLine: string): string {
 }
 
 /**
- * Whether a pin still belongs to the address it is stored against.
+ * Whether a pin belongs to the host ssh will check it against, given as that
+ * host's known_hosts name (`knownHostsHost`, or the Mac's `hostKeyName`).
  *
  * This matters when a connection is edited. A pin is a claim about one host at
  * one port (remote.md §4), so a new address invalidates it, and ssh would then
@@ -183,7 +179,7 @@ export function pinnedHost(hostKeyLine: string): string {
  * An empty pin fits every host. It means the user's own ssh already trusts the
  * host, and the pin is in the user's file rather than in Ledge's.
  */
-export function pinFitsHost(hostKey: string, destination: string, port: number = PORT_UNSET): boolean {
-  const host = pinnedHost(hostKey);
-  return host === "" || host === knownHostsHost(destination, port);
+export function pinFitsHost(hostKey: string, host: string): boolean {
+  const pinned = pinnedHost(hostKey);
+  return pinned === "" || pinned.toLowerCase() === host.toLowerCase();
 }

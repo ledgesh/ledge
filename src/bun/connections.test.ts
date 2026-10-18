@@ -11,7 +11,9 @@ import {
   configPath,
   explainDial,
   fingerprintOf,
+  hostKeyNameOf,
   keyTypeOf,
+  knownHostsHost,
   knownHostsText,
   LOCAL_CONNECTION,
   LOCAL_ID,
@@ -20,6 +22,7 @@ import {
   pickHostKey,
   pinConflict,
   PORT_UNSET,
+  resolveArgv,
   scanArgv,
   SERVE_COMMAND,
   SSH_PATH,
@@ -469,32 +472,32 @@ describe("whether a pairing code may dial past the pins", () => {
   const other = conn("Pi", "dev@pi", 2222, `[pi]:2222 ${ECDSA}`);
 
   test("nothing pinned at that host: the code may dial", () => {
-    expect(pinConflict([other], "ledge@vps", PORT_UNSET, [ED25519_FP])).toBeNull();
-    expect(pinConflict([], "ledge@vps", PORT_UNSET, [ED25519_FP])).toBeNull();
+    expect(pinConflict([other], knownHostsHost("ledge@vps", PORT_UNSET), [ED25519_FP])).toBeNull();
+    expect(pinConflict([], knownHostsHost("ledge@vps", PORT_UNSET), [ED25519_FP])).toBeNull();
   });
 
   test("a pin the code names, on this account or another: the code may dial", () => {
-    expect(pinConflict([pinned], "ledge@vps", PORT_UNSET, [ED25519_FP])).toBeNull();
-    expect(pinConflict([pinned], "deploy@vps", PORT_UNSET, [ECDSA_FP, ED25519_FP])).toBeNull();
+    expect(pinConflict([pinned], knownHostsHost("ledge@vps", PORT_UNSET), [ED25519_FP])).toBeNull();
+    expect(pinConflict([pinned], knownHostsHost("deploy@vps", PORT_UNSET), [ECDSA_FP, ED25519_FP])).toBeNull();
     // A code writes 22 as unset; a record may hold it either way.
-    expect(pinConflict([conn("VPS", "ledge@vps", 22, `vps ${ED25519}`)], "ledge@vps", PORT_UNSET, [ED25519_FP])).toBeNull();
+    expect(pinConflict([conn("VPS", "ledge@vps", 22, `vps ${ED25519}`)], knownHostsHost("ledge@vps", PORT_UNSET), [ED25519_FP])).toBeNull();
   });
 
   test("a pin the code does not name refuses, naming the pin and the record", () => {
-    const why = pinConflict([pinned], "deploy@vps", PORT_UNSET, [ECDSA_FP]);
+    const why = pinConflict([pinned], knownHostsHost("deploy@vps", PORT_UNSET), [ECDSA_FP]);
     expect(why).toContain(ED25519_FP);
     expect(why).toContain('"VPS"');
   });
 
   test("the rule is per host and port, and the host compares without regard to case", () => {
-    expect(pinConflict([pinned], "ledge@vps", 2222, [ECDSA_FP])).toBeNull();
-    expect(pinConflict([other], "dev@pi", 2222, [ED25519_FP])).toContain(ECDSA_FP);
-    expect(pinConflict([other], "dev@pi", PORT_UNSET, [ED25519_FP])).toBeNull();
-    expect(pinConflict([pinned], "ledge@VPS", PORT_UNSET, [ECDSA_FP])).toContain(ED25519_FP);
+    expect(pinConflict([pinned], knownHostsHost("ledge@vps", 2222), [ECDSA_FP])).toBeNull();
+    expect(pinConflict([other], knownHostsHost("dev@pi", 2222), [ED25519_FP])).toContain(ECDSA_FP);
+    expect(pinConflict([other], knownHostsHost("dev@pi", PORT_UNSET), [ED25519_FP])).toBeNull();
+    expect(pinConflict([pinned], knownHostsHost("ledge@VPS", PORT_UNSET), [ECDSA_FP])).toContain(ED25519_FP);
   });
 
   test("a record that pins nothing has no say", () => {
-    expect(pinConflict([conn("VPS", "ledge@vps", PORT_UNSET, "")], "ledge@vps", PORT_UNSET, [ECDSA_FP])).toBeNull();
+    expect(pinConflict([conn("VPS", "ledge@vps", PORT_UNSET, "")], knownHostsHost("ledge@vps", PORT_UNSET), [ECDSA_FP])).toBeNull();
   });
 });
 
@@ -510,9 +513,20 @@ describe("known_hosts paths in an option", () => {
   });
 });
 
-// Windows records a host key with ssh itself (scanArgv's comment says why).
+// The scan is ssh itself, so the user's ssh config applies to it (scanArgv's
+// comment says why).
 describe("the host-key scan through ssh", () => {
-  const argv = scanArgv("vps", PORT_UNSET, "/tmp/scan");
+  const argv = scanArgv("ledge@vps", PORT_UNSET, "/tmp/scan");
+
+  test("names no config file, so the user's own ~/.ssh/config applies", () => {
+    expect(argv).not.toContain("-F");
+    expect(argv.slice(-2)).toEqual(["ledge@vps", "exit"]);
+  });
+
+  test("stays off a connection the user's config multiplexes", () => {
+    expect(argv).toContain("ControlMaster=no");
+    expect(argv).toContain("ControlPath=none");
+  });
 
   test("writes an unknown host's key into the scan file and nowhere else", () => {
     expect(argv).toContain("StrictHostKeyChecking=accept-new");
@@ -531,5 +545,37 @@ describe("the host-key scan through ssh", () => {
   test("names the port only when the connection does", () => {
     expect(argv).not.toContain("-p");
     expect(scanArgv("vps", 2222, "/tmp/scan").slice(-4)).toEqual(["-p", "2222", "vps", "exit"]);
+  });
+});
+
+// `ssh -G` output, trimmed to the lines that matter and a few that do not.
+describe("the name ssh checks a host key under", () => {
+  const G = (lines: string[]) => ["user ledge", ...lines, "identitiesonly no"].join("\n");
+
+  test("a plain host on the default port is its own name", () => {
+    expect(hostKeyNameOf(G(["hostname vps", "port 22"]))).toBe("vps");
+  });
+
+  test("an alias is the HostName it resolves to", () => {
+    expect(hostKeyNameOf(G(["hostname 10.0.0.5", "port 22"]))).toBe("10.0.0.5");
+  });
+
+  test("a non-default port brackets the name, as known_hosts does", () => {
+    expect(hostKeyNameOf(G(["hostname box.example", "port 2200"]))).toBe("[box.example]:2200");
+  });
+
+  // ssh looks up a HostKeyAlias as written, with no port.
+  test("a HostKeyAlias wins over the HostName and the port", () => {
+    expect(hostKeyNameOf(G(["hostname 10.0.0.5", "port 2200", "hostkeyalias labkey"]))).toBe("labkey");
+  });
+
+  test("output that names no host gives no answer", () => {
+    expect(hostKeyNameOf("")).toBeNull();
+    expect(hostKeyNameOf("port 22")).toBeNull();
+  });
+
+  test("the resolve asks ssh for its config, with the port only when there is one", () => {
+    expect(resolveArgv("ledge@lab", PORT_UNSET).slice(1)).toEqual(["-G", "ledge@lab"]);
+    expect(resolveArgv("ledge@lab", 2222).slice(1)).toEqual(["-G", "-p", "2222", "ledge@lab"]);
   });
 });

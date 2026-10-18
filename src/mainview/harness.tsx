@@ -1350,7 +1350,7 @@ configureConnections(
       passwords.delete(id);
       return { ok: true, error: "" };
     },
-    // The pinned line carries the port the way keyscan's does, so a spec can
+    // The pinned line carries the port the way the real scan's does, so a spec can
     // see that a non-default port becomes part of what is pinned
     // (shared/connections.ts knownHostsHost).
     // With `expect`, a pairing code's fingerprints, the fake answers as the

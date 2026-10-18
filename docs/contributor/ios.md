@@ -284,9 +284,9 @@ whether anything is scheduled. The two mechanisms cover the two halves of a
 phone's life, which is why this client has both and the Mac has ssh's as well.
 
 **The key algorithms line up with the Mac's, by luck rather than by
-agreement.** NIOSSH offers `ssh-ed25519` first, which is also the first entry
-in `connections.ts`'s `KEY_PREFERENCE`, so a pin taken by `ssh-keyscan` on a
-Mac names the key an iOS connection will actually be offered. That is worth
+agreement.** NIOSSH offers `ssh-ed25519` first, and so does OpenSSH, so a pin
+taken by the Mac's scan names the key an iOS connection will actually be
+offered. That is worth
 knowing rather than relying on: the app pins what the connection in front of
 the user offered (§4), so the two lists agreeing is a convenience, not a
 requirement.

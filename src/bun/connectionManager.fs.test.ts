@@ -12,7 +12,17 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { APP_HOME } from "./workspaces";
-import { CONNECTIONS_PATH, KNOWN_HOSTS_PATH, LOCAL_ID, LOCAL_NAME, PORT_UNSET, saveConnections, type Connection } from "./connections";
+import {
+  CONNECTIONS_PATH,
+  hostPart,
+  KNOWN_HOSTS_PATH,
+  knownHostsHost,
+  LOCAL_ID,
+  LOCAL_NAME,
+  PORT_UNSET,
+  saveConnections,
+  type Connection,
+} from "./connections";
 import { createConnectionManager, type Attached, type ConnectionManager } from "./connectionManager";
 import { createConnectionStore, type Secrets } from "./connectionStore";
 import { CONNECTION_METHODS } from "../shared/wire";
@@ -21,6 +31,11 @@ import type { RequestHandlers } from "../shared/wire";
 if (!resolve(APP_HOME).startsWith(resolve(tmpdir()) + sep)) {
   throw new Error(`refusing to run filesystem tests against ${APP_HOME} — is the preload configured?`);
 }
+
+// The name ssh checks a key under, as typed rather than as this machine's ssh
+// config would resolve it, so no result depends on who runs the tests
+// (testing.md §2). The alias test passes its own.
+const hostKeyAsTyped = async (destination: string, port: number) => knownHostsHost(destination, port);
 
 const LAPTOP: Connection = {
   id: "laptop-1",
@@ -68,7 +83,7 @@ beforeEach(async () => {
 describe("boot", () => {
   test("a fresh install serves the local server", async () => {
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     expect(await served(m)).toBe(LOCAL_ID);
     const { active, wanted, error, connections } = await m.requests.connectionList({});
     expect(active).toBe(LOCAL_ID);
@@ -80,7 +95,7 @@ describe("boot", () => {
 
   test("the connection chosen last time is the one served", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     expect(await served(m)).toBe(LAPTOP.id);
   });
 
@@ -89,7 +104,7 @@ describe("boot", () => {
   // The recorded reason is what the user acts on.
   test("a connection that will not open falls back to the local server, with the reason", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
-    const m = await createConnectionManager({ attach: fakeAttach(new Set([LAPTOP.id])).attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach(new Set([LAPTOP.id])).attach });
     expect(await served(m)).toBe(LOCAL_ID);
     const status = await m.requests.connectionList({});
     expect(status.active).toBe(LOCAL_ID);
@@ -101,13 +116,13 @@ describe("boot", () => {
 
   test("reaching a connection records when", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
-    const m = await createConnectionManager({ attach: fakeAttach().attach, now: () => 1_700_000_000_000 });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach, now: () => 1_700_000_000_000 });
     const list = await m.requests.connectionList({});
     expect(list.connections.find((c) => c.id === LAPTOP.id)!.lastReached).toBe(1_700_000_000_000);
   });
 
   test("the server's build travels from the handshake", async () => {
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     expect((await m.requests.connectionList({})).build).toBe(`build-${LOCAL_ID}`);
   });
 });
@@ -116,7 +131,7 @@ describe("switching", () => {
   test("the router points at the new server, and the old one is shut down", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
     expect(await served(m)).toBe(LAPTOP.id);
     expect(fake.open.has(LOCAL_ID)).toBe(false);
@@ -130,7 +145,7 @@ describe("switching", () => {
   test("a connection that will not open costs nothing", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const fake = fakeAttach(new Set([LAPTOP.id]));
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     const res = await m.requests.connectionSelect({ id: LAPTOP.id });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Laptop");
@@ -147,7 +162,7 @@ describe("switching", () => {
   test("a switch reports the new connection for the window list", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const chosen: string[] = [];
-    const m = await createConnectionManager({ attach: fakeAttach().attach, onSelect: (id) => chosen.push(id) });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach, onSelect: (id) => chosen.push(id) });
     await m.requests.connectionSelect({ id: LAPTOP.id });
     await m.requests.connectionSelect({ id: LOCAL_ID });
     expect(chosen).toEqual([LAPTOP.id, LOCAL_ID]);
@@ -159,6 +174,7 @@ describe("switching", () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const chosen: string[] = [];
     const m = await createConnectionManager({
+      hostKeyName: hostKeyAsTyped,
       attach: fakeAttach(new Set([LAPTOP.id])).attach,
       onSelect: (id) => chosen.push(id),
     });
@@ -172,21 +188,21 @@ describe("switching", () => {
   // `want` names, and bun/index.ts takes that id from the window list (§8a).
   test("a window opens on the connection it is asked for", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
-    const m = await createConnectionManager({ attach: fakeAttach().attach, want: LAPTOP.id });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach, want: LAPTOP.id });
     expect(await served(m)).toBe(LAPTOP.id);
     expect(m.active()).toBe(LAPTOP.id);
   });
 
   test("selecting the one already being served is a no-op, not a reconnect", async () => {
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     expect(await m.requests.connectionSelect({ id: LOCAL_ID })).toEqual({ ok: true, error: "" });
     expect(fake.log).toEqual([`attach:${LOCAL_ID}`]);
   });
 
   test("an id naming nothing is refused without touching the connection", async () => {
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     expect((await m.requests.connectionSelect({ id: "nope" })).ok).toBe(false);
     expect(await served(m)).toBe(LOCAL_ID);
   });
@@ -198,7 +214,7 @@ describe("switching", () => {
   test("selecting the one being served DOES reconnect once its wire has given up", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     m.lost(LAPTOP.id, "Disconnected: another client connected to this server.");
     expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
     expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `attach:${LAPTOP.id}`, `shutdown:${LAPTOP.id}`]);
@@ -213,7 +229,7 @@ describe("switching", () => {
   test("a wire that came back on its own makes selecting it a no-op again", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     m.lost(LAPTOP.id, "Lost the connection: host is down.");
     m.restored(LAPTOP.id);
     expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
@@ -225,7 +241,7 @@ describe("switching", () => {
   test("and a recovery reported by a connection nobody is on clears nothing", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     m.lost(LAPTOP.id, "Lost the connection: host is down.");
     m.restored(LOCAL_ID);
     expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
@@ -237,7 +253,7 @@ describe("switching", () => {
   test("reconnecting asks the wire being served, and nothing else", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     expect(await m.requests.connectionReconnect({})).toEqual({ ok: true });
     expect(fake.log).toEqual([`attach:${LAPTOP.id}`, `recheck:${LAPTOP.id}`]);
   });
@@ -248,7 +264,7 @@ describe("switching", () => {
   test("a connection that dies after being switched away from marks nothing", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     await m.requests.connectionSelect({ id: LAPTOP.id });
     m.lost(LOCAL_ID, "Lost the connection: host is down.");
     expect(await m.requests.connectionSelect({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
@@ -262,7 +278,7 @@ describe("switching", () => {
 describe("naming the window", () => {
   const named = async (deps: Parameters<typeof createConnectionManager>[0]) => {
     const names: string[] = [];
-    const m = await createConnectionManager({ ...deps, onName: (name) => names.push(name) });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, ...deps, onName: (name) => names.push(name) });
     return { m, names };
   };
 
@@ -339,7 +355,7 @@ describe("naming the window", () => {
 
 describe("adding and removing", () => {
   test("an added connection is listed, stored, and switchable", async () => {
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     const { id, error } = await m.requests.connectionAdd({
       name: "VPS",
       destination: "ledge@vps",
@@ -356,13 +372,13 @@ describe("adding and removing", () => {
   });
 
   test("what was pinned is what ssh will check", async () => {
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", port: PORT_UNSET, keyPath: "", auth: "key", password: "", hostKey: "vps ssh-ed25519 AAAA" });
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("vps ssh-ed25519 AAAA\n");
   });
 
   test("a bad destination is refused with a reason and nothing is stored", async () => {
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     const res = await m.requests.connectionAdd({ name: "VPS", destination: "-oProxyCommand=x", port: PORT_UNSET, keyPath: "", auth: "key", password: "", hostKey: "" });
     expect(res.id).toBe("");
     expect(res.error).toContain("ssh destination");
@@ -370,7 +386,7 @@ describe("adding and removing", () => {
   });
 
   test("only what the user was shown is pinned: no host key means no line", async () => {
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     await m.requests.connectionAdd({ name: "VPS", destination: "ledge@vps", port: PORT_UNSET, keyPath: "", auth: "key", password: "", hostKey: "" });
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("");
     expect((await m.requests.connectionList({})).connections.find((c) => c.name === "VPS")!.pinned).toBe(false);
@@ -378,7 +394,7 @@ describe("adding and removing", () => {
 
   test("removing takes the pin with it", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     expect(await m.requests.connectionRemove({ id: LAPTOP.id })).toEqual({ ok: true, error: "" });
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("");
     expect((await m.requests.connectionList({})).connections.map((c) => c.id)).toEqual([LOCAL_ID]);
@@ -386,7 +402,7 @@ describe("adding and removing", () => {
 
   // Both refusals below leave the window on a connection it can work from.
   test("the local server cannot be removed", async () => {
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     const res = await m.requests.connectionRemove({ id: LOCAL_ID });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("cannot be removed");
@@ -394,7 +410,7 @@ describe("adding and removing", () => {
 
   test("the connection being served cannot be removed", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     const res = await m.requests.connectionRemove({ id: LAPTOP.id });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Switch somewhere else");
@@ -419,18 +435,18 @@ describe("editing", () => {
 
   test("a rename keeps everything else, pin included", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     expect(await m.requests.connectionUpdate({ ...edit, name: "Studio" })).toEqual({ ok: true, error: "" });
     const stored = JSON.parse(await readFile(CONNECTIONS_PATH, "utf8")).connections;
     expect(stored).toEqual([{ ...LAPTOP, name: "Studio" }]);
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe(`${LAPTOP.hostKey}\n`);
   });
 
-  // A host key belongs to the host, not to the account: ssh-keyscan asked the
+  // A host key belongs to the host, not to the account: the scan asked the
   // host. `dev@laptop` to `ledge@laptop` is the same machine and the same key.
   test("changing only the account keeps the pin", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     expect(await m.requests.connectionUpdate({ ...edit, destination: "ledge@laptop" })).toEqual({ ok: true, error: "" });
     expect((await m.requests.connectionList({})).connections[1]).toMatchObject({
       destination: "ledge@laptop",
@@ -444,7 +460,7 @@ describe("editing", () => {
   // address.
   test("an address that moved to another host has to be pinned again", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     const refused = await m.requests.connectionUpdate({ ...edit, destination: "dev@studio" });
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain("another host");
@@ -459,9 +475,23 @@ describe("editing", () => {
     expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe("studio ssh-ed25519 AAAAnew\n");
   });
 
+  // An alias pins the HostName ssh resolves it to (bun/connections.ts
+  // hostKeyName), which is not the destination as typed. A rename keeps that
+  // pin, and a move to an address that resolves elsewhere still refuses it.
+  test("a ~/.ssh/config alias keeps its pin across a rename", async () => {
+    const lab: Connection = { ...LAPTOP, destination: "ledge@lab", hostKey: "10.0.0.5 ssh-ed25519 AAAAC3Nza" };
+    await saveConnections([lab], LOCAL_ID);
+    const resolved = async (d: string, p: number) => (hostPart(d) === "lab" ? "10.0.0.5" : knownHostsHost(d, p));
+    const m = await createConnectionManager({ hostKeyName: resolved, attach: fakeAttach().attach });
+    expect(await m.requests.connectionUpdate({ ...edit, destination: lab.destination, name: "Lab" })).toEqual({ ok: true, error: "" });
+    expect(await readFile(KNOWN_HOSTS_PATH, "utf8")).toBe(`${lab.hostKey}\n`);
+    const moved = await m.requests.connectionUpdate({ ...edit, destination: "ledge@elsewhere" });
+    expect(moved.error).toContain("another host");
+  });
+
   test("a fresh pin naming a third machine is refused too", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     const res = await m.requests.connectionUpdate({
       ...edit,
       destination: "dev@studio",
@@ -473,7 +503,7 @@ describe("editing", () => {
 
   test("the same refusals a new connection gets", async () => {
     await saveConnections([LAPTOP], LOCAL_ID);
-    const m = await createConnectionManager({ attach: fakeAttach().attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
     expect((await m.requests.connectionUpdate({ ...edit, destination: "-oProxyCommand=x" })).error)
       .toContain("ssh destination");
     expect((await m.requests.connectionUpdate({ ...edit, name: "  " })).error).toContain("name");
@@ -489,7 +519,7 @@ describe("editing", () => {
   test("re-addressing the connection being served re-opens it", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     fake.log.length = 0;
     expect(
       await m.requests.connectionUpdate({ ...edit, destination: "dev@studio", hostKey: "studio ssh-ed25519 AAAAnew" }),
@@ -517,7 +547,7 @@ describe("editing", () => {
         shutdown: () => log.push(`shutdown:${conn.destination}`),
       };
     };
-    const m = await createConnectionManager({ attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach });
     log.length = 0;
 
     const res = await m.requests.connectionUpdate({
@@ -541,7 +571,7 @@ describe("editing", () => {
   test("renaming the connection being served does not re-open it", async () => {
     await saveConnections([LAPTOP], LAPTOP.id);
     const fake = fakeAttach();
-    const m = await createConnectionManager({ attach: fake.attach });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach });
     fake.log.length = 0;
     await m.requests.connectionUpdate({ ...edit, name: "Studio" });
     expect(fake.log).toEqual([]);
@@ -556,11 +586,11 @@ describe("two windows over one store", () => {
   // Two managers over one store, each on its own connection.
   async function pair(unreachable = new Set<string>()) {
     const fake = fakeAttach(unreachable);
-    const store = await createConnectionStore({ inUse: () => [first, second].map((m) => m?.active() ?? "") });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, inUse: () => [first, second].map((m) => m?.active() ?? "") });
     let first: ConnectionManager | undefined;
     let second: ConnectionManager | undefined;
-    first = await createConnectionManager({ attach: fake.attach, store, want: LOCAL_ID });
-    second = await createConnectionManager({ attach: fake.attach, store, want: LAPTOP.id });
+    first = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach, store, want: LOCAL_ID });
+    second = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fake.attach, store, want: LAPTOP.id });
     return { first, second, fake, store };
   }
 
@@ -655,7 +685,7 @@ describe("two windows over one store", () => {
 // what the manager answers. A name in one and not the other is a method
 // refused by everybody or served by nobody.
 test("the listed connection methods are the ones implemented", async () => {
-  const m = await createConnectionManager({ attach: fakeAttach().attach });
+  const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach });
   for (const name of CONNECTION_METHODS) expect(typeof m.requests[name]).toBe("function");
   // The manager serves them rather than forwarding them. The fake connection
   // above implements only vaultState, so a forwarded call would throw.
@@ -723,7 +753,7 @@ describe("the password door", () => {
   // hand-edit.
   test("stores the password in the keychain and not in the file", async () => {
     const { items, secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id, error } = await store.add(PASSWORD_ADD);
     expect(error).toBe("");
     expect(items.get(id)).toBe("hunter2");
@@ -736,7 +766,7 @@ describe("the password door", () => {
   // behind in the form is dropped rather than stored as a field with no effect.
   test("drops a key path that came with it", async () => {
     const { secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id } = await store.add({ ...PASSWORD_ADD, keyPath: "/home/dev/.ssh/ledge" });
     expect(store.find(id)!.keyPath).toBe("");
   });
@@ -745,7 +775,7 @@ describe("the password door", () => {
   // rather than stored and left to make a connection that cannot authenticate.
   test("refuses a password ssh could not deliver, and stores nothing", async () => {
     const { items, secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     for (const password of ["", "two\nlines", "with\ttab"]) {
       const res = await store.add({ ...PASSWORD_ADD, password });
       expect(res.id).toBe("");
@@ -759,7 +789,7 @@ describe("the password door", () => {
   // The alternative is a connection naming a password door with no password.
   test("a keychain that refuses costs the whole connection", async () => {
     const { secrets } = fakeSecrets(true);
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const res = await store.add(PASSWORD_ADD);
     expect(res.id).toBe("");
     expect(res.error).toBe(REFUSED);
@@ -768,7 +798,7 @@ describe("the password door", () => {
 
   test("removing the connection forgets its password", async () => {
     const { items, log, secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id } = await store.add(PASSWORD_ADD);
     expect(await store.remove(id)).toEqual({ ok: true, error: "" });
     expect(items.size).toBe(0);
@@ -778,7 +808,7 @@ describe("the password door", () => {
   // Every connection that has no password should cost no keychain call at all.
   test("an ordinary connection never touches the keychain", async () => {
     const { log, secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id } = await store.add({ ...PASSWORD_ADD, auth: "key", password: "" });
     await store.reviewUpdate({ ...PASSWORD_ADD, id, auth: "key", password: null, hostKey: null });
     await store.swapPassword(id, "key", null);
@@ -792,7 +822,7 @@ describe("the password door", () => {
   // reason.
   test("a rename keeps the stored password and asks the keychain nothing", async () => {
     const { items, log, secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id } = await store.add(PASSWORD_ADD);
     log.length = 0;
     const { conn, error } = await store.reviewUpdate({
@@ -814,7 +844,7 @@ describe("the password door", () => {
   // find no secret, and be refused for a reason that is on this Mac.
   test("moving onto the door with nothing stored is refused", async () => {
     const { secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id } = await store.add({ ...PASSWORD_ADD, auth: "key", password: "" });
     const { conn, error } = await store.reviewUpdate({ ...PASSWORD_ADD, id, password: null, hostKey: null });
     expect(conn).toBeNull();
@@ -823,7 +853,7 @@ describe("the password door", () => {
 
   test("moving off the door forgets the password", async () => {
     const { items, secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id } = await store.add(PASSWORD_ADD);
     await store.swapPassword(id, "key", null);
     expect(items.size).toBe(0);
@@ -835,7 +865,7 @@ describe("the password door", () => {
   // on the way to reporting the failure.
   test("a new password is in place before the dial, and back out after a failed one", async () => {
     const { items, log, secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id } = await store.add(PASSWORD_ADD);
     // Reachable at boot and not afterwards. That is what a mistyped password
     // looks like from here: the connection worked, and the dial made with the
@@ -845,7 +875,7 @@ describe("the password door", () => {
       if (refuse) throw new Error("host is down");
       return { requests: {} as RequestHandlers, build: "b", recheck: () => {}, shutdown: () => {} };
     };
-    const m = await createConnectionManager({ attach, store, want: id });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach, store, want: id });
     refuse = true;
     log.length = 0;
 
@@ -870,9 +900,9 @@ describe("the password door", () => {
   // And the same edit against a machine that answers keeps the new one.
   test("a new password that dials survives", async () => {
     const { items, secrets } = fakeSecrets();
-    const store = await createConnectionStore({ secrets });
+    const store = await createConnectionStore({ hostKeyName: hostKeyAsTyped, secrets });
     const { id } = await store.add(PASSWORD_ADD);
-    const m = await createConnectionManager({ attach: fakeAttach().attach, store, want: id });
+    const m = await createConnectionManager({ hostKeyName: hostKeyAsTyped, attach: fakeAttach().attach, store, want: id });
     const res = await m.requests.connectionUpdate({
       id,
       name: "VPS",

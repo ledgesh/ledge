@@ -43,8 +43,8 @@ describe("validating what someone typed", () => {
   });
 });
 
-// keyscan takes a host, so hostPart drops the user half of a destination. A
-// host key does not depend on which account connects.
+// hostPart drops the user half of a destination. A host key does not depend on
+// which account connects.
 describe("the host half of a destination", () => {
   test.each([
     ["dev@laptop", "laptop"],
@@ -70,11 +70,19 @@ describe("a pin belongs to one host", () => {
   // Editing an address to point at another machine invalidates the pin.
   // Keeping it would refuse every later connection with a changed-host-key
   // warning, which reads as an attack when the user only edited the address.
+  // The host is a known_hosts name, which knownHostsHost spells for a
+  // destination that is not an alias.
   test("a pin does not follow a connection to another host", () => {
-    expect(pinFitsHost("laptop ssh-ed25519 AAAA", "dev@laptop")).toBe(true);
+    expect(pinFitsHost("laptop ssh-ed25519 AAAA", knownHostsHost("dev@laptop", PORT_UNSET))).toBe(true);
     // The user half is not the host half: changing the account keeps the pin.
-    expect(pinFitsHost("laptop ssh-ed25519 AAAA", "ledge@laptop")).toBe(true);
-    expect(pinFitsHost("laptop ssh-ed25519 AAAA", "dev@vps")).toBe(false);
+    expect(pinFitsHost("laptop ssh-ed25519 AAAA", knownHostsHost("ledge@laptop", PORT_UNSET))).toBe(true);
+    expect(pinFitsHost("laptop ssh-ed25519 AAAA", knownHostsHost("dev@vps", PORT_UNSET))).toBe(false);
+  });
+
+  // ssh lowercases a resolved HostName, and known_hosts matches without
+  // regard to case.
+  test("the host compares without regard to case", () => {
+    expect(pinFitsHost("laptop ssh-ed25519 AAAA", "Laptop")).toBe(true);
   });
 
   // Neither pin names a host, so there is nothing here to invalidate. An
@@ -82,19 +90,21 @@ describe("a pin belongs to one host", () => {
   // trusts the host. A two-field pin is a phone's, and pinFitsHost cannot
   // check it (see pinnedHost above).
   test("no pin of Ledge's own fits anywhere", () => {
-    expect(pinFitsHost("", "dev@anywhere")).toBe(true);
-    expect(pinFitsHost("ssh-ed25519 AAAA", "dev@anywhere")).toBe(true);
+    expect(pinFitsHost("", "anywhere")).toBe(true);
+    expect(pinFitsHost("ssh-ed25519 AAAA", "anywhere")).toBe(true);
   });
 
   // known_hosts indexes a non-default port as `[host]:port`. The pin is taken
   // and compared in that shape, or it matches nothing at connect time.
   test("a port is part of which host a pin belongs to", () => {
-    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", 2222)).toBe(true);
+    expect(knownHostsHost("dev@laptop", 2222)).toBe("[laptop]:2222");
+    expect(knownHostsHost("dev@laptop", 22)).toBe("laptop");
+    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", knownHostsHost("dev@laptop", 2222))).toBe(true);
     // The same machine on another port is a separate known_hosts entry, and can
     // offer a different key.
-    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", 2022)).toBe(false);
-    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", "dev@laptop", PORT_UNSET)).toBe(false);
-    expect(pinFitsHost("laptop ssh-ed25519 AAAA", "dev@laptop", 2222)).toBe(false);
+    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", knownHostsHost("dev@laptop", 2022))).toBe(false);
+    expect(pinFitsHost("[laptop]:2222 ssh-ed25519 AAAA", knownHostsHost("dev@laptop", PORT_UNSET))).toBe(false);
+    expect(pinFitsHost("laptop ssh-ed25519 AAAA", knownHostsHost("dev@laptop", 2222))).toBe(false);
   });
 });
 

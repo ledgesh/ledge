@@ -12,9 +12,17 @@ if [ -n "$LEDGE_PUBKEY" ]; then
   # forwarding, agent forwarding, X11 and pty allocation; `command=` means this
   # key cannot ask for anything else. The probe checks both halves. The command
   # is SERVE_COMMAND, and shared/serveCommand.test.ts keeps this copy the same.
-  command='PATH=$HOME/.ledge/.server/bin:$PATH ledge serve'
+  #
+  # `LEDGE_JUMP` makes this box a jump host instead: the key may forward to
+  # another sshd, which is all `ProxyJump` asks of it, and runs nothing.
+  if [ -n "$LEDGE_JUMP" ]; then
+    options='restrict,port-forwarding,command="/bin/false"'
+  else
+    command='PATH=$HOME/.ledge/.server/bin:$PATH ledge serve'
+    options="restrict,command=\"$command\""
+  fi
   mkdir -p /home/ledge/.ssh
-  printf 'restrict,command="%s" %s\n' "$command" "$LEDGE_PUBKEY" > /home/ledge/.ssh/authorized_keys
+  printf '%s %s\n' "$options" "$LEDGE_PUBKEY" > /home/ledge/.ssh/authorized_keys
   chown -R ledge:ledge /home/ledge/.ssh
   chmod 600 /home/ledge/.ssh/authorized_keys
 fi

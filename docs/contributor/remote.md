@@ -330,10 +330,10 @@ and a form that defaulted to 22 and always sent it would override the user's
 configuration with our guess.
 
 The port is part of a PIN, which is the half that is easy to get silently
-wrong. `known_hosts` indexes a non-default port as `[host]:port`, so
-`ssh-keyscan -p` is what takes a pin in the shape ssh will look for at connect
-time, and moving a connection to a different port on the same machine
-invalidates its pin exactly as moving it to another machine does. Two sshd
+wrong. `known_hosts` indexes a non-default port as `[host]:port`, so the scan
+passes `-p` and ssh writes the pin in the shape it will look for at connect
+time. Moving a connection to a different port on the same machine invalidates
+its pin exactly as moving it to another machine does. Two sshd
 instances on one box really can offer different keys.
 
 **Secrets at rest go in the platform keychain**, macOS's on the Mac, the
@@ -361,8 +361,8 @@ file that user can read, and an item that user can read. Narrowing the ACL with
 `-T /Applications/Ledge.app` would bring the signing problem back with it, so
 it is not used. What the measurement did not cover is a hardened-runtime
 release build making the same spawn, which is the one thing to re-confirm on
-the first signed build; that build already spawns `ssh`, `ssh-keyscan` and
-`ssh-keygen` from fixed paths.
+the first signed build; that build already spawns `ssh` and `ssh-keygen` from
+fixed paths.
 
 **On Linux the keyring is reached through `secret-tool`, libsecret's
 command-line client, for the same reason.** A desktop keyring (GNOME Keyring,
@@ -494,13 +494,12 @@ fingerprint. A changed key is refused with the fingerprint shown, and there is
 no blind accept and no "continue anyway" that remembers.
 
 The enforcement is ssh's own, which is the point of being ssh's client rather
-than its replacement (§3). Pairing runs `ssh-keyscan`, describes the key with
-`ssh-keygen -lf`, and stores the `known_hosts` line only after a person has
-compared the fingerprint. On Windows the scan is `ssh.exe` with
-`StrictHostKeyChecking=accept-new` into a temporary file, because the
-`ssh-keyscan.exe` Windows ships (9.5p2) fails against OpenSSH 8.5 and later: it
-proposes `sntrup761x25519-sha512@openssh.com`, which those servers pick first,
-and then reports it unsupported. Every connection then runs with
+than its replacement (§3). Pairing scans the host with `ssh` itself, with
+`StrictHostKeyChecking=accept-new` into a temporary file and no credential
+offered: ssh records the key during the key exchange, and the login fails
+there. Pairing then describes the key with `ssh-keygen -lf`, and stores the
+`known_hosts` line only after a person has compared the fingerprint. Every
+connection then runs with
 `StrictHostKeyChecking=yes`, `GlobalKnownHostsFile=/dev/null`, and Ledge's own
 `known_hosts` followed by the user's. Ledge parses no key material and computes
 no hash of its own. The user's file is included because their entry for a host
@@ -509,6 +508,34 @@ someone to click through pinning; what Ledge pinned stays in a file of its own
 so it can be read and revoked separately, and it is a projection of the
 connection records, so removing a connection removes its pin in the same
 breath.
+
+**The scan is `ssh` and not `ssh-keyscan`, because keyscan reads no ssh
+config.** The dial reads `~/.ssh/config`, so an alias, its `HostName`, a
+`ProxyJump` and a `ProxyCommand` all apply to it. A keyscan of the same
+destination resolved the alias as a DNS name or reached for a host only the
+jump could see, so Add Server failed for servers the dial could reach (issue
+#18). On Windows keyscan was never an option: the `ssh-keyscan.exe` it ships
+(9.5p2) proposes `sntrup761x25519-sha512@openssh.com`, which OpenSSH 8.5 and
+later pick first, and then reports it unsupported.
+
+ssh writes the line under the name it looks up at connect time: the
+`HostKeyAlias` when one is set, and otherwise the resolved `HostName`, as
+`[host]:port` off port 22. An alias `lab` with `HostName 10.0.0.5` is
+therefore pinned as `10.0.0.5`. So a pin is checked against the name `ssh -G`
+resolves for the destination (`hostKeyName`), not against the destination as
+typed, both when an edit keeps a pin and when a pairing code is checked
+against the pins already held (§4b).
+
+| Scan option | Why |
+| ----------- | --- |
+| `ControlMaster=no`, `ControlPath=none` | A connection the user's config already multiplexes skips the key exchange, and ssh would write nothing |
+| Killed after 15 seconds | `ConnectTimeout` bounds only the last hop. A `ProxyJump` or `ProxyCommand` is another process that the option does not reach |
+
+**A jump host is the user's ssh config's business, credentials and host key
+included.** ssh runs the `ProxyJump` hop as a second ssh with the user's
+config and none of Ledge's `-o` options, so the jump host's key is checked
+against the user's own known_hosts. That hop has no terminal and no askpass,
+so a jump host that asks for a password or a one-time code fails the dial.
 
 **That last claim is about a client that spawns OpenSSH, and it does not
 generalize.** A client with no subprocesses has to link an SSH library and
@@ -2762,6 +2789,13 @@ Per `testing.md`'s categories:
   `BatchMode=yes` suppresses askpass outright. Both directions are asserted now:
   the argv the app builds connects, and the same argv with that one option back
   fails with the helper never spawned.
+- **A server only a jump host can reach**, in the same probe's `[jump]` step. A
+  second fixture container is the jump host, with a key that may forward and
+  runs nothing, and the server joins a private network under a name this Mac
+  cannot resolve. An ssh config passed with `-F` names both, because ssh reads
+  `~/.ssh/config` from the account's home and not from `$HOME`, and a probe
+  must not edit the developer's. `-F` is the same parser, and ssh hands it on
+  to the `ProxyJump` hop.
 - **A server that stops answering while the wire stays perfect**, in the same
   probe's `[stall]` step. SIGSTOP to the daemon leaves TCP established and its
   keepalives answered, sshd answering `ServerAlive` from its own process, and
@@ -2820,6 +2854,12 @@ rather than blaming the wire; the process answering afterwards is a different
 one, started by the reconnect itself. And a client with the wire cut under it
 sits `lost` for 19.5 seconds with a beat half a minute away, until a press,
 which lands 0.2 seconds later.
+
+And, from `[jump]`: `ssh-keyscan` gets nothing for the alias; `ssh -G`
+resolves it to its `HostName`; the scan through the jump pins a key under that
+name, and it is the same key `[pair]` scanned on the published port; and the
+argv `sshDial` builds brings the protocol up through the jump, on the same
+daemon `[connect]` reached.
 
 And, from `[password]`: a password stored with `security` and read back by the
 helper brings the protocol up over `password` and over `keyboard-interactive`,

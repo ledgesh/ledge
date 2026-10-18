@@ -30,6 +30,8 @@ The port goes in its own field, not in the address: write `ledge@vps`, not `ledg
 
 Leave it blank whenever you can. Blank means your ssh config decides, so an alias from `~/.ssh/config` keeps whatever `Port` it already sets.
 
+Ledge uses your ssh config both to fetch the host key and to connect. A server you reach through a jump host (`ProxyJump` or `ProxyCommand`) works the same way it does in a terminal. The jump host has to let you in without a prompt, with a key or your ssh agent, because Ledge has no terminal for it to ask in.
+
 Ledge then fetches that machine's host key and shows you its fingerprint. Compare it against what the machine reports for itself, in a shell on that machine:
 
 ```sh norun

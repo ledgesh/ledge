@@ -18,7 +18,7 @@ import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isHostName } from "../shared/frontmatter";
-import { hostPart, isPort, knownHostsHost, LOCAL_ID, parseAuth, pinnedHost, PORT_UNSET, SERVE_COMMAND, type AuthMode } from "../shared/connections";
+import { DEFAULT_PORT, hostPart, isPort, knownHostsHost, LOCAL_ID, parseAuth, pinnedHost, PORT_UNSET, SERVE_COMMAND, type AuthMode } from "../shared/connections";
 import { CLIENT_HOME, ensureClientHome } from "./clientHome";
 import { ASKPASS_ACCOUNT_ENV } from "./secrets";
 
@@ -57,7 +57,6 @@ const WINDOWS = process.platform === "win32";
 const OPENSSH_DIR = WINDOWS ? join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "OpenSSH") : "/usr/bin";
 const EXE = WINDOWS ? ".exe" : "";
 export const SSH_PATH = join(OPENSSH_DIR, `ssh${EXE}`);
-export const KEYSCAN_PATH = join(OPENSSH_DIR, `ssh-keyscan${EXE}`);
 export const KEYGEN_PATH = join(OPENSSH_DIR, `ssh-keygen${EXE}`);
 
 export interface Connection {
@@ -368,20 +367,15 @@ export function knownHostsText(connections: readonly Connection[]): string {
 }
 
 /**
- * The host key to pin, out of `ssh-keyscan` output. The preference order below
- * is the order ssh itself prefers, so the key pinned is the one a connection
- * will actually be offered. Scanning returns every type the host serves, and
- * pinning an ed25519 key while ssh negotiates rsa would refuse every
- * connection with a message about a changed host key.
- *
- * Comment lines (`# host:22 SSH-2.0-OpenSSH_9.6`) are keyscan's banner report,
- * not keys. Null when there is nothing usable, which is what an unreachable
- * host looks like from here.
+ * The host key to pin, out of known_hosts text: the file the scan wrote
+ * (`scanArgv`), or `ssh-keyscan` output in the probes. Keyscan returns every
+ * type the host serves, so the order below is ssh's own preference. Comment
+ * lines are keyscan's banner report. Null when nothing is usable.
  */
 const KEY_PREFERENCE = ["ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa"];
 
-export function pickHostKey(keyscanOutput: string): string | null {
-  const lines = keyscanOutput
+export function pickHostKey(scanned: string): string | null {
+  const lines = scanned
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith("#") && l.split(/\s+/).length >= 3);
@@ -441,25 +435,24 @@ export function keyTypeOf(hostKeyLine: string): string {
 }
 
 /**
- * Why a pairing code may not dial `destination` at `port`, or null when it may
- * (remote.md §4b's first rule). A code never replaces a pin: a pin held on ANY
- * account at that host and port names sshd there, and a code whose
- * fingerprints do not include it is a code for some other machine, or for a
- * server whose key has changed. The phone applies the same rule per host and
- * port (`PairingCode.match`).
+ * Why a pairing code may not dial the host ssh looks up as `where`, or null
+ * when it may (remote.md §4b's first rule). `where` is that host's known_hosts
+ * name (`hostKeyName`). A code never replaces a pin: a pin held on ANY account
+ * at that host and port names sshd there, and a code whose fingerprints do not
+ * include it is a code for some other machine, or for a server whose key has
+ * changed. The phone applies the same rule per host and port
+ * (`PairingCode.match`).
  */
 export function pinConflict(
   connections: readonly Connection[],
-  destination: string,
-  port: number,
+  where: string,
   fingerprints: readonly string[],
 ): string | null {
-  const where = knownHostsHost(destination, port).toLowerCase();
   for (const conn of connections) {
-    if (conn.hostKey === "" || pinnedHost(conn.hostKey).toLowerCase() !== where) continue;
+    if (conn.hostKey === "" || pinnedHost(conn.hostKey).toLowerCase() !== where.toLowerCase()) continue;
     const pinned = fingerprintOf(conn.hostKey);
     if (pinned === null || fingerprints.includes(pinned)) continue;
-    return `"${conn.name}" already pins a host key for ${knownHostsHost(destination, port)} that this code does not name (${pinned}). The code is for a different machine, or that server's key has changed: check it from "${conn.name}" instead.`;
+    return `"${conn.name}" already pins a host key for ${where} that this code does not name (${pinned}). The code is for a different machine, or that server's key has changed: check it from "${conn.name}" instead.`;
   }
   return null;
 }
@@ -526,26 +519,9 @@ export async function probeHostKey(
   if (port !== PORT_UNSET && !isPort(port)) return { error: `${port} is not a port.` };
   let scanned: string;
   try {
-    // -T bounds the wait. A firewalled host would otherwise leave the dialog
-    // spinning with nothing to say.
-    //
-    // -p when the connection names a port, because the line keyscan prints is
-    // the line that gets pinned. With a port it comes back as `[host]:port`,
-    // which is the shape ssh looks for at connect time (shared/connections.ts
-    // knownHostsHost).
-    if (WINDOWS) {
-      scanned = await scanWithSsh(hostPart(destination), port);
-    } else {
-      const argv = [KEYSCAN_PATH, "-T", "5"];
-      if (port !== PORT_UNSET) argv.push("-p", String(port));
-      argv.push(hostPart(destination));
-      const p = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore" });
-      scanned = await new Response(p.stdout).text();
-      await p.exited;
-    }
+    scanned = await scanWithSsh(destination, port);
   } catch (err) {
-    const tool = WINDOWS ? "ssh" : "ssh-keyscan";
-    return { error: `Could not run ${tool} (${err instanceof Error ? err.message : String(err)}).` };
+    return { error: `Could not run ssh (${err instanceof Error ? err.message : String(err)}).` };
   }
   const hostKey = pickHostKey(scanned);
   if (!hostKey) {
@@ -567,16 +543,18 @@ export async function probeHostKey(
   }
 }
 
+// How long a scan may take in all. ConnectTimeout does not reach a ProxyJump
+// hop (remote.md §4).
+const SCAN_TIMEOUT_MS = 15_000;
+
 /**
- * The argv that has ssh record a host's key in `file` and then stop, for
- * Windows, whose ssh-keyscan.exe fails against OpenSSH 8.5 and later: it
- * proposes sntrup761x25519-sha512@openssh.com, which those servers pick first,
- * and then reports it unsupported. ssh.exe negotiates the same servers.
- * `accept-new` writes the key to `file` before authentication, and with no
- * method left to try the login fails there. The line ssh writes has the shape
- * keyscan prints, `[host]:port` included.
+ * The argv that has ssh record a host's key in `file` and then stop. ssh, not
+ * ssh-keyscan, so the user's ssh config applies (remote.md §4). `accept-new`
+ * writes the key before authentication, which then fails with no method left.
+ * `ControlPath=none` keeps the scan off a multiplexed connection, which would
+ * skip the key exchange.
  */
-export function scanArgv(host: string, port: number, file: string): string[] {
+export function scanArgv(destination: string, port: number, file: string): string[] {
   const argv = [
     SSH_PATH,
     "-o",
@@ -592,25 +570,78 @@ export function scanArgv(host: string, port: number, file: string): string[] {
     "-o",
     "HashKnownHosts=no",
     "-o",
+    "ControlMaster=no",
+    "-o",
+    "ControlPath=none",
+    "-o",
     "PreferredAuthentications=publickey",
     "-o",
     "PubkeyAuthentication=no",
     "-n",
   ];
   if (port !== PORT_UNSET) argv.push("-p", String(port));
-  argv.push(host, "exit");
+  argv.push(destination, "exit");
   return argv;
 }
 
 /** Runs `scanArgv` and returns the file ssh wrote, "" when it wrote none. */
-async function scanWithSsh(host: string, port: number): Promise<string> {
+async function scanWithSsh(destination: string, port: number): Promise<string> {
   await ensureClientHome();
   const file = join(CLIENT_HOME, `hostkey-scan-${process.pid}-${Date.now()}`);
   try {
-    const p = Bun.spawn(scanArgv(host, port, file), { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    const p = Bun.spawn(scanArgv(destination, port, file), { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    const timer = setTimeout(() => p.kill(), SCAN_TIMEOUT_MS);
     await p.exited;
+    clearTimeout(timer);
     return await readFile(file, "utf8").catch(() => "");
   } finally {
     await rm(file, { force: true });
+  }
+}
+
+/** The argv that has ssh print the configuration it would use for a
+ * destination, and connect to nothing. `hostKeyName` reads its output. */
+export function resolveArgv(destination: string, port: number): string[] {
+  const argv = [SSH_PATH, "-G"];
+  if (port !== PORT_UNSET) argv.push("-p", String(port));
+  argv.push(destination);
+  return argv;
+}
+
+/**
+ * The name ssh looks a host key up under, out of `ssh -G` output: the
+ * `HostKeyAlias` when one is set, else the resolved `HostName`, as
+ * `[host]:port` off port 22. The scan's pin is written under this name
+ * (remote.md §4). Null when the output names no host.
+ */
+export function hostKeyNameOf(config: string): string | null {
+  const values = new Map<string, string>();
+  for (const line of config.split("\n")) {
+    const [key, ...rest] = line.trim().split(/\s+/);
+    if (key && rest.length > 0 && !values.has(key.toLowerCase())) values.set(key.toLowerCase(), rest.join(" "));
+  }
+  const alias = values.get("hostkeyalias");
+  if (alias) return alias;
+  const host = values.get("hostname");
+  if (!host) return null;
+  const port = Number(values.get("port"));
+  return !isPort(port) || port === DEFAULT_PORT ? host : `[${host}]:${port}`;
+}
+
+/**
+ * The known_hosts name of `destination` at `port`, as the user's ssh config
+ * resolves it (`hostKeyNameOf`). When ssh cannot answer, falls back to the
+ * destination's own host, which is right for anything that is not an alias.
+ */
+export async function hostKeyName(destination: string, port: number): Promise<string> {
+  const fallback = knownHostsHost(destination, port);
+  try {
+    const p = Bun.spawn(resolveArgv(destination.trim(), port), { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const timer = setTimeout(() => p.kill(), SCAN_TIMEOUT_MS);
+    const out = await new Response(p.stdout).text();
+    clearTimeout(timer);
+    return (await p.exited) === 0 ? (hostKeyNameOf(out) ?? fallback) : fallback;
+  } catch {
+    return fallback;
   }
 }

@@ -33,7 +33,8 @@ const SCRATCH = await mkdtemp(join(tmpdir(), "ledge-ssh-probe-"));
 // (testing.md §6).
 process.env["LEDGE_NOTES_ROOT"] = join(SCRATCH, "home");
 
-const { sshDial, pickHostKey, knownHostsText, parsePort, PORT_UNSET, SERVE_COMMAND } = await import("../src/bun/connections");
+const { sshDial, pickHostKey, knownHostsText, parsePort, PORT_UNSET, SERVE_COMMAND, scanArgv, resolveArgv, hostKeyNameOf, fingerprintOf, pinnedHost } =
+  await import("../src/bun/connections");
 const { ensureAskpass, forgetPassword, storePassword } = await import("../src/bun/secrets");
 type Connection = import("../src/bun/connections").Connection;
 const { clientConnection, reconnectingClient } = await import("../src/shared/transport");
@@ -47,6 +48,10 @@ const REPO = join(import.meta.dir, "..");
 const IMAGE = "ledge-server:probe";
 const FIXTURE = "ledge-sshd:probe";
 const NAME = "ledge-ssh-probe";
+// The [jump] step's jump host, and the network it shares with NAME.
+const JUMP = `${NAME}-jump`;
+const JUMP_NET = `${NAME}-net`;
+const JUMP_PORT = 22024;
 
 // Stand the fixture up for a phone instead of asserting against it.
 const SERVE = Bun.argv.includes("--serve");
@@ -86,9 +91,10 @@ function run(cmd: string[], opts: { quiet?: boolean; env?: Record<string, string
 const secrets: string[] = [];
 
 async function teardown() {
-  for (const name of [NAME, `${NAME}-pw`, `${NAME}-kbd`, `${NAME}-plain`]) {
+  for (const name of [NAME, `${NAME}-pw`, `${NAME}-kbd`, `${NAME}-plain`, JUMP]) {
     run(["docker", "rm", "-f", name], { quiet: true });
   }
+  run(["docker", "network", "rm", JUMP_NET], { quiet: true });
   for (const id of secrets) await forgetPassword(id);
   await rm(SCRATCH, { recursive: true, force: true });
 }
@@ -419,6 +425,79 @@ try {
     trips.push(Date.now() - at);
   }
   ok("round trip", `${Math.min(...trips)}-${Math.max(...trips)}ms over ssh to a container`);
+
+  // A server only a jump host can reach, named by an alias: the scan and the
+  // dial both go through it (remote.md §4, §13). The config rides `-F` so the
+  // developer's own is never edited. NAME joins a private network as
+  // `ledge-inner`, a name this Mac cannot resolve, so a connection that comes
+  // up went through the jump.
+  step("[jump] a server reachable only through a jump host in the ssh config");
+  run(["docker", "network", "create", JUMP_NET]);
+  run(["docker", "network", "connect", "--alias", "ledge-inner", JUMP_NET, NAME]);
+  run([
+    ...["docker", "run", "-d", "--name", JUMP, "--network", JUMP_NET],
+    ...["-p", `127.0.0.1:${JUMP_PORT}:22`, "-e", `LEDGE_PUBKEY=${pub}`, "-e", "LEDGE_JUMP=1", FIXTURE],
+  ]);
+  const jumpConfig = join(SCRATCH, "ssh_config");
+  await writeFile(
+    jumpConfig,
+    [
+      "Host ledge-probe-jump",
+      "  HostName 127.0.0.1",
+      `  Port ${JUMP_PORT}`,
+      "  User ledge",
+      `  IdentityFile ${keyPath}`,
+      "  IdentitiesOnly yes",
+      `  UserKnownHostsFile ${join(SCRATCH, "known_hosts.jump")}`,
+      "  GlobalKnownHostsFile /dev/null",
+      "  StrictHostKeyChecking accept-new",
+      "  BatchMode yes",
+      "Host ledge-probe-inner",
+      "  HostName ledge-inner",
+      "  User ledge",
+      "  ProxyJump ledge-probe-jump",
+      "",
+    ].join("\n"),
+  );
+  const withConfig = (argv: string[]) => [argv[0]!, "-F", jumpConfig, ...argv.slice(1)];
+  for (let i = 0; i < 40 && !(await answers(JUMP_PORT)); i++) await Bun.sleep(250);
+
+  const keyscanned = run(["ssh-keyscan", "-T", "3", "ledge-probe-inner"], { quiet: true }).out;
+  check("ssh-keyscan cannot scan the alias", pickHostKey(keyscanned) === null);
+
+  const resolvedName = hostKeyNameOf(run(withConfig(resolveArgv("ledge-probe-inner", PORT_UNSET)), { quiet: true }).out);
+  check("ssh -G resolves the alias to its HostName", resolvedName === "ledge-inner", String(resolvedName));
+
+  const scanFile = join(SCRATCH, "known_hosts.scan");
+  let jumpPin: string | null = null;
+  for (let i = 0; i < 20 && !jumpPin; i++) {
+    run(withConfig(scanArgv("ledge-probe-inner", PORT_UNSET, scanFile)), { quiet: true });
+    jumpPin = pickHostKey(await readFile(scanFile, "utf8").catch(() => ""));
+    if (!jumpPin) await Bun.sleep(250);
+  }
+  check("the scan pins a key through the jump", jumpPin !== null, jumpPin?.slice(0, 40) ?? "nothing written");
+  check("under the name ssh -G resolved", jumpPin !== null && pinnedHost(jumpPin) === resolvedName, jumpPin ? pinnedHost(jumpPin) : "");
+  check(
+    "and it is the same key [pair] scanned directly",
+    jumpPin !== null && fingerprintOf(jumpPin) === fingerprintOf(hostKey),
+    jumpPin ? (fingerprintOf(jumpPin) ?? "") : "",
+  );
+
+  if (jumpPin) {
+    const jumpConn: Connection = { ...conn, id: "probe-jump", destination: "ledge-probe-inner", port: PORT_UNSET, hostKey: jumpPin };
+    const jumpKnownHosts = join(SCRATCH, "known_hosts.inner");
+    await writeFile(jumpKnownHosts, knownHostsText([jumpConn]));
+    const jumpArgv = withConfig(sshDial(jumpConn, { knownHosts: jumpKnownHosts, userKnownHosts: "/dev/null", askpass: "" }).argv);
+    console.log(`  ${jumpArgv.join(" ")}`);
+    const viaJump = clientConnection(spawnDuplex(jumpArgv), { push: ears().push, build: BUILD_VERSION, client: "probe-jump" });
+    const jumpHello = await Promise.race([viaJump.ready, Bun.sleep(20_000).then(() => null)]);
+    check("the protocol comes up through the jump", jumpHello !== null);
+    check("on the same daemon [connect] reached", jumpHello?.instance === hello.instance, jumpHello?.instance.slice(0, 8) ?? "");
+    viaJump.close();
+  }
+  run(["docker", "rm", "-f", JUMP], { quiet: true });
+  run(["docker", "network", "disconnect", JUMP_NET, NAME], { quiet: true });
+  run(["docker", "network", "rm", JUMP_NET], { quiet: true });
 
   step("[notes] a workspace and a note, on the other machine");
   const { root } = await client.requests.workspaceCreate({ name: "Probe" });

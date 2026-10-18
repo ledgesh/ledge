@@ -12,6 +12,7 @@
 // added in one from the other.
 import {
   fingerprintOf,
+  hostKeyName as sshHostKeyName,
   hostPart,
   keyTypeOf,
   loadConnections,
@@ -162,10 +163,15 @@ export async function createConnectionStore(deps: {
   inUse?: () => Iterable<string>;
   /** Defaults to the real keychain. */
   secrets?: Secrets;
+  /** The known_hosts name ssh checks a destination's key under. Defaults to
+   * asking ssh (bun/connections.ts hostKeyName). Tests pass their own, so a
+   * result does not depend on the ssh config of whoever runs them. */
+  hostKeyName?: (destination: string, port: number) => Promise<string>;
 } = {}): Promise<ConnectionStore> {
   const now = deps.now ?? (() => Date.now());
   const inUse = deps.inUse ?? (() => []);
   const secrets = deps.secrets ?? REAL_SECRETS;
+  const hostKeyName = deps.hostKeyName ?? sshHostKeyName;
   const loaded = await loadConnections();
   let connections = loaded.connections;
   // Loaded once and written back unchanged. The window list is the authority
@@ -255,7 +261,9 @@ export async function createConnectionStore(deps: {
       // The port is part of the claim: a pin is indexed by `[host]:port` in
       // known_hosts, so moving a connection to a different port on the same
       // machine invalidates it exactly as moving it to another machine does.
-      if (!pinFitsHost(pin, destination, port)) {
+      // The host is the one ssh resolves, which for an alias is not the
+      // destination as typed.
+      if (!pinFitsHost(pin, await hostKeyName(destination.trim(), port))) {
         return { conn: null, error: "That pinned key belongs to another host. Check the new host's fingerprint first." };
       }
       const next: Connection = {
@@ -312,7 +320,7 @@ export async function createConnectionStore(deps: {
     probe: async (destination, port, expect) => {
       const refused = (error: string) => ({ hostKey: "", fingerprint: "", keyType: "", error });
       if (expect && expect.length > 0) {
-        const conflict = pinConflict(connections, destination.trim(), port, expect);
+        const conflict = pinConflict(connections, await hostKeyName(destination.trim(), port), expect);
         if (conflict) return refused(conflict);
       }
       const probed = await probeHostKey(destination.trim(), port);
