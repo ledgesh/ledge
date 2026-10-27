@@ -111,7 +111,7 @@ There is one drawer, spanning the window below the panes, rather than one per pa
 
 Each workspace keeps its own pane tree. ⌘1 through ⌘9 switch the whole arrangement, not just the note ([[Notes and Workspaces]]).
 
-Ledge saves the layout as you change it and restores it at the next launch. The sidebar's open folders are saved with it, so the tree comes back the way you left it too ([[Notes and Workspaces]]).
+Ledge saves the layout as you change it and restores it at the next launch. The sidebar's open folders and its note order are saved with it, so the tree comes back the way you left it too ([[Notes and Workspaces]]).
 
 Two things do not come back:
 

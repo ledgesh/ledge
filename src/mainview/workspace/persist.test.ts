@@ -11,6 +11,7 @@ import { findLeaf, firstLeaf, tabPaths, type LeafNode, type SplitNode } from "./
 import { layoutLabels, restoreLayout, restoredState, reviveWorkspace, serializeLayout, snapshotWorkspace } from "./persist";
 import { DEFAULT_ICON } from "./icons";
 import { expandFolder, expandedIn, resetExpansion } from "../notes/expansion";
+import { resetSort, setSort, sortIn } from "../notes/sorting";
 
 function note(path: string, title: string, mtimeMs = 1): NoteMeta {
   return { path, title, mtimeMs };
@@ -47,7 +48,10 @@ const FILED_BY = { [FOLDER]: [...NOTES, ...FILED], [FOLDER2]: FILED2 };
 
 // serializeLayout reads the live open set (notes/expansion.ts) and restore
 // seeds it, so a test that opened a folder would leak it into the next one.
-afterEach(resetExpansion);
+afterEach(() => {
+  resetExpansion();
+  resetSort();
+});
 
 // A state exercising everything the layout records: two workspaces (each on
 // its own folder), a split, tab order, active tabs, focus, selection. Built
@@ -112,6 +116,24 @@ describe("round trip", () => {
     expect(restoreLayout(text, ROOTS, FILED_BY, {})).not.toBeNull();
     expect([...expandedIn(FOLDER)].sort()).toEqual(["projects", "projects/api"]);
     expect([...expandedIn(FOLDER2)]).toEqual([]);
+  });
+
+  test("the note sort comes back per workspace, and the default writes nothing", () => {
+    const before = richState();
+    expect(serializeLayout(before)).not.toContain('"sort"'); // a layout from before the field, byte for byte
+    setSort(FOLDER2, "modified");
+    const text = serializeLayout(before);
+    resetSort(); // the relaunch
+    expect(restoreLayout(text, ROOTS, NOTES_BY, {})).not.toBeNull();
+    expect(sortIn(FOLDER)).toBe("title");
+    expect(sortIn(FOLDER2)).toBe("modified");
+  });
+
+  test("a sort value the build does not know restores as the default", () => {
+    setSort(FOLDER, "modified");
+    const text = serializeLayout(richState()).replace('"sort":"modified"', '"sort":"size"');
+    restoreLayout(text, ROOTS, NOTES_BY, {});
+    expect(sortIn(FOLDER)).toBe("title");
   });
 
   test("the saved order is the folders themselves, not the order they were opened in", () => {
@@ -447,6 +469,14 @@ describe("snapshot and revive", () => {
     resetExpansion();
     reviveWorkspace(snap, FOLDER, [...NOTES, FILED[1]!]);
     expect([...expandedIn(FOLDER)]).toEqual(["admin"]);
+  });
+
+  test("the note sort comes back with the workspace, under the handle it returned with", () => {
+    setSort(FOLDER, "modified");
+    const snap = snapshotWorkspace(initialState(FOLDER, NOTES).workspaces[0]!);
+    resetSort();
+    reviveWorkspace(snap, "/r-2", []);
+    expect(sortIn("/r-2")).toBe("modified");
   });
 });
 

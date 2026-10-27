@@ -10,6 +10,7 @@ import {
   folderList,
   folderRowId,
   nameOf,
+  noteOrder,
   parentOf,
 } from "./folders";
 import type { NoteMeta } from "../../shared/rpc-schema";
@@ -200,5 +201,65 @@ describe("favoriteRows", () => {
     const inTree = browserRows(notes, new Set(), byTitle);
     expect(favoriteRows(notes, byTitle)[0]!.id).not.toBe(inTree[0]!.id);
     expect(favoriteRowId("/r/a.md")).not.toBe("/r/a.md");
+  });
+});
+
+describe("noteOrder", () => {
+  const at = (path: string, title: string, mtimeMs: number, folder?: string): NoteMeta => ({
+    ...note(path, title, folder),
+    mtimeMs,
+  });
+  const NOTES = [at("/r/02-b.md", "Apple", 1), at("/r/01-c.md", "Cherry", 3), at("/r/03-a.md", "Banana", 2)];
+  const sorted = (order: (a: NoteMeta, b: NoteMeta) => number) => [...NOTES].sort(order).map((n) => n.title);
+
+  test("title order is alphabetical, and last modified puts the newest first", () => {
+    expect(sorted(noteOrder("title", false))).toEqual(["Apple", "Banana", "Cherry"]);
+    expect(sorted(noteOrder("modified", false))).toEqual(["Cherry", "Banana", "Apple"]);
+  });
+
+  test("the manual is in path order whichever sort is chosen", () => {
+    expect(sorted(noteOrder("title", true))).toEqual(["Cherry", "Apple", "Banana"]);
+    expect(sorted(noteOrder("modified", true))).toEqual(["Cherry", "Apple", "Banana"]);
+  });
+
+  test("equal mtimes fall back to title order", () => {
+    const tied = [at("/r/z.md", "Zed", 5), at("/r/a.md", "Ant", 5)];
+    expect(tied.sort(noteOrder("modified", false)).map((n) => n.title)).toEqual(["Ant", "Zed"]);
+  });
+
+  test("a hold keeps the mtimes it took, and a note it has no entry for sorts by its live one", () => {
+    // Apple was saved after the hold was taken, and does not jump to the top.
+    // Durian is new since the hold, so it has only its live mtime to go by.
+    const held = new Map([
+      ["/r/02-b.md", 1],
+      ["/r/01-c.md", 3],
+      ["/r/03-a.md", 2],
+    ]);
+    const live = [at("/r/02-b.md", "Apple", 9), NOTES[1]!, NOTES[2]!, at("/r/04-d.md", "Durian", 8)];
+    expect(live.sort(noteOrder("modified", false, held)).map((n) => n.title)).toEqual([
+      "Durian",
+      "Cherry",
+      "Banana",
+      "Apple",
+    ]);
+  });
+
+  test("under last modified, folders stay alphabetical and the newest note leads its folder", () => {
+    const notes = [
+      at("/r/old.md", "Old", 1),
+      at("/r/new.md", "New", 9),
+      at("/r/b/x.md", "X", 2, "b"),
+      at("/r/a/y.md", "Y", 3, "a"),
+      at("/r/a/z.md", "Z", 4, "a"),
+    ];
+    expect(titles(browserRows(notes, new Set(["a", "b"]), noteOrder("modified", false)))).toEqual([
+      "a/",
+      "  Z",
+      "  Y",
+      "b/",
+      "  X",
+      "New",
+      "Old",
+    ]);
   });
 });

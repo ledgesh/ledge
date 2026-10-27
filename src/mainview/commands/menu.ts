@@ -202,6 +202,10 @@ export const MENU: readonly MenuSection[] = [
       { command: "backlinks.toggle" },
       { command: "outline.toggle" },
       { command: "tags.toggle" },
+      // A two-faces pair, beside the other sidebar and panel controls: the
+      // live face says which order the note list switches to.
+      { command: "note.sortByModified", hideWhenDisabled: true },
+      { command: "note.sortByTitle", hideWhenDisabled: true },
       // No key equivalent. The shell owns Ctrl (interactions.md §2), and a key
       // equivalent fires regardless of focus, which is the window-level Ctrl
       // dispatch that policy forbids. The editor's keymap routes ⌃` to this

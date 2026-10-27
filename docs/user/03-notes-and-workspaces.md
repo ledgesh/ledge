@@ -119,6 +119,16 @@ Marking a note writes `favorite: true` into its frontmatter ([[Frontmatter and E
 
 A locked note can be favorited without unlocking it, because the marker sits in the part of the file that stays readable ([[Note Locking]]).
 
+## Sorting notes
+
+The note list is sorted by title. To put the most recently changed notes at the top instead, click the sort button at the right end of the Notes header, or choose "Sort Notes by Last Modified" from the View menu or the command palette. The same button, or "Sort Notes by Title", switches back.
+
+Folders stay in alphabetical order under either sort, and the notes in each folder are sorted within it. The Favorites section uses the same order.
+
+While the pointer is over the list, the order holds still, so a note saving in the background cannot move the row you are about to click. The list catches up when the pointer leaves it.
+
+The order is per workspace and part of the layout, so it comes back at the next launch ([[Panes and Tabs]]). The built-in documentation always keeps its reading order.
+
 ## Which files become notes
 
 Every `.md` file in the workspace folder and its subfolders is a note, with two kinds of exception.

@@ -26,9 +26,11 @@
 // attributes (commands/target.ts) and the window dispatcher reads it back, so
 // a right-click and a keystroke run the same command against the same note.
 import {
+  ArrowDownAZ,
   CalendarDays,
   ChevronDown,
   ChevronRight,
+  Clock,
   FileText,
   Folder,
   FolderOpen,
@@ -52,6 +54,7 @@ import { useCommands, useCommandTitle } from "@/commands/CommandProvider";
 import { CommandMenuItem } from "@/commands/CommandMenuItem";
 import { configureUi } from "@/commands/glue";
 import { tooltip } from "@/commands/format";
+import { titleOf } from "@/commands/keys";
 import { targetAttrs } from "@/commands/target";
 import { workspaceKind } from "@/workspace/channel";
 import { docIdsForPath, notesOf, openNotePaths, trashOf, useWorkspace } from "@/workspace/store";
@@ -75,8 +78,9 @@ import {
   restoreNote,
 } from "./actions";
 import { createNote } from "./channel";
-import { browserRows, favoriteRows, folderList, folderOf, folderRowId, type BrowserRow } from "./folders";
+import { browserRows, favoriteRows, folderList, folderOf, folderRowId, noteOrder, type BrowserRow } from "./folders";
 import { expandFolder, toggleFolder, useExpanded } from "./expansion";
+import { useNoteSort, type NoteSort } from "./sorting";
 import { NOTE_DRAG } from "./drag";
 import { requestTitleCaret } from "@/workspace/editorPool";
 import type { NoteMeta, TrashMeta } from "./channel";
@@ -146,21 +150,21 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
   // mutating affordances hide here, and Bun refuses them regardless
   // (bun/workspaces.ts assertWritableRoot).
   const readOnly = workspaceKind(selected.folder) === "docs";
-  // The selected workspace's notes only. The sort below is by title, not the
-  // mtime order the store holds them in: an autosave rewrites mtime on every
-  // keystroke burst, so an mtime-sorted list would reorder under the pointer
-  // while typing. The docs workspace sorts by path, whose numbered filenames
-  // (bun/docsContent.ts) keep the manual in reading order, not alphabetical.
+  // The selected workspace's notes only, sorted below by the workspace's
+  // chosen order (notes/folders.ts noteOrder).
   const notes = notesOf(state, selected.folder);
   // Which folders are open, from the module the commands also write
   // (notes/expansion.ts): Move to Folder… and New Note in Folder both have to
   // reveal where the note landed, so the state cannot live in this component.
   const expanded = useExpanded(selected.folder);
-  const order = useMemo(
-    () => (a: NoteMeta, b: NoteMeta) =>
-      readOnly ? a.path.localeCompare(b.path) : a.title.localeCompare(b.title),
-    [readOnly],
-  );
+  // Title or last modified, from the module the sort commands write
+  // (notes/sorting.ts).
+  const sort = useNoteSort(selected.folder);
+  // The mtimes the list showed when the pointer entered it, held until it
+  // leaves, so a save cannot move the row about to be clicked. Only the
+  // last-modified sort reads mtimes, so only it takes a hold.
+  const [held, setHeld] = useState<ReadonlyMap<string, number> | null>(null);
+  const order = useMemo(() => noteOrder(sort, readOnly, held ?? undefined), [sort, readOnly, held]);
   // The tree, flattened. browserRows applies the sort within each folder.
   const rows = useMemo(() => browserRows(notes, expanded, order), [notes, expanded, order]);
   // The favorites, above the tree. Their rows are the tree's rows over again,
@@ -414,13 +418,15 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
           Notes
         </span>
         <span className="text-[10px] text-muted-foreground/70">{notes.length || ""}</span>
-        {readOnly && (
+        {readOnly ? (
           <span
             className="ml-auto rounded border px-1 text-[10px] leading-4 text-muted-foreground/80"
             title="The built-in documentation cannot be edited or deleted"
           >
             read-only
           </span>
+        ) : (
+          <SortButton sort={sort} />
         )}
       </div>
 
@@ -438,6 +444,10 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
           e.preventDefault();
           setAddMenu({ x: e.clientX, y: e.clientY });
         }}
+        onPointerEnter={() => {
+          if (sort === "modified") setHeld(new Map(notes.map((n) => [n.path, n.mtimeMs])));
+        }}
+        onPointerLeave={() => setHeld(null)}
       >
         {/* The favorites, in a section of their own above the tree. It draws
             nothing while nothing is marked, the Trash section's stance: a
@@ -1107,6 +1117,24 @@ function NoteRow({
       )}
       {open && !current && <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />}
     </div>
+  );
+}
+
+// The header's sort switch, the in-situ button for the two sort commands
+// (interactions.md §1). The glyph shows the order the list is in, and a click
+// runs the other face, which the tooltip names.
+function SortButton({ sort }: { sort: NoteSort }) {
+  const { exec } = useCommands();
+  const next = sort === "title" ? "note.sortByModified" : "note.sortByTitle";
+  return (
+    <button
+      className="-my-0.5 ml-auto self-center rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground touch:grid touch:size-[44px] touch:place-items-center"
+      title={tooltip(next)}
+      aria-label={titleOf(next)}
+      onClick={() => exec(next)}
+    >
+      {sort === "title" ? <ArrowDownAZ className="size-3.5" /> : <Clock className="size-3.5" />}
+    </button>
   );
 }
 

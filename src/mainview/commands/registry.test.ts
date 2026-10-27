@@ -65,6 +65,8 @@ function stubDeps(
     folderExpanded: () => false,
     toggleFolder: (root, folder) => calls.push(`toggleFolder:${root}:${folder}`),
     expandFolder: (root, folder) => calls.push(`expandFolder:${root}:${folder}`),
+    noteSort: () => "title",
+    setNoteSort: (root, sort) => calls.push(`setNoteSort:${root}:${sort}`),
     createNote: async (folder, text) => {
       calls.push(`createNote:${folder}:${text.split("\n", 4).join("|")}`);
       return { path: `${folder}/untitled-template.md`, title: "Untitled Template", mtimeMs: 0 };
@@ -1081,6 +1083,23 @@ describe("registry", () => {
       configureShell({ multiWindow: true });
     }
   }
+
+  test("the sort verbs are two faces: only the other order is offered, and none in the manual", () => {
+    const live = (deps: RegistryDeps, ctx: CommandCtx) =>
+      ["note.sortByModified", "note.sortByTitle"].filter((id) => find(buildCommands(deps), id).when!(ctx));
+    const ctx = makeCtx(initialState(FOLDER, []));
+    expect(live(stubDeps([]), ctx)).toEqual(["note.sortByModified"]);
+    expect(live({ ...stubDeps([]), noteSort: () => "modified" }, ctx)).toEqual(["note.sortByTitle"]);
+    // The manual keeps its reading order (notes/folders.ts noteOrder).
+    expect(live(docsDeps(), makeCtx(docsSelectedState()))).toEqual([]);
+  });
+
+  test("a sort verb sets the order of the selected workspace only", () => {
+    const calls: string[] = [];
+    const ctx = makeCtx(apply(initialState(FOLDER, []), secondWs));
+    find(buildCommands(stubDeps(calls)), "note.sortByModified").run(ctx);
+    expect(calls).toEqual(["setNoteSort:/ws/two:modified"]);
+  });
 
   test("docs.toggle shows only when a docs root exists, and asks for the manual's window", () => {
     // The base stub reports no docs root, so the command is hidden (a harness

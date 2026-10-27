@@ -33,8 +33,8 @@ export interface AppState {
   // Every known note, keyed by workspace folder: a fact about the folder, and
   // the key persist.ts saves. The note browser and quick-open palette read
   // the selected workspace's list, in listNotes order (newest first), which
-  // picks the note to open at boot. The browser sorts a copy by title, since
-  // autosave rewrites mtime on each keystroke burst and rows would shuffle.
+  // picks the note to open at boot. The browser sorts a copy in the
+  // workspace's chosen order (notes/folders.ts noteOrder).
   notes: Record<string, NoteMeta[]>;
   // Each workspace folder's deleted notes, still in its .ledge-trash, newest
   // deletion first. Held here rather than fetched when the Trash section

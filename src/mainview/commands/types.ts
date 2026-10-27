@@ -8,6 +8,7 @@ import type { Workspace } from "@/workspace/tree";
 import type { NoteMeta, TrashedWorkspace, TrashMeta, VaultState } from "../../shared/rpc-schema";
 import type { UndoOffer } from "@/workspace/actions";
 import type { FocusDomain } from "./keymap";
+import type { NoteSort } from "@/notes/sorting";
 
 // What to run once the vault dialog succeeds (unlock or first-time setup):
 // the command that was waiting on the passphrase. App.tsx runs the follow-up.
@@ -301,6 +302,10 @@ export interface RegistryDeps {
   // Open a folder and its ancestors, so a note the command just put there is
   // on screen where it landed rather than behind a closed disclosure.
   expandFolder(root: string, folder: string): void;
+  // The browser's note order in one workspace, and the switch for it
+  // (notes/sorting.ts). A dep for folderExpanded's reason.
+  noteSort(root: string): NoteSort;
+  setNoteSort(root: string, sort: NoteSort): void;
   // The daily.workspace setting resolved to a registered root at boot, null
   // when unset or stale, mirrored from Bun with the workspace registry. The
   // Edit and New Daily Template faces read it so they act in the workspace ⌘J

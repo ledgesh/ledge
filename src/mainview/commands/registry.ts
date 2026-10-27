@@ -7,6 +7,7 @@
 // ctx.ui (see types.ts UiHooks), editor/RPC calls through RegistryDeps, so
 // this module stays importable by pure unit tests.
 import {
+  ArrowDownAZ,
   ArrowLeft,
   ArrowRight,
   Bold,
@@ -17,6 +18,7 @@ import {
   CalendarDays,
   ClipboardPaste,
   ClipboardType,
+  Clock,
   Code,
   Columns2,
   Command as CommandIcon,
@@ -1198,6 +1200,20 @@ export function buildCommands(deps: RegistryDeps): Command[] {
         if (ctx.target?.kind === "folder") deps.toggleFolder(ctx.selected.folder, ctx.target.folder);
       },
     },
+
+    // The browser's note order (notes/sorting.ts), a two-faces pair: exactly
+    // one is live, and neither in the docs workspace, which keeps the
+    // manual's reading order.
+    cmd("note.sortByModified", {
+      icon: Clock,
+      when: (ctx) => !docsSelected(ctx) && deps.noteSort(ctx.selected.folder) === "title",
+      run: (ctx) => deps.setNoteSort(ctx.selected.folder, "modified"),
+    }),
+    cmd("note.sortByTitle", {
+      icon: ArrowDownAZ,
+      when: (ctx) => !docsSelected(ctx) && deps.noteSort(ctx.selected.folder) === "modified",
+      run: (ctx) => deps.setNoteSort(ctx.selected.folder, "title"),
+    }),
 
     // --- trash ---------------------------------------------------------------
     cmd("note.restore", {

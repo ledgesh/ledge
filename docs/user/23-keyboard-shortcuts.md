@@ -78,6 +78,8 @@ The id is what a `keys` entry names. A command with no default has no shortcut u
 | Move to Folder… | `note.move` |  |
 | Move to Workspace… | `note.moveToWorkspace` |  |
 | New Folder… | `folder.new` |  |
+| Sort Notes by Last Modified | `note.sortByModified` |  |
+| Sort Notes by Title | `note.sortByTitle` |  |
 | Empty Trash… | `trash.empty` |  |
 
 ### Editing

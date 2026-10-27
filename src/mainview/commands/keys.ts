@@ -272,6 +272,12 @@ export const COMMANDS = {
   "note.newInFolder": { title: "New Note in Folder" },
   "folder.new": { title: "New Folder…" },
   "folder.toggle": { title: "Expand", listKeys: ["Enter"] },
+  // The browser's note order, per workspace (notes/sorting.ts). Two faces,
+  // one live at a time, so the visible title says which order you get. No
+  // chord: changing the order is a once-in-a-while act, and the header's sort
+  // button is a click away.
+  "note.sortByModified": { title: "Sort Notes by Last Modified" },
+  "note.sortByTitle": { title: "Sort Notes by Title" },
   // The one folder verb that earns a bare key. `/` is the search key
   // list-shaped programs already spell it with. The folder row kind has only
   // Enter spent on it, and narrowing a search is a frequent folder act. The

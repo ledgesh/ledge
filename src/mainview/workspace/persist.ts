@@ -17,11 +17,12 @@
 // - tab titles. A note can be retitled from a shell while Ledge is closed, so
 //   the boot noteList is authoritative and a saved title could only be stale.
 //
-// One thing this module saves does not come from AppState: which folders the
-// note browser has open. That set lives in notes/expansion.ts, a mirrored
-// module rather than reducer state (architecture.md §5). This module reads it
-// on the way to the file and seeds it on the way back. Which folders are open
-// is arrangement, per workspace, like the pane tree it sits beside.
+// Two things this module saves do not come from AppState: which folders the
+// note browser has open, and the order it sorts notes in. They live in
+// notes/expansion.ts and notes/sorting.ts, mirrored modules rather than
+// reducer state (architecture.md §5). This module reads them on the way to the
+// file and seeds them on the way back. Both are arrangement, per workspace,
+// like the pane tree they sit beside.
 import {
   firstLeaf,
   makeNoteTab,
@@ -39,6 +40,7 @@ import type { AppState } from "./store";
 import { folderName, initialState, syncWithRegistry } from "./store";
 import type { NoteMeta, TrashMeta, WorkspaceRootInfo } from "../../shared/rpc-schema";
 import { expandedIn, seedExpansion } from "../notes/expansion";
+import { seedSort, sortIn } from "../notes/sorting";
 import { folderList } from "../notes/folders";
 
 // The persisted shape, version 2. Version 1 predates per-workspace folders and
@@ -51,7 +53,8 @@ import { folderList } from "../notes/folders";
 // restore reads `expanded` defensively, since it arrived after the shape was
 // named. A file written before it existed is a good version-2 file whose
 // folders are all closed, and the build that wrote it opened with every folder
-// closed too. Nothing to migrate, so no new version.
+// closed too. Nothing to migrate, so no new version. `sort` is read the same
+// way, and is absent for the default title order.
 interface PersistedLeaf {
   kind: "leaf";
   tabs: string[];
@@ -75,6 +78,7 @@ interface PersistedWorkspace {
   symbol: string;
   folder: string;
   expanded: string[];
+  sort?: "modified";
   root: PersistedNode;
 }
 interface PersistedLayout {
@@ -153,6 +157,7 @@ export function serializeLayout(state: AppState): string {
         // folder open as opening a alone. An insertion-ordered list would make
         // that a byte change, and so a write of a layout that did not change.
         expanded: [...expandedIn(ws.folder)].sort(),
+        ...sortField(ws.folder),
         root: persistNode(ws.root, ws.focusedPaneId),
       })),
       // The unmounted-volume workspaces follow the live ones, untouched, so
@@ -174,8 +179,14 @@ export function snapshotWorkspace(ws: Workspace): WorkspaceSnapshot {
     symbol: ws.symbol,
     folder: ws.folder,
     expanded: [...expandedIn(ws.folder)].sort(),
+    ...sortField(ws.folder),
     root: persistNode(ws.root, ws.focusedPaneId),
   };
+}
+
+// The workspace's note order as the file holds it: nothing for the default.
+function sortField(folder: string): Pick<PersistedWorkspace, "sort"> {
+  return sortIn(folder) === "modified" ? { sort: "modified" } : {};
 }
 
 // --- restore ----------------------------------------------------------------
@@ -293,6 +304,7 @@ function keepDormant(raw: Record<string, unknown>, folder: string): void {
     symbol: typeof raw.symbol === "string" ? (raw.symbol as string) : DEFAULT_ICON,
     folder,
     expanded: stringList(raw.expanded),
+    ...(raw.sort === "modified" ? { sort: "modified" as const } : {}),
     root: raw.root as PersistedNode,
   });
 }
@@ -366,6 +378,7 @@ export function restoreLayout(
       raw.folder,
       stringList(raw.expanded).filter((f) => live.has(f)),
     );
+    seedSort(raw.folder, raw.sort);
   }
   if (workspaces.length === 0) return null;
 
@@ -389,6 +402,7 @@ export function reviveWorkspace(snap: WorkspaceSnapshot, folder: string, notes: 
   if (!ws) return null;
   const live = new Set(folderList(notes));
   seedExpansion(folder, snap.expanded.filter((f) => live.has(f)));
+  seedSort(folder, snap.sort);
   return ws;
 }
 

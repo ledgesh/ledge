@@ -55,6 +55,8 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     folderExpanded: () => false,
     toggleFolder: noop,
     expandFolder: noop,
+    noteSort: () => "title",
+    setNoteSort: noop,
     dailyRoot: () => null,
     vaultState: () => "unlocked",
     lockVaultNow: noop,

@@ -33,6 +33,7 @@ import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
 import { refreshWikilinks } from "@/editor/livePreview";
 import { refreshFolder, syncWorkspaces } from "@/workspace/actions";
 import { subscribeExpansion } from "@/notes/expansion";
+import { subscribeSort } from "@/notes/sorting";
 import { docsFolder, onWorkspacesChanged, workspaceKind } from "@/workspace/channel";
 import { allDocIds, docsLanding, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
@@ -640,11 +641,17 @@ function Shell() {
   // Keyed on those two state fields, not the whole state, so a notes-folder
   // refresh does not rewrite an unchanged layout. serializeLayout reads only
   // those two fields, so the closure below cannot be stale. Which folders are
-  // open is saved with them, by subscription rather than by dep, since it
-  // lives outside the reducer (notes/expansion.ts, architecture.md §6).
+  // open and how the notes are sorted are saved with them, by subscription
+  // rather than by dep, since both live outside the reducer
+  // (notes/expansion.ts, notes/sorting.ts, architecture.md §5).
   useEffect(() => {
     scheduleLayoutSave(state);
-    return subscribeExpansion(() => scheduleLayoutSave(state));
+    const unExpansion = subscribeExpansion(() => scheduleLayoutSave(state));
+    const unSort = subscribeSort(() => scheduleLayoutSave(state));
+    return () => {
+      unExpansion();
+      unSort();
+    };
   }, [state.workspaces, state.selectedId]);
 
   // Notes autosave on a short debounce, so the exposure is quitting (or

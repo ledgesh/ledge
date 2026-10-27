@@ -13,6 +13,7 @@
 // collapsed folder stops emitting its subtree.
 import { folderContains } from "../../shared/folders";
 import type { NoteMeta } from "../../shared/rpc-schema";
+import type { NoteSort } from "./sorting";
 
 /** A note's folder as the browser reads it: "" at the top level, never
  * undefined, so callers stay branch-free (notesOf's total-selector rule). */
@@ -59,6 +60,29 @@ export function countIn(notes: readonly NoteMeta[], folder: string): number {
   return notes.filter((n) => folderContains(folder, folderOf(n))).length;
 }
 
+/**
+ * The browser's note order. The docs workspace is always in path order, whose
+ * numbered filenames (bun/docsContent.ts) keep the manual in reading order.
+ * Elsewhere `sort` picks title order or newest first (notes/sorting.ts).
+ *
+ * `held` is the mtimes the list showed when the pointer entered it
+ * (NoteBrowser.tsx). An autosave or an external write moves a note's mtime,
+ * and without the hold the row under the pointer could change just before a
+ * click. A note the hold has no entry for (one created since) sorts by its
+ * live mtime. Equal mtimes fall back to title order, so the order is total.
+ */
+export function noteOrder(
+  sort: NoteSort,
+  docs: boolean,
+  held?: ReadonlyMap<string, number>,
+): (a: NoteMeta, b: NoteMeta) => number {
+  if (docs) return (a, b) => a.path.localeCompare(b.path);
+  const byTitle = (a: NoteMeta, b: NoteMeta) => a.title.localeCompare(b.title);
+  if (sort === "title") return byTitle;
+  const mtime = (n: NoteMeta) => held?.get(n.path) ?? n.mtimeMs;
+  return (a, b) => mtime(b) - mtime(a) || byTitle(a, b);
+}
+
 export type BrowserRow =
   | { kind: "folder"; id: string; folder: string; name: string; depth: number; count: number; expanded: boolean }
   | { kind: "note"; id: string; note: NoteMeta; depth: number };
@@ -68,9 +92,9 @@ export type BrowserRow =
  * (alphabetically), then that level's own notes in `order`. A folder not in
  * `expanded` emits its row and stops, hiding its notes and subfolders.
  *
- * `order` is the browser's chosen note sort (by title, or by path in the
- * manual). It applies within a folder, not across the whole list: a global
- * sort would move a note's row into another folder's group.
+ * `order` is the browser's note sort (noteOrder). It applies within a folder,
+ * not across the whole list: a global sort would move a note's row into
+ * another folder's group. Folders stay alphabetical under either sort.
  *
  * A folder row's id is prefixed so it cannot collide with a note's, whose id
  * is its absolute path. The id is a row's identity in the list: two rows

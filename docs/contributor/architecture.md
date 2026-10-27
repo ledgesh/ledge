@@ -601,7 +601,7 @@ exactly like a note — from one special root that can never be written:
 - **The corpus is compiled into the binary** (`bun/docsContent.ts`, text
   imports of `docs/user/*.md`). Manifest filenames carry a numeric prefix
   (`01-getting-started.md`): the note browser sorts the docs workspace by
-  path instead of title (`NoteBrowser.tsx`), so the numbering is the manual's
+  path instead of title or mtime (`notes/folders.ts` noteOrder), so the numbering is the manual's
   reading order — no order field travels the RPC, and titles stay clean.
   Pages are authored one line per paragraph (no hard 80-column wraps: the
   editor soft-wraps, and a hard wrap renders as a broken line) and synced

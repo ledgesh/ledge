@@ -30,6 +30,7 @@ import { flushAllNow, saveNow } from "@/notes/store";
 import { favoriteNoteNow } from "@/notes/actions";
 import { lockNoteAndRefresh, lockVault, removeLockAndRefresh, vaultState } from "@/vault/channel";
 import { expandFolder, isExpanded, toggleFolder } from "@/notes/expansion";
+import { setSort, sortIn } from "@/notes/sorting";
 import {
   createNote as rpcCreateNote,
   createNoteFromTemplate,
@@ -109,6 +110,8 @@ export const registryDeps: RegistryDeps = {
   folderExpanded: isExpanded,
   toggleFolder,
   expandFolder,
+  noteSort: sortIn,
+  setNoteSort: setSort,
   // The daily.workspace setting as resolved at boot (workspace/channel.ts).
   // Used only to label the Edit/New Daily Template faces: Bun re-resolves it
   // on every ⌘J.
