@@ -34,6 +34,7 @@ const params = (p: Partial<NoteParams>): NoteParams => ({
   envFile: null,
   env: {},
   favorite: false,
+  archived: false,
   locked: null,
   hosts: [],
   sudo: null,

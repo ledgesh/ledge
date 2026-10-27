@@ -54,6 +54,12 @@ describe("filterNotes", () => {
     expect(filterNotes("", notes).map((n) => n.title)).toEqual(["alpha", "mid", "zeta"]);
   });
 
+  test("every archived match ranks below every unarchived one, whatever the match quality", () => {
+    const notes = [{ ...note("deploy"), archived: true as const }, note("old deployment runbook")];
+    expect(filterNotes("deploy", notes).map((n) => n.title)).toEqual(["old deployment runbook", "deploy"]);
+    expect(filterNotes("", notes).map((n) => n.title)).toEqual(["old deployment runbook", "deploy"]);
+  });
+
   test("drops non-matches", () => {
     const notes = [note("shipping-notes"), note("groceries")];
     expect(filterNotes("ship", notes).map((n) => n.title)).toEqual(["shipping-notes"]);

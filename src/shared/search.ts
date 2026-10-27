@@ -75,6 +75,13 @@ export function searchText(query: string, text: string, limit = MAX_HITS_PER_NOT
 }
 
 /** The fields a store supplies for a note before collectHits reads its text. */
+// The same metas with the archived ones moved to the end, each half still
+// newest first. The body scans walk in this order, so a capped scan spends its
+// budget on live notes and archived hits come last (architecture.md §3).
+export function liveFirst<M extends { archived?: true }>(metas: readonly M[]): M[] {
+  return [...metas.filter((m) => !m.archived), ...metas.filter((m) => m.archived)];
+}
+
 export interface NoteRef {
   path: string;
   title: string;

@@ -127,7 +127,9 @@ export async function findDailyTemplate(root: string): Promise<{ path: string; t
   // A locked claimant is hand-crafted: the commands enforce the marker
   // exclusivity. It cannot seed a daily note, so it does not claim the role,
   // neither winning nor counting toward the warning below.
-  const marked = (await listNotes(r)).filter((m) => m.template === "daily" && !m.locked);
+  // An archived claimant is out of the way by the user's own choice, so it
+  // does not claim the role either (interactions.md §3).
+  const marked = (await listNotes(r)).filter((m) => m.template === "daily" && !m.locked && !m.archived);
   if (marked.length === 0) return null;
   if (marked.length > 1) {
     console.warn(

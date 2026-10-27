@@ -161,7 +161,14 @@ export function hitPath(p: string, cwd: string, home: string = homedir()): strin
 
 /** ls rows: title column padded, date, then the variable-width path last. */
 export function formatNoteList(
-  notes: ReadonlyArray<{ title: string; path: string; modified: string; template?: true | "daily"; locked?: boolean }>,
+  notes: ReadonlyArray<{
+    title: string;
+    path: string;
+    modified: string;
+    template?: true | "daily";
+    locked?: boolean;
+    archived?: boolean;
+  }>,
   home: string = homedir(),
 ): string[] {
   const rows = notes.map((n) => ({
@@ -173,7 +180,11 @@ export function formatNoteList(
     // §9). A trailing tag rather than a column, since most rows have nothing
     // to say. `(locked)` uses the same slot, so a row carries one marker: the
     // shell says up front which rows `cat` and `search` will not serve.
-    tag: n.template === "daily" ? "  (daily template)" : n.template ? "  (template)" : n.locked ? "  (locked)" : "",
+    // `(archived)` is a state rather than a kind, so it follows whichever of
+    // those the row has.
+    tag:
+      (n.template === "daily" ? "  (daily template)" : n.template ? "  (template)" : n.locked ? "  (locked)" : "") +
+      (n.archived ? "  (archived)" : ""),
   }));
   const width = rows.reduce((w, r) => Math.max(w, r.title.length), 0);
   return rows.map((r) => `${r.title.padEnd(width)}  ${r.date}  ${r.path}${r.tag}`);

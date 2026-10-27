@@ -67,6 +67,7 @@ import { RenameField } from "@/components/RenameField";
 import type { FolderRequest } from "@/commands/types";
 import type { UndoOffer } from "@/workspace/actions";
 import { agoLabel } from "./ago";
+import { FolderLabel } from "./FolderLabel";
 import {
   deleteFolderTo,
   deleteNote,
@@ -78,9 +79,19 @@ import {
   restoreNote,
 } from "./actions";
 import { createNote } from "./channel";
-import { browserRows, favoriteRows, folderList, folderOf, folderRowId, noteOrder, type BrowserRow } from "./folders";
+import {
+  archivedRows,
+  browserRows,
+  favoriteRows,
+  folderList,
+  folderOf,
+  folderRowId,
+  noteOrder,
+  type BrowserRow,
+} from "./folders";
 import { expandFolder, toggleFolder, useExpanded } from "./expansion";
 import { useNoteSort, type NoteSort } from "./sorting";
+import { setArchivedOpen, useArchivedOpen } from "./archivedSection";
 import { NOTE_DRAG } from "./drag";
 import { requestTitleCaret } from "@/workspace/editorPool";
 import type { NoteMeta, TrashMeta } from "./channel";
@@ -171,6 +182,11 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
   // with ids of their own, so ↑/↓ walk the section and the tree as one list
   // and every row verb reaches a favorite twice over.
   const favorites = useMemo(() => favoriteRows(notes, order), [notes, order]);
+  // The archived notes, below the tree in a section of their own
+  // (interactions.md §3). The tree and its counts leave them out.
+  const archived = useMemo(() => archivedRows(notes, order), [notes, order]);
+  const archivedOpen = useArchivedOpen(selected.folder);
+  const archivedNav = useListNav();
   // Every folder of this workspace, for the chooser's list.
   const folders = useMemo(() => folderList(notes), [notes]);
   const open = useMemo(() => openNotePaths(state), [state]);
@@ -417,7 +433,7 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Notes
         </span>
-        <span className="text-[10px] text-muted-foreground/70">{notes.length || ""}</span>
+        <span className="text-[10px] text-muted-foreground/70">{notes.length - archived.length || ""}</span>
         {readOnly ? (
           <span
             className="ml-auto rounded border px-1 text-[10px] leading-4 text-muted-foreground/80"
@@ -475,7 +491,7 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
             <div className="mx-2 my-1 border-t" />
           </>
         )}
-        {rows.length === 0 ? (
+        {rows.length === 0 && archived.length === 0 ? (
           <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
             No notes yet. A new note is saved to this workspace's folder as soon as you type in it.
           </p>
@@ -516,6 +532,53 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
           )
         )}
       </div>
+
+      {/* The archived notes. Its own list for the Trash section's reason,
+          below the tree and above the Trash, and closed until opened: these
+          are the notes put out of the way. Its rows are note rows, so every
+          note verb reaches them, and their menu is the tree's. Draws nothing
+          while no note is archived. */}
+      {archived.length > 0 && (
+        <div className="border-t">
+          <button
+            className="flex w-full min-w-0 items-center gap-1 px-3 py-1.5 text-left touch:min-h-[44px]"
+            data-testid="archived-heading"
+            onClick={() => setArchivedOpen(selected.folder, !archivedOpen)}
+            title="Archived notes: out of the tree, still searchable and linkable"
+          >
+            <ChevronRight
+              className={cn("size-3 shrink-0 text-muted-foreground transition-transform", archivedOpen && "rotate-90")}
+            />
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Archived
+            </span>
+            <span className="text-[10px] text-muted-foreground/70">{archived.length}</span>
+          </button>
+          {archivedOpen && (
+            <div
+              {...archivedNav.containerProps}
+              data-testid="archived-list"
+              className="max-h-48 overflow-y-auto px-1.5 pb-1.5"
+            >
+              {archived.map((row, i) => (
+                <NoteRow
+                  key={row.id}
+                  note={row.note}
+                  depth={0}
+                  current={row.note.path === current}
+                  open={open.has(row.note.path)}
+                  unlocked={vault === "unlocked"}
+                  draggable={false}
+                  showFolder
+                  rowProps={archivedNav.rowProps(row.id, i)}
+                  onOpen={() => exec("note.open", { kind: "note", path: row.note.path })}
+                  onContextMenu={(x, y) => setMenu({ kind: "note", path: row.note.path, x, y })}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <TrashSection onRestore={restore} onError={setError} />
 
@@ -669,6 +732,11 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
             target={{ kind: "note", path: menu.path }}
             onClose={() => setMenu(null)}
           />
+          <CommandMenuItem
+            id="note.archive"
+            target={{ kind: "note", path: menu.path }}
+            onClose={() => setMenu(null)}
+          />
           {/* Filing, above the lock faces and well clear of Delete. Move and
               Delete both relocate the note's file, but the destructive one
               keeps the bottom of the menu to itself (interactions.md §4). */}
@@ -729,11 +797,7 @@ export function NoteBrowser({ stacked = false }: { stacked?: boolean } = {}) {
       {deletingFolder !== null && (
         <ConfirmDialog
           title={`Delete “${deletingFolder}”?`}
-          body={
-            notesUnder(notes, deletingFolder).length === 1
-              ? "Its 1 note moves to the Trash, where Undo and Restore bring it back."
-              : `Its ${notesUnder(notes, deletingFolder).length} notes move to the Trash, including everything in the folders inside it. Undo and Restore bring them back.`
-          }
+          body={folderDeleteBody(notesUnder(notes, deletingFolder))}
           confirmLabel="Delete Folder"
           onConfirm={() => {
             const folder = deletingFolder;
@@ -1002,6 +1066,19 @@ const ROW_CLASS =
 // be recognised.
 const INDENT = 12;
 
+// The Delete Folder dialog's body. The count includes the folder's archived
+// notes and says how many those are, since the tree does not show them and
+// they go with the folder (interactions.md §4).
+export function folderDeleteBody(under: readonly NoteMeta[]): string {
+  const n = under.length;
+  const archived = under.filter((m) => m.archived).length;
+  const count = n === 1 ? "Its 1 note" : `Its ${n} notes`;
+  const which = archived === 0 ? "" : archived === n ? (n === 1 ? ", archived," : ", all archived,") : `, ${archived} of them archived,`;
+  return n === 1
+    ? `${count}${which} moves to the Trash, where Undo and Restore bring it back.`
+    : `${count}${which} move to the Trash, including everything in the folders inside it. Undo and Restore bring them back.`;
+}
+
 // One note's row. `current` is the note in the focused pane's active tab;
 // `open` is any note with a tab somewhere. A click runs note.open either way,
 // and the openNote action it dispatches focuses the existing tab rather than
@@ -1013,6 +1090,7 @@ function NoteRow({
   open,
   unlocked,
   draggable,
+  showFolder = false,
   rowProps,
   onOpen,
   onFavorite,
@@ -1027,6 +1105,9 @@ function NoteRow({
   // Whether the row can be dragged. Off in the read-only manual, where there
   // is nowhere to drop a note.
   draggable: boolean;
+  // Name the note's folder after its title, as a flat list must when two notes
+  // in different folders share a title. The Archived section's rows set it.
+  showFolder?: boolean;
   rowProps: ReturnType<ReturnType<typeof useListNav>["rowProps"]>;
   onOpen: () => void;
   // Toggle the favorite marker. Undefined in the manual, whose pages take no
@@ -1086,6 +1167,7 @@ function NoteRow({
       <div className={cn("min-w-0 flex-1 truncate text-sm leading-tight", !open && "text-muted-foreground")}>
         {note.title}
       </div>
+      {showFolder && <FolderLabel folder={note.folder} className="max-w-[40%]" />}
       {/* The star, the trash row's hover-verb pattern (interactions.md §3). A
           marked note wears a filled one at rest, since that is what the
           section above is drawn from; an unmarked one shows a hollow one on

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { frontmatterEnd, parseFrontmatter, setFavoriteLine } from "./frontmatter";
+import { frontmatterEnd, parseFrontmatter, setArchivedLine, setFavoriteLine } from "./frontmatter";
 
 const fm = (inner: string, body = "# Title\n") => `---\n${inner}---\n${body}`;
 
@@ -48,15 +48,15 @@ describe("frontmatterEnd", () => {
 describe("parseFrontmatter", () => {
   test("a note with no frontmatter yields empty params and no problems", () => {
     const { params, problems, end } = parseFrontmatter("# Title\nbody");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, locked: null });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, archived: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBe(0);
   });
 
-  test("all eleven keys parse together", () => {
+  test("all twelve keys parse together", () => {
     const { params, problems } = parseFrontmatter(
       fm(
-        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\nsudo: root\ntags: work, ledge\ntemplate: true\nconfirm: true\nfavorite: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
+        "cwd: ~/Projects/ledge\nprofile: petstore\nenvFile: ./.env\nhost: web1 deploy@prod\nsudo: root\ntags: work, ledge\ntemplate: true\nconfirm: true\nfavorite: true\narchived: true\nlocked: v1.aa.bb.cc\nenv:\n  NODE_ENV: development\n  PORT: 3000\n",
       ),
     );
     expect(params).toEqual({
@@ -70,6 +70,7 @@ describe("parseFrontmatter", () => {
       template: true,
       confirm: true,
       favorite: true,
+      archived: true,
       locked: "v1.aa.bb.cc",
     });
     expect(problems).toEqual([]);
@@ -121,6 +122,14 @@ describe("parseFrontmatter", () => {
     // the note's author can tell which blocks pause.
     expect(params.confirm).toBe(false);
     expect(problems).toEqual([{ line: 2, message: `"confirm" must be true or false: "always"` }]);
+  });
+
+  test("archived takes exactly true or false; anything else costs the line", () => {
+    expect(parseFrontmatter(fm("archived: true\n")).params.archived).toBe(true);
+    expect(parseFrontmatter(fm("archived: false\n")).params.archived).toBe(false);
+    const { params, problems } = parseFrontmatter(fm("archived: yes\n"));
+    expect(params.archived).toBe(false);
+    expect(problems).toEqual([{ line: 2, message: `"archived" must be true or false: "yes"` }]);
   });
 
   test("favorite takes exactly true or false; anything else costs the line", () => {
@@ -394,7 +403,7 @@ describe("parseFrontmatter", () => {
 
   test("an empty block is valid and empty", () => {
     const { params, problems, end } = parseFrontmatter("---\n---\n# Title\n");
-    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, locked: null });
+    expect(params).toEqual({ cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, archived: false, locked: null });
     expect(problems).toEqual([]);
     expect(end).toBeGreaterThan(0);
   });
@@ -443,5 +452,21 @@ describe("setFavoriteLine", () => {
     const text = fm("env:\n  favorite: yes\n");
     expect(setFavoriteLine(text, false)).toBe(text);
     expect(setFavoriteLine(text, true)).toBe(fm("env:\n  favorite: yes\nfavorite: true\n"));
+  });
+});
+
+// Archive writes its own line through the same surgery, and the two markers
+// leave each other alone.
+describe("setArchivedLine", () => {
+  test("goes in and comes out without touching the favorite line", () => {
+    const fav = setFavoriteLine("# Title\n", true);
+    const both = setArchivedLine(fav, true);
+    expect(both).toBe("---\nfavorite: true\narchived: true\n---\n# Title\n");
+    expect(setArchivedLine(both, false)).toBe(fav);
+  });
+
+  test("an archived note with nothing else in its block returns to plain", () => {
+    const plain = "# Title\n\nbody\n";
+    expect(setArchivedLine(setArchivedLine(plain, true), false)).toBe(plain);
   });
 });

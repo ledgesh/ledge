@@ -16,8 +16,8 @@ import { mkdir, open, readdir, readFile, rename, rmdir, stat, unlink, writeFile 
 import type { Stats } from "node:fs";
 import { ASSETS_DIRNAME, type BacklinkHit, type NoteMeta, type TagHit, type TrashMeta } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugOf, titleOf } from "../shared/slug";
-import { parseFrontmatter, setFavoriteLine } from "../shared/frontmatter";
-import { collectHits, type SearchHit } from "../shared/search";
+import { parseFrontmatter, setArchivedLine, setFavoriteLine } from "../shared/frontmatter";
+import { collectHits, liveFirst, type SearchHit } from "../shared/search";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
 import { loadIgnore } from "./ignore";
@@ -82,10 +82,10 @@ function baseFor(text: string): string {
 
 // A note as the view sees it. `title` is the display label: the note's heading
 // ("Shipping Notes"), else its filename, a slug of that same heading
-// (shipping-notes.md). `template`, `favorite` and `locked` come from the
-// frontmatter in the text already in hand, so none of them costs an extra
-// read: the ⌥⌘N template picker and the browser's Favorites section both build
-// themselves out of the listing. Each is present only when the note is marked,
+// (shipping-notes.md). `template`, `favorite`, `archived` and `locked` come
+// from the frontmatter in the text already in hand, so none of them costs an
+// extra read: the ⌥⌘N template picker and the browser's Favorites and Archived
+// sections build themselves out of the listing. Each is present only when the note is marked,
 // and `template` carries `true` or the `daily` role.
 async function metaFor(path: string, text: string): Promise<NoteMeta> {
   const p = parseFrontmatter(text).params;
@@ -98,6 +98,7 @@ async function metaFor(path: string, text: string): Promise<NoteMeta> {
     ...(folder === "" ? {} : { folder }),
     ...(p.template ? { template: p.template } : {}),
     ...(p.favorite ? { favorite: true as const } : {}),
+    ...(p.archived ? { archived: true as const } : {}),
     ...(p.locked !== null ? { locked: true as const } : {}),
   };
 }
@@ -124,6 +125,7 @@ async function metaAt(path: string, root?: string): Promise<NoteMeta> {
     ...(folder === "" ? {} : { folder }),
     ...(p?.template ? { template: p.template } : {}),
     ...(p?.favorite ? { favorite: true as const } : {}),
+    ...(p?.archived ? { archived: true as const } : {}),
     ...(p !== null && p.locked !== null ? { locked: true as const } : {}),
   };
 }
@@ -299,7 +301,7 @@ export async function searchNotes(
   // The scope narrows the metas before collectHits reads a byte. The cap is
   // "stop after MAX_HITS", so filtering afterwards would let notes outside the
   // folder spend the budget and leave the folder's own matches unread.
-  const metas = notesUnder(await listNotes(root), folder);
+  const metas = liveFirst(notesUnder(await listNotes(root), folder));
   const open = metas.filter((m) => !m.locked);
   const hits = await collectHits(query, open, async (path) => (await readNote(path))?.text ?? null);
   return { hits, lockedSkipped: metas.length - open.length };
@@ -328,7 +330,7 @@ export async function backlinksTo(path: string): Promise<{ backlinks: BacklinkHi
   const metas = await listNotes(root);
   const out: BacklinkHit[] = [];
   let lockedSkipped = 0;
-  for (const meta of metas) {
+  for (const meta of liveFirst(metas)) {
     if (meta.path === target) continue; // a note is not "linked from" itself
     // A locked note's own links sit in a body this scan must not read
     // (searchNotes' skip, same rule). Links pointing at a locked note still
@@ -390,7 +392,7 @@ export async function notesTagged(
   if (!want) throw new Error("empty tag");
   const out: TagHit[] = [];
   let lockedSkipped = 0;
-  for (const meta of notesUnder(await listNotes(root), folder)) {
+  for (const meta of liveFirst(notesUnder(await listNotes(root), folder))) {
     if (meta.locked) lockedSkipped += 1;
     const text = await tagSourceOf(meta); // locked: head only, tagsIn's rule
     if (text === null) continue;
@@ -686,6 +688,16 @@ function rebaseAssetRefs(text: string, root: string, from: string, to: string): 
 // listing a command fired from can be a beat stale, and a second Favorite must
 // not rewrite the file to say what it already says.
 export async function favoriteNote(path: string, on: boolean): Promise<NoteMeta> {
+  return setMarker(path, (raw) => setFavoriteLine(raw, on));
+}
+
+// Archive a note, or bring it back: favoriteNote's write for the `archived:`
+// line. The file stays where it is (architecture.md §3).
+export async function archiveNote(path: string, on: boolean): Promise<NoteMeta> {
+  return setMarker(path, (raw) => setArchivedLine(raw, on));
+}
+
+async function setMarker(path: string, edit: (raw: string) => string): Promise<NoteMeta> {
   assertWritableRoot(assertNote(path)); // the manual's pages take no marker
   let raw: string;
   let mtimeMs: number;
@@ -695,7 +707,7 @@ export async function favoriteNote(path: string, on: boolean): Promise<NoteMeta>
   } catch {
     throw new Error(`no note at ${path}`);
   }
-  const next = setFavoriteLine(raw, on);
+  const next = edit(raw);
   if (next !== raw) await writeSealed(path, next, mtimeMs);
   return metaAt(path);
 }

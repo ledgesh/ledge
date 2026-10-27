@@ -92,6 +92,10 @@ export type BrowserRow =
  * (alphabetically), then that level's own notes in `order`. A folder not in
  * `expanded` emits its row and stops, hiding its notes and subfolders.
  *
+ * Archived notes are left out, and so are their counts and any folder only
+ * they are in: the Archived section draws them instead (archivedRows,
+ * architecture.md §3).
+ *
  * `order` is the browser's note sort (noteOrder). It applies within a folder,
  * not across the whole list: a global sort would move a note's row into
  * another folder's group. Folders stay alphabetical under either sort.
@@ -107,6 +111,7 @@ export function browserRows(
   expanded: ReadonlySet<string>,
   order: (a: NoteMeta, b: NoteMeta) => number,
 ): BrowserRow[] {
+  notes = notes.filter((n) => !n.archived);
   const folders = folderList(notes);
   const rows: BrowserRow[] = [];
   const emit = (folder: string, depth: number): void => {
@@ -145,10 +150,27 @@ export function favoriteRows(
   notes: readonly NoteMeta[],
   order: (a: NoteMeta, b: NoteMeta) => number,
 ): Extract<BrowserRow, { kind: "note" }>[] {
+  // An archived favorite keeps its `favorite:` line but not its row, so
+  // Unarchive puts it back here too.
   return notes
-    .filter((n) => n.favorite)
+    .filter((n) => n.favorite && !n.archived)
     .sort(order)
     .map((note) => ({ kind: "note", id: favoriteRowId(note.path), note, depth: 0 }));
+}
+
+/**
+ * The Archived section's rows: every note marked `archived: true`, flat, in
+ * the tree's order. A note row's id is its path, and an archived note has no
+ * other row, so the path serves here too.
+ */
+export function archivedRows(
+  notes: readonly NoteMeta[],
+  order: (a: NoteMeta, b: NoteMeta) => number,
+): Extract<BrowserRow, { kind: "note" }>[] {
+  return notes
+    .filter((n) => n.archived)
+    .sort(order)
+    .map((note) => ({ kind: "note", id: note.path, note, depth: 0 }));
 }
 
 /** A favorites row's list id. Prefixed for folderRowId's reason, against the

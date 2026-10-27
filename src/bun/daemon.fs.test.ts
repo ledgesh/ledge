@@ -1202,6 +1202,7 @@ describe("frontmatter the note's shells are not running", () => {
     template: false as const,
     confirm: false,
     favorite: p.favorite ?? false,
+    archived: false,
     locked: null,
   });
   const stale = (seen: Seen) => got<{ sessionId: string; stale: boolean }>(seen, "sessionStale");

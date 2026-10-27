@@ -268,15 +268,15 @@ test("profile fields copy and paste through the clipboard bridge, mask notwithst
   expect(await page.evaluate(() => window.__harness.clipboard())).toBe("TOKEN");
 });
 
-// The stale-params hint on the closing fence (editor/frontmatter.ts).
+// The stale-params hint under the closing fence (editor/frontmatter.ts).
 //
 // Params apply at spawn and never to a live shell (architecture.md §6a), and
 // the hint is the only thing that says so where the edit is made. Bun decides
 // when a note is stale, from shells this harness does not have, so the push is
 // simulated (window.__harness.setStale) and what is tested here is the half
-// the view owns: that the button appears on the right line, runs the restart,
+// the view owns: that the button appears in the right place, runs the restart,
 // and does not eat the caret on its way past.
-const hint = (page: Page) => page.locator("button.ledge-fm-stale");
+const hint = (page: Page) => page.getByTestId("fm-stale");
 
 // The docId of the note the drawer just attached, which is the sessionId the
 // stale push is addressed to.
@@ -319,9 +319,13 @@ test("the hint appears on the frontmatter block and restarts the note's shells",
   expect(await hint(page).evaluate((el) => el.closest("[contenteditable]")?.getAttribute("contenteditable"))).toBe(
     "false",
   );
-  // On the closing fence, at the foot of the block: the hint is about
-  // everything above it, not about any one line.
-  await expect(page.locator(".cm-line.ledge-fm-fence").last().locator("button.ledge-fm-stale")).toHaveCount(1);
+  // In a row of its own right under the closing fence, at the foot of the
+  // block: the hint is about everything above it, not about any one line, and
+  // a chip on the fence line read as part of the `---`.
+  await expect(page.locator(".cm-line .ledge-fm-hint")).toHaveCount(0);
+  expect(
+    await hint(page).evaluate((el) => el.closest(".ledge-fm-hints")?.previousElementSibling?.classList.contains("ledge-fm-fence")),
+  ).toBe(true);
 
   await hint(page).click();
   await expect.poll(() => page.evaluate(() => window.__harness.shellRestarts())).toEqual([sessionId]);

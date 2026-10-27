@@ -14,6 +14,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { APP_HOME, attachExternal, createManaged, loadWorkspaces } from "./workspaces";
 import { readAsset, savePastedImage } from "./assets";
 import {
+  archiveNote,
   backlinksTo,
   carryAcrossVolumes,
   createNote,
@@ -1302,6 +1303,84 @@ describe("favoriteNote", () => {
 
   test("a note that is gone is an error, not a new file", async () => {
     expect(favoriteNote(join(ROOT, "nothing-here.md"), true)).rejects.toThrow(/no note/);
+  });
+});
+
+// --- archive ---------------------------------------------------------------
+// The archive marker is favoriteNote's write for another line, so the byte
+// rules are checked once there. These check what the flag changes: the file
+// stays put, and the scans put archived notes after the live ones.
+describe("archiveNote", () => {
+  test("archiving adds the line, keeps the file where it was, and flags the listing", async () => {
+    const original = "# Old runbook\n\nsteps\n";
+    const note = await createNote(ROOT, original);
+    const meta = await archiveNote(note.path, true);
+    expect(meta.path).toBe(note.path);
+    expect(meta.archived).toBe(true);
+    expect(await readRaw(note.path, "utf8")).toBe(`---\narchived: true\n---\n${original}`);
+    expect((await listNotes(ROOT))[0]?.archived).toBe(true);
+    expect((await archiveNote(note.path, false)).archived).toBeUndefined();
+    expect(await readRaw(note.path, "utf8")).toBe(original);
+  });
+
+  test("a favorite keeps its favorite line through archive and back", async () => {
+    const note = await createNote(ROOT, "# Runbook\n");
+    await favoriteNote(note.path, true);
+    await archiveNote(note.path, true);
+    await archiveNote(note.path, false);
+    expect(await readRaw(note.path, "utf8")).toBe("---\nfavorite: true\n---\n# Runbook\n");
+  });
+
+  test("a locked note takes the marker with the vault shut", async () => {
+    resetVaultForTests();
+    await createVault("test passphrase", DEVICE);
+    const note = await createNote(ROOT, "# Secrets\n\nplutonium shipment schedule\n");
+    await lockNote(note.path);
+    lockVault();
+    const meta = await archiveNote(note.path, true);
+    expect(meta.archived).toBe(true);
+    expect(meta.locked).toBe(true);
+    expect(await readRaw(note.path, "utf8")).not.toContain("plutonium shipment schedule");
+  });
+
+  test("search hits from archived notes come after the live ones, newer or not", async () => {
+    const live = await createNote(ROOT, "# Live\n\nshared term\n");
+    const archived = await createNote(ROOT, "# Archived\n\nshared term\n");
+    await archiveNote(archived.path, true);
+    await utimes(live.path, new Date(0), new Date(0));
+    expect((await searchNotes(ROOT, "shared term")).hits.map((h) => h.title)).toEqual(["Live", "Archived"]);
+  });
+
+  test("archived notes cannot spend the search cap ahead of live ones", async () => {
+    // The scope-before-scan trap with the archive as the noise
+    // (architecture.md §3): enough archived matches to fill MAX_HITS, all
+    // newer than the one live match.
+    const live = await createNote(ROOT, "# Live\n\nneedle\n");
+    await utimes(live.path, new Date(0), new Date(0));
+    for (let i = 0; i < MAX_HITS; i += 1) {
+      const n = await createNote(ROOT, `# Noise ${i}\n\nneedle\n`);
+      await archiveNote(n.path, true);
+    }
+    expect((await searchNotes(ROOT, "needle")).hits[0]?.title).toBe("Live");
+  });
+
+  test("backlinks and tag hits list archived notes last", async () => {
+    const target = await createNote(ROOT, "# Target\n");
+    const live = await createNote(ROOT, "# Live\n\n[[Target]] #ops\n");
+    const archived = await createNote(ROOT, "# Archived\n\n[[Target]] #ops\n");
+    await archiveNote(archived.path, true);
+    await utimes(live.path, new Date(0), new Date(0));
+    expect((await backlinksTo(target.path)).backlinks.map((b) => b.title)).toEqual(["Live", "Archived"]);
+    expect((await notesTagged(ROOT, "ops")).hits.map((h) => h.title)).toEqual(["Live", "Archived"]);
+  });
+
+  test("a link to a title two notes share resolves to the unarchived one, however recent", async () => {
+    const fresh = await createNote(ROOT, "# Plan\n\nthe live plan\n");
+    const stale = await createNote(ROOT, "# Plan\n\nlast year's plan\n", "old");
+    await archiveNote(stale.path, true); // also the newest write now
+    await createNote(ROOT, "# Index\n\nsee [[Plan]]\n");
+    expect((await backlinksTo(fresh.path)).backlinks.map((b) => b.title)).toEqual(["Index"]);
+    expect((await backlinksTo(stale.path)).backlinks).toEqual([]);
   });
 });
 

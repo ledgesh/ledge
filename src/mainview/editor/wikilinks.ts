@@ -129,6 +129,8 @@ function applyWiki(view: EditorView, completion: Completion, from: number, to: n
   });
 }
 
+const ARCHIVED_SECTION = { name: "Archived" };
+
 /**
  * Completion source for `[[`: every linkable note title in this note's own
  * workspace, read through the bridge (the same list clicks resolve against).
@@ -148,7 +150,10 @@ export function wikiCompletionSource(context: CompletionContext): CompletionResu
   const notes = wikiNotes(context.state.facet(sessionIdFacet));
   const options: Completion[] = [];
   for (const n of notes) {
-    if (linkableTitle(n.title)) options.push({ label: n.title, apply: applyWiki });
+    if (!linkableTitle(n.title)) continue;
+    // An archived note sits in a section under a heading of its own, which
+    // CodeMirror ranks below every option without one (interactions.md §3).
+    options.push({ label: n.title, apply: applyWiki, ...(n.archived ? { section: ARCHIVED_SECTION } : {}) });
   }
   if (options.length === 0) return null;
   return { from: m.from + 2, options, validFor: /^[^\[\]]*$/ };

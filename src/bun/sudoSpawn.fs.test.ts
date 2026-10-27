@@ -43,6 +43,7 @@ const params = (p: Partial<NoteParams>): NoteParams => ({
   template: false,
   confirm: false,
   favorite: false,
+  archived: false,
   locked: null,
   ...p,
 });

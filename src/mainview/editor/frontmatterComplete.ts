@@ -1,6 +1,7 @@
 // Completion inside the frontmatter block, the `[[` and `#` picker stance:
 // three closed vocabularies the view already holds. The params keys at line
-// start; the values of `template:`, `confirm:` and `favorite:`; the tags after
+// start; the values of `template:`, `confirm:`, `favorite:` and `archived:`;
+// the tags after
 // `tags:` (the `#tag` vocabulary, same bridge), "local" after `host:` and
 // "root" after `sudo:`.
 // `profile:` completes nothing: the view holds no profile list. Profiles live
@@ -34,13 +35,19 @@ const KEY_OPTIONS = (): readonly Completion[] => (keyOptions ??= [
   { label: "template", apply: "template: ", detail: `true joins the ${keyChip("note.fromTemplate")} picker; daily seeds ${keyChip("daily.open")}` },
   { label: "confirm", apply: "confirm: ", detail: "true makes every block here ask before it runs" },
   { label: "favorite", apply: "favorite: ", detail: "true keeps this note in the sidebar's Favorites" },
+  { label: "archived", apply: "archived: ", detail: "true moves this note to the sidebar's Archived section" },
 ]);
 
-// true and false, nothing else, for the two boolean keys. The parser reports
+// true and false, nothing else, for the boolean keys. The parser reports
 // any other value as a typo, so each popup lists that key's whole grammar.
 const FAVORITE_VALUES: readonly Completion[] = [
   { label: "true", detail: "kept in the note browser's Favorites section" },
   { label: "false", detail: "explicitly not a favorite" },
+];
+
+const ARCHIVED_VALUES: readonly Completion[] = [
+  { label: "true", detail: "out of the sidebar's tree, still searchable and linkable" },
+  { label: "false", detail: "explicitly not archived" },
 ];
 
 const CONFIRM_VALUES: readonly Completion[] = [
@@ -100,7 +107,7 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
     return { from: line.from, options, validFor: /^[A-Za-z]*$/ };
   }
 
-  const value = /^(template|confirm|favorite|tags|host|sudo)[ \t]*:([^]*)$/.exec(before);
+  const value = /^(template|confirm|favorite|archived|tags|host|sudo)[ \t]*:([^]*)$/.exec(before);
   if (!value) return null;
   // "[" ends the token, the way a separator does: it opens a `tags:` flow
   // sequence (shared/frontmatter.ts unbracket), so the completion inserts
@@ -109,9 +116,15 @@ export function frontmatterCompletionSource(context: CompletionContext): Complet
   // become `tags: [work`, not `tags: work`.
   const token = /[^,\s[]*$/.exec(value[2]!)![0];
 
-  if (value[1] === "template" || value[1] === "confirm" || value[1] === "favorite") {
+  if (value[1] === "template" || value[1] === "confirm" || value[1] === "favorite" || value[1] === "archived") {
     const options =
-      value[1] === "template" ? TEMPLATE_VALUES() : value[1] === "confirm" ? CONFIRM_VALUES : FAVORITE_VALUES;
+      value[1] === "template"
+        ? TEMPLATE_VALUES()
+        : value[1] === "confirm"
+          ? CONFIRM_VALUES
+          : value[1] === "favorite"
+            ? FAVORITE_VALUES
+            : ARCHIVED_VALUES;
     return { from: pos - token.length, options, validFor: /^[A-Za-z]*$/ };
   }
 

@@ -81,6 +81,8 @@ interface NoteHandlers {
   // edit up the way it picks up any external one (editorPool
   // reloadOpenNotes).
   favorite: (path: string, on: boolean) => Promise<NoteMeta>;
+  // The same for the `archived: true` line (rpc noteArchive).
+  archive: (path: string, on: boolean) => Promise<NoteMeta>;
   // Rename one folder of a workspace, in place (rpc folderRename). `name` is
   // one segment, never a path. Resolves to the folder's new root-relative
   // path and to every note that travelled: old path beside new meta.
@@ -244,6 +246,11 @@ export function retitleNote(path: string, text: string): Promise<NoteMeta> {
 // leaves it, so the caller can tell a no-op from a change.
 export function favoriteNote(path: string, on: boolean): Promise<NoteMeta> {
   return bridge().favorite(path, on);
+}
+
+// Archive a note or bring it back, favoriteNote's contract.
+export function archiveNote(path: string, on: boolean): Promise<NoteMeta> {
+  return bridge().archive(path, on);
 }
 
 // Resolves to where the note landed in the trash (the handle Undo restores

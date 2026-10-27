@@ -119,6 +119,33 @@ Marking a note writes `favorite: true` into its frontmatter ([[Frontmatter and E
 
 A locked note can be favorited without unlocking it, because the marker sits in the part of the file that stays readable ([[Note Locking]]).
 
+## Archiving a note
+
+Archiving takes a note out of the tree and into the Archived section below it, without deleting it. Use it for a note you are done with but want to keep: a runbook for a retired service, last year's incident notes, a finished project.
+
+Archive a note by pressing `a` with its row focused, or by choosing "Archive" from its right-click menu, the Note menu, or the command palette. An Undo strip comes up for a few seconds, the same one a delete shows.
+
+The Archived section is closed until you click its heading, and it shows how many notes are in it. Its rows work like any other note's: Enter opens one, `d` deletes it, and `a` or "Unarchive" puts it back in the tree where it was. The section is not there at all until you archive something.
+
+An archived note is still a note. It stays in the same file, in the same folder, and everything else treats it as before:
+
+| Where | What an archived note does |
+| --- | --- |
+| Opening it | It opens and edits as usual. An "Archived: Unarchive" button sits under the frontmatter block. |
+| Running its blocks | They run as usual. Add `confirm` if you want an old runbook to ask first ([[Running Code#Confirm before running]]). |
+| ⌘P | Listed below every note that is not archived, with an archive icon and the label "Archived". |
+| The `[[` picker | Listed under an "Archived" heading, below every note that is not archived. |
+| Search | Its matches come after those in notes that are not archived, with an archive icon and the label "Archived". |
+| Backlinks and tags | Listed after notes that are not archived, with an archive icon. |
+| Wikilinks | `[[Title]]` still opens it. If an archived note and another note share a title, the link opens the one that is not archived. |
+| Favorites | It leaves the Favorites section and comes back when you unarchive it. |
+| Templates | An archived template is not offered by New Note from Template…, and an archived daily template does not seed ⌘J. |
+| Deleting its folder | It goes to the Trash with the folder, and the confirmation counts it. |
+
+Archived notes are never purged, unlike the Trash.
+
+Archiving writes `archived: true` into the note's frontmatter ([[Frontmatter and Environments]]), the way favoriting writes `favorite: true`. The marker travels with the note through renames, moves, and sync, and you can type or delete the line yourself. A locked note can be archived without unlocking it.
+
 ## Sorting notes
 
 The note list is sorted by title. To put the most recently changed notes at the top instead, click the sort button at the right end of the Notes header, or choose "Sort Notes by Last Modified" from the View menu or the command palette. The same button, or "Sort Notes by Title", switches back.

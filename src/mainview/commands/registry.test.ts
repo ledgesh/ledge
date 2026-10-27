@@ -6,6 +6,7 @@ import { EDITOR_MENU_COMMANDS } from "./editorMenu";
 import { parseKey, resolveChord, DEFAULT_DOMAINS, type FocusDomain } from "./keymap";
 import { COMMANDS, takesChord, type CommandId } from "./keys";
 import type { Command, CommandCtx, RegistryDeps } from "./types";
+import type { UndoOffer } from "@/workspace/actions";
 import { configureShell } from "@/lib/shell";
 import { recordWindowRole } from "@/lib/windows";
 import { recordUpdateState } from "@/lib/updates";
@@ -88,6 +89,10 @@ function stubDeps(
     },
     favoriteNoteNow: async (folder, path, on) => {
       calls.push(`favoriteNoteNow:${folder}:${path}:${on}`);
+      return null;
+    },
+    archiveNoteNow: async (folder, path, on) => {
+      calls.push(`archiveNoteNow:${folder}:${path}:${on}`);
       return null;
     },
     openNoteIn: (root, note) => calls.push(`openNoteIn:${root}:${note.path}`),
@@ -937,6 +942,45 @@ describe("registry", () => {
     ]);
   });
 
+  test("run: note.archive toggles the marker, titles itself, and offers Undo only on the way out", async () => {
+    const plain = note("/n/a.md", "A");
+    const archived = { ...note("/n/b.md", "B"), archived: true as const };
+    const state = initialState(FOLDER, [plain, archived]);
+    const calls: string[] = [];
+    const offers: UndoOffer[] = [];
+    const cmds = buildCommands(stubDeps(calls));
+    const onPlain: CommandCtx = {
+      ...makeCtx(state),
+      ui: { offerUndo: (o) => offers.push(o) },
+      target: { kind: "note", path: plain.path },
+    };
+    const onArchived: CommandCtx = { ...onPlain, target: { kind: "note", path: archived.path } };
+    const cmd = find(cmds, "note.archive");
+    const title = (ctx: CommandCtx) => (typeof cmd.title === "function" ? cmd.title(ctx) : cmd.title);
+    expect([title(onPlain), title(onArchived)]).toEqual(["Archive", "Unarchive"]);
+    cmd.run(onPlain);
+    cmd.run(onArchived);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual([`archiveNoteNow:${FOLDER}:${plain.path}:true`, `archiveNoteNow:${FOLDER}:${archived.path}:false`]);
+    expect(offers.map((o) => o.label)).toEqual(["Archived “A”."]);
+    await offers[0]!.run();
+    expect(calls.at(-1)).toBe(`archiveNoteNow:${FOLDER}:${plain.path}:false`);
+  });
+
+  test("when: Favorite greys on an archived note, and an archived template leaves the picker", () => {
+    const archived = { ...note("/n/b.md", "B"), archived: true as const, template: true as const };
+    const live = { ...note("/n/c.md", "C"), template: true as const };
+    const state = initialState(FOLDER, [archived, live]);
+    const ctx: CommandCtx = { ...makeCtx(state), target: { kind: "note", path: archived.path } };
+    expect(find(commands, "note.favorite").when!(ctx)).toBe(false);
+    const picks = commands
+      .filter((c) => c.id.startsWith("note.fromTemplate.") && c.when!(ctx))
+      .map((c) => (typeof c.title === "function" ? c.title(ctx) : c.title));
+    expect(picks.some((t) => t.includes("C"))).toBe(true);
+    expect(picks.some((t) => t.includes("B"))).toBe(false);
+  });
+
   test("run: note.open opens the targeted row's note", () => {
     const n = note("/n/a.md", "A");
     const dispatched: Action[] = [];
@@ -997,6 +1041,10 @@ describe("registry", () => {
     expect(
       resolveChord(commands, r, { domain: "list", modalOpen: false, targetKind: "trash" })?.id,
     ).toBe("note.restore");
+    const a = { key: "a", meta: false, ctrl: false, alt: false, shift: false };
+    expect(
+      resolveChord(commands, a, { domain: "list", modalOpen: false, targetKind: "note" })?.id,
+    ).toBe("note.archive");
     const f = { key: "f", meta: false, ctrl: false, alt: false, shift: false };
     expect(
       resolveChord(commands, f, { domain: "list", modalOpen: false, targetKind: "note" })?.id,

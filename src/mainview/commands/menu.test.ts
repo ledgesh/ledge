@@ -63,6 +63,7 @@ function stubDeps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     lockNoteNow: async () => ({ error: null, notice: null }),
     removeLockNow: async () => null,
     favoriteNoteNow: async () => null,
+    archiveNoteNow: async () => null,
     openNoteIn: noop,
     noteHead: () => null,
     hasSelection: () => true,

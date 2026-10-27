@@ -210,6 +210,7 @@ export const REQUEST_METHODS = [
   "folderDelete",
   "noteRetitle",
   "noteFavorite",
+  "noteArchive",
   "dailyOpen",
   "noteFromTemplate",
   "noteDelete",

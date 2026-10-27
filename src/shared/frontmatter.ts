@@ -83,6 +83,12 @@ export interface NoteParams {
   // ordinary hand-editable text either way, unlike `locked:`. Never feeds a
   // spawn; it lives here because the block has one parser.
   favorite: boolean;
+  // Whether the note is archived: it leaves the note browser's tree for its
+  // Archived section and ranks last in the pickers, while it still opens,
+  // runs, links and searches (architecture.md §3). The `favorite:` argument
+  // and the same machinery: the Archive verbs write this line (bun/notes.ts
+  // archiveNote). Never feeds a spawn.
+  archived: boolean;
   // The note-locking crypto header (locking.md §2): non-null means the note's
   // body on disk is ciphertext. Bun owns the value's structure (bun/vault.ts
   // parseLockedHeader); here it is one opaque string, parsed like every key
@@ -227,7 +233,7 @@ export function frontmatterEnd(text: string): number {
 /** Parse a note's frontmatter into spawn params (see the header for grammar). */
 export function parseFrontmatter(text: string): Frontmatter {
   const end = frontmatterEnd(text);
-  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, locked: null };
+  const params: NoteParams = { cwd: null, profile: null, envFile: null, env: {}, hosts: [], sudo: null, tags: [], template: false, confirm: false, favorite: false, archived: false, locked: null };
   const problems: FrontmatterProblem[] = [];
   if (end === 0) return { params, problems, end };
 
@@ -366,6 +372,13 @@ export function parseFrontmatter(text: string): Frontmatter {
         else if (value === "false") params.favorite = false;
         else problem(`"favorite" must be true or false: "${value}"`);
         break;
+      case "archived":
+        // Exactly true or false, `confirm`'s rule. A typo defaulting to true
+        // would hide a note from the tree that nobody archived.
+        if (value === "true") params.archived = true;
+        else if (value === "false") params.archived = false;
+        else problem(`"archived" must be true or false: "${value}"`);
+        break;
       case "locked":
         // Opaque here; bun/vault.ts owns the structure. A non-empty value
         // marks the note locked even when malformed: the vault then refuses to
@@ -415,10 +428,11 @@ export function unbracket(v: string): string {
 }
 
 // --- line surgery -----------------------------------------------------------
-// Two commands write a frontmatter line rather than the writer: Lock This Note
-// stamps `locked:` (bun/vault.ts) and Favorite writes `favorite:`
-// (bun/notes.ts). Both edit one line and preserve the bytes around it, because
-// every other line in the block is the user's.
+// Three commands write a frontmatter line rather than the writer: Lock This
+// Note stamps `locked:` (bun/vault.ts), and Favorite and Archive write
+// `favorite:` and `archived:` (bun/notes.ts). Each edits one line and
+// preserves the bytes around it, because every other line in the block is the
+// user's.
 
 /**
  * The frontmatter block's lines, split so that surgery can address them.
@@ -437,44 +451,55 @@ export function blockLines(text: string): { end: number; lines: string[]; close:
   return null; // unreachable: frontmatterEnd found a closing fence
 }
 
-// A top-level `favorite:` line, never an indented one. An indented one would
-// be an env var named "favorite" under `env:`.
-const FAVORITE_LINE = /^favorite\s*:/;
+// The markers a command toggles as one `key: true` line. Matched top-level
+// only: an indented `favorite:` would be an env var of that name under `env:`.
+export type MarkerKey = "favorite" | "archived";
 
 /**
- * The note's text with `favorite: true` present or every `favorite:` line
- * gone.
+ * The note's text with `key: true` present or every `key:` line gone, for one
+ * of the two markers a command toggles (Favorite, Archive).
  *
  * Adding writes the line last, after the keys the writer typed, and grows a
  * block on a note that has none. Removing takes the whole block with it when
- * nothing but blank lines is left, so favoriting and unfavoriting a plain note
+ * nothing but blank lines is left, so marking and unmarking a plain note
  * leaves it as it was found. A block still holding comments or other keys is
  * the user's and it stays, the rule stripLockedLine follows.
  *
  * Idempotent in both directions: a note that already reads the asked-for way
  * comes back unchanged, so the caller can skip the write.
  */
-export function setFavoriteLine(text: string, on: boolean): string {
+export function setMarkerLine(text: string, key: MarkerKey, on: boolean): string {
+  const matches = (l: string) => new RegExp(`^${key}\\s*:`).test(l);
   const b = blockLines(text);
   if (!on) {
     if (b === null) return text;
     const content = b.lines.slice(1, b.close);
-    const kept = content.filter((l) => !FAVORITE_LINE.test(l));
+    const kept = content.filter((l) => !matches(l));
     if (kept.length === content.length) return text;
     if (kept.every((l) => l.trim() === "")) return text.slice(b.end);
     return [b.lines[0]!, ...kept, ...b.lines.slice(b.close)].join("\n") + text.slice(b.end);
   }
-  const line = "favorite: true";
+  const line = `${key}: true`;
   if (b === null) return `---\n${line}\n---\n${text}`;
   const content = b.lines.slice(1, b.close);
-  const at = content.findIndex((l) => FAVORITE_LINE.test(l));
+  const at = content.findIndex(matches);
   // Replace where it sits (dropping stray duplicates), so a hand-written
   // `favorite: false` becomes true in place rather than gaining a second line
   // the parser would then have to arbitrate.
   const stamped =
     at === -1
       ? [...content, line]
-      : content.map((l, i) => (i === at ? line : l)).filter((l, i) => i === at || !FAVORITE_LINE.test(l));
+      : content.map((l, i) => (i === at ? line : l)).filter((l, i) => i === at || !matches(l));
   if (stamped.join("\n") === content.join("\n")) return text;
   return [b.lines[0]!, ...stamped, ...b.lines.slice(b.close)].join("\n") + text.slice(b.end);
+}
+
+/** setMarkerLine for `favorite:`. */
+export function setFavoriteLine(text: string, on: boolean): string {
+  return setMarkerLine(text, "favorite", on);
+}
+
+/** setMarkerLine for `archived:`. */
+export function setArchivedLine(text: string, on: boolean): string {
+  return setMarkerLine(text, "archived", on);
 }

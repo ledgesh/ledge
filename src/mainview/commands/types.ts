@@ -341,6 +341,8 @@ export interface RegistryDeps {
   // two note ops above. `docIds` is every open tab on the note, which the
   // action saves before the marker lands (notes/actions.ts favoriteNoteNow).
   favoriteNoteNow(folder: string, path: string, on: boolean, docIds: string[]): Promise<string | null>;
+  // The same for the `archived: true` marker (notes/actions.ts archiveNoteNow).
+  archiveNoteNow(folder: string, path: string, on: boolean, docIds: string[]): Promise<string | null>;
   editor: {
     find(docId: string): void;
     replace(docId: string): void;

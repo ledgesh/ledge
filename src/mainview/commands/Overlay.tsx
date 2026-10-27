@@ -29,7 +29,7 @@
 // the Tags panel drilled into it (tag.open). There is no fourth mode and no
 // second sigil: tags are written with the "#" the search sigil already spends.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Command as CommandIcon, FileText, Folder, Hash, LayoutTemplate, Lock, LockOpen, TextSearch, X, type LucideIcon } from "lucide-react";
+import { Archive, CalendarDays, Command as CommandIcon, FileText, Folder, Hash, LayoutTemplate, Lock, LockOpen, TextSearch, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { softKeyboard } from "@/lib/shell";
 import { notesOf, useWorkspace } from "@/workspace/store";
@@ -63,6 +63,20 @@ const MODES: { id: OverlayMode; label: string; sigil: string | null; Icon: Lucid
 // results feel live, long enough that typing "shipping" costs one scan rather
 // than eight.
 const SEARCH_DEBOUNCE_MS = 80;
+
+// The word beside an archived note's title in quick-open and text search. The
+// glyph alone is the same size and grey as the one it replaces, so it does not
+// read as a signal.
+function ArchivedTag() {
+  return (
+    <span
+      data-testid="overlay-archived-tag"
+      className="shrink-0 self-center rounded-sm border px-1 text-[10px] leading-4 text-muted-foreground"
+    >
+      Archived
+    </span>
+  );
+}
 
 export function Overlay({
   initialMode,
@@ -120,6 +134,9 @@ export function Overlay({
   // over the whole workspace rather than the scope, since the answer to "where
   // is this path" does not change with what is being looked at.
   const folders = useMemo(() => folderIndex(wsNotes), [wsNotes]);
+  // Which hits are in archived notes, looked up the same way: those rows wear
+  // the Archive glyph (interactions.md §3). Bun already scans them last.
+  const archivedPaths = useMemo(() => new Set(wsNotes.filter((n) => n.archived).map((n) => n.path)), [wsNotes]);
 
   // The tag rows' vocabulary. listTags runs when search mode opens, and again
   // when the workspace or the scope changes, but not per keystroke: the
@@ -530,7 +547,11 @@ export function Overlay({
                     onMouseMove={() => setIndex(i)}
                     onClick={() => open(i)}
                   >
-                    <TextSearch className="size-3.5 shrink-0 text-muted-foreground" />
+                    {archivedPaths.has(hit.path) ? (
+                      <Archive className="size-3.5 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <TextSearch className="size-3.5 shrink-0 text-muted-foreground" />
+                    )}
                     <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
                       {hit.snippet.slice(0, hit.col)}
                       <span className="rounded-[2px] bg-primary/15 font-medium text-foreground">
@@ -541,6 +562,7 @@ export function Overlay({
                     <span className="flex max-w-[35%] shrink-0 items-baseline gap-1.5 truncate text-[11px] text-muted-foreground">
                       <span className="truncate">{hit.title}</span>
                       <FolderLabel folder={folders.get(hit.path)} />
+                      {archivedPaths.has(hit.path) && <ArchivedTag />}
                     </span>
                   </div>
                 );
@@ -562,8 +584,12 @@ export function Overlay({
                     CalendarDays, any other template note LayoutTemplate, a
                     locked note Lock (open while the vault is unlocked). The
                     browser and the picker must agree on what kind a note is,
-                    and on whether it is readable now. */}
-                {note.template === "daily" ? (
+                    and on whether it is readable now. An archived note wears
+                    Archive over all of them: it is ranked last, and the glyph
+                    says why. */}
+                {note.archived ? (
+                  <Archive data-testid="overlay-archived-glyph" className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : note.template === "daily" ? (
                   <CalendarDays className="size-3.5 shrink-0 text-muted-foreground" />
                 ) : note.template ? (
                   <LayoutTemplate className="size-3.5 shrink-0 text-muted-foreground" />
@@ -580,6 +606,7 @@ export function Overlay({
                 {/* Which of two same-titled notes this row is
                     (notes/FolderLabel.tsx). */}
                 <FolderLabel folder={note.folder} />
+                {note.archived && <ArchivedTag />}
               </div>
             ))
           )}

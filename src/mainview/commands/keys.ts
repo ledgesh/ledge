@@ -261,6 +261,10 @@ export const COMMANDS = {
   // are usually looking at in the list. No chord, since the ⌘ letters are
   // spent (interactions.md §2) and the section is a click away.
   "note.favorite": { title: "Favorite", listKeys: ["f"] },
+  // The archive marker, which takes a note out of the browser's tree and into
+  // its Archived section. note.favorite's shape for note.favorite's reason: one
+  // command retitled "Unarchive" on an archived note, on the row's spare `a`.
+  "note.archive": { title: "Archive", listKeys: ["a"] },
   // Filing. No chord for any of the three: putting a note somewhere is a
   // once-in-a-while act, and the N family is already spent (interactions.md
   // §2). `m` is the note row's spare mnemonic. The folder row's Enter is its

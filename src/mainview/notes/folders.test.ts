@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  archivedRows,
   browserRows,
   countIn,
   favoriteRowId,
@@ -172,6 +173,43 @@ describe("expansion", () => {
 
   test("a collapsed folder stays collapsed under its new name", () => {
     expect([...expandedRenamed(new Set(["admin"]), "projcts", "projects")]).toEqual(["admin"]);
+  });
+});
+
+describe("archived notes", () => {
+  const arc = (path: string, title: string, folder?: string): NoteMeta => ({
+    ...note(path, title, folder),
+    archived: true,
+  });
+
+  test("the tree and its counts leave them out, and a folder only they are in has no row", () => {
+    const notes = [
+      note("/r/a.md", "Alpha"),
+      arc("/r/b.md", "Beta"),
+      note("/r/p/c.md", "Gamma", "projects"),
+      arc("/r/p/d.md", "Delta", "projects"),
+      arc("/r/old/e.md", "Epsilon", "old"),
+    ];
+    const rows = browserRows(notes, new Set(["projects"]), byTitle);
+    expect(titles(rows)).toEqual(["projects/", "  Gamma", "Alpha"]);
+    expect(rows.find((r) => r.kind === "folder")).toMatchObject({ count: 1 });
+  });
+
+  test("their section is flat and sorted, with the note's path as the row id", () => {
+    const notes = [arc("/r/p/z.md", "Zebra", "projects"), note("/r/a.md", "Plain"), arc("/r/b.md", "Alpha")];
+    const rows = archivedRows(notes, byTitle);
+    expect(rows.map((r) => r.note.title)).toEqual(["Alpha", "Zebra"]);
+    expect(rows.map((r) => r.id)).toEqual(["/r/b.md", "/r/p/z.md"]);
+    expect(rows.every((r) => r.depth === 0)).toBe(true);
+  });
+
+  test("an archived favorite leaves the Favorites section", () => {
+    const notes = [{ ...arc("/r/a.md", "Gone"), favorite: true as const }, { ...note("/r/b.md", "Kept"), favorite: true as const }];
+    expect(favoriteRows(notes, byTitle).map((r) => r.note.title)).toEqual(["Kept"]);
+  });
+
+  test("the chooser's folder list still has a folder only archived notes are in", () => {
+    expect(folderList([arc("/r/old/e.md", "Epsilon", "old")])).toEqual(["old"]);
   });
 });
 

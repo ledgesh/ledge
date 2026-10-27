@@ -28,12 +28,14 @@ import { TagsPanel } from "@/workspace/TagsPanel";
 import { WorkspaceView } from "@/workspace/WorkspaceView";
 import { HostPicker } from "@/components/HostPicker";
 import { LOCAL_HOST } from "../shared/frontmatter";
-import { configureStoreUi, flushAll, folderOf, onNoteEdited, paramsOf } from "@/notes/store";
+import { configureStoreUi, flushAll, folderOf, onNoteEdited, paramsOf, pathOf } from "@/notes/store";
+import { archiveNoteNow } from "@/notes/actions";
 import { parseWikiTarget, resolveWikiTitle } from "@/editor/wikilinks";
 import { refreshWikilinks } from "@/editor/livePreview";
 import { refreshFolder, syncWorkspaces } from "@/workspace/actions";
 import { subscribeExpansion } from "@/notes/expansion";
 import { subscribeSort } from "@/notes/sorting";
+import { subscribeArchivedOpen } from "@/notes/archivedSection";
 import { docsFolder, onWorkspacesChanged, workspaceKind } from "@/workspace/channel";
 import { allDocIds, docsLanding, notesOf, useWorkspace, WorkspaceProvider, type AppState } from "@/workspace/store";
 import { flushLayout, scheduleLayoutSave } from "@/workspace/persist";
@@ -559,6 +561,15 @@ function Shell() {
       // "Restart Note Shell" command, on the note it is drawn in rather than
       // on whichever one has focus.
       restartShell: (docId) => restartSession(docId),
+      // The block's Archived hint, on the note it is drawn in.
+      unarchive: (docId) => {
+        const path = pathOf(docId);
+        const folder = folderOf(docId);
+        if (!path || !folder) return;
+        void archiveNoteNow(path, false, folder, [docId]).then((error) => {
+          if (error) notify(error);
+        });
+      },
     });
     // The autosave outcome a user has to be told about: a save that displaced
     // another writer's version of the note into the trash. Same strip and the
@@ -641,16 +652,19 @@ function Shell() {
   // Keyed on those two state fields, not the whole state, so a notes-folder
   // refresh does not rewrite an unchanged layout. serializeLayout reads only
   // those two fields, so the closure below cannot be stale. Which folders are
-  // open and how the notes are sorted are saved with them, by subscription
-  // rather than by dep, since both live outside the reducer
-  // (notes/expansion.ts, notes/sorting.ts, architecture.md §5).
+  // open, how the notes are sorted, and whether the Archived section is open
+  // are saved with them, by subscription rather than by dep, since all three
+  // live outside the reducer (notes/expansion.ts, notes/sorting.ts,
+  // notes/archivedSection.ts, architecture.md §5).
   useEffect(() => {
     scheduleLayoutSave(state);
     const unExpansion = subscribeExpansion(() => scheduleLayoutSave(state));
     const unSort = subscribeSort(() => scheduleLayoutSave(state));
+    const unArchived = subscribeArchivedOpen(() => scheduleLayoutSave(state));
     return () => {
       unExpansion();
       unSort();
+      unArchived();
     };
   }, [state.workspaces, state.selectedId]);
 

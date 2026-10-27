@@ -23,6 +23,7 @@ import type { ClientMethod } from "../shared/wire";
 import type { RequestHandlers, ServerPush } from "../shared/wire";
 import { folderScopeOf } from "../shared/folders";
 import {
+  archiveNote,
   backlinksTo,
   changeVaultPassphrase,
   createNote,
@@ -932,6 +933,7 @@ export async function createServer(deps: { push: Audience; exitsWhenIdle?: boole
     "dailyOpen",
     "folderDelete",
     "folderRename",
+    "noteArchive",
     "noteCreate",
     "noteDelete",
     "noteFavorite",
@@ -1081,6 +1083,7 @@ export async function createServer(deps: { push: Audience; exitsWhenIdle?: boole
     folderDelete: ({ root, folder }) => deleteFolder(root, folder),
     noteRetitle: async ({ path, text }) => ({ note: await retitleNote(path, text) }),
     noteFavorite: async ({ path, on }) => ({ note: await favoriteNote(path, on) }),
+    noteArchive: async ({ path, on }) => ({ note: await archiveNote(path, on) }),
     // The daily.workspace setting outranks the view's selected workspace,
     // which is only the fallback. daily.folder says where inside it, and
     // matters only on the day the note is created: an existing one is found

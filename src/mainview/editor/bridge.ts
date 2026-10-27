@@ -169,6 +169,11 @@ interface BridgeHandlers {
   // stale-params hint, and it runs the same edge as the "Restart Note Shell"
   // command. App wires both to terminal/channel.ts.
   restartShell: (docId: string) => void;
+  // Take the note's `archived: true` line off (notes/actions.ts
+  // archiveNoteNow). editor/frontmatter.ts calls this from the block's
+  // Archived hint. Always "off", never a toggle: the hint is drawn from the
+  // text, which can run ahead of the note list a toggle would read.
+  unarchive: (docId: string) => void;
 }
 const handlers: Partial<BridgeHandlers> = {};
 
@@ -421,4 +426,9 @@ export function onSessionStaleChange(sink: () => void): () => void {
 /** Kill the note's shells so the next one reads its current frontmatter. */
 export function restartShell(docId: string): void {
   handlers.restartShell?.(docId);
+}
+
+/** Bring an archived note back into the browser's tree. */
+export function unarchive(docId: string): void {
+  handlers.unarchive?.(docId);
 }

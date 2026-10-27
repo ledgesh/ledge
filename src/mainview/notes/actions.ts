@@ -21,6 +21,7 @@ import {
   deleteTrashed as unlinkTrashed,
   dispatchNotesChanged,
   emptyTrash,
+  archiveNote as markArchived,
   favoriteNote as markFavorite,
   listTrash,
   moveNote as moveFile,
@@ -205,17 +206,27 @@ export async function moveNoteToWorkspace(
 //
 // `docIds` is every open tab on the note, as in moveNoteTo. Resolves to an
 // error message, or null.
-export async function favoriteNoteNow(
-  path: string,
-  on: boolean,
+export function favoriteNoteNow(path: string, on: boolean, folder: string, docIds: string[]): Promise<string | null> {
+  return markNoteNow(() => markFavorite(path, on), "favorite", folder, docIds);
+}
+
+// Archive a note, or bring it back: favoriteNoteNow for the `archived:` line,
+// flushing the buffers first for the same reason.
+export function archiveNoteNow(path: string, on: boolean, folder: string, docIds: string[]): Promise<string | null> {
+  return markNoteNow(() => markArchived(path, on), "archive", folder, docIds);
+}
+
+async function markNoteNow(
+  mark: () => Promise<NoteMeta>,
+  verb: string,
   folder: string,
   docIds: string[],
 ): Promise<string | null> {
   try {
     for (const id of docIds) await saveNow(id);
-    await markFavorite(path, on);
+    await mark();
   } catch (err) {
-    console.error("[notes] favorite failed", err);
+    console.error(`[notes] ${verb} failed`, err);
     return err instanceof Error ? err.message : String(err);
   }
   // The same refresh a lock does (vault/channel.ts): the folder's list is

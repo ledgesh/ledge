@@ -42,6 +42,16 @@ describe("resolveWikiTitle", () => {
     expect(resolveWikiTitle("Beta", notes)?.path).toBe("/ws/Beta-2.md");
   });
 
+  test("an unarchived note wins a shared title, after case and before list order", () => {
+    const old = { ...note("Plan", "/ws/old/Plan.md"), archived: true as const };
+    const live = note("Plan", "/ws/Plan.md");
+    expect(resolveWikiTitle("Plan", [old, live])?.path).toBe("/ws/Plan.md");
+    // Case still comes first: an exact-case archived note beats a folded live one.
+    expect(resolveWikiTitle("Plan", [old, note("plan", "/ws/plan.md")])?.path).toBe("/ws/old/Plan.md");
+    // And an archived note alone still resolves.
+    expect(resolveWikiTitle("plan", [old])?.path).toBe("/ws/old/Plan.md");
+  });
+
   test("no fuzz: a near-miss is dangling, never the nearest note", () => {
     expect(resolveWikiTitle("Alphas", notes)).toBeNull();
   });

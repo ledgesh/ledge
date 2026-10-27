@@ -145,6 +145,20 @@ describe("formatNoteList", () => {
     );
     expect(lines).toEqual(["Meeting  2026-07-18  ~/w/meeting.md  (template)"]);
   });
+
+  test("an archived row says so after whatever kind tag it has", () => {
+    const lines = formatNoteList(
+      [
+        { title: "Old", path: "/home/u/w/old.md", modified: "2026-07-18T09:00:00.000Z", archived: true },
+        { title: "Tpl", path: "/home/u/w/tpl.md", modified: "2026-07-18T09:00:00.000Z", template: true, archived: true },
+      ],
+      "/home/u",
+    );
+    expect(lines).toEqual([
+      "Old  2026-07-18  ~/w/old.md  (archived)",
+      "Tpl  2026-07-18  ~/w/tpl.md  (template)  (archived)",
+    ]);
+  });
 });
 
 describe("resolveWorkspaceArg", () => {

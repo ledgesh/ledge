@@ -7,6 +7,8 @@
 // ctx.ui (see types.ts UiHooks), editor/RPC calls through RegistryDeps, so
 // this module stays importable by pure unit tests.
 import {
+  Archive,
+  ArchiveRestore,
   ArrowDownAZ,
   ArrowLeft,
   ArrowRight,
@@ -128,7 +130,7 @@ function templateChoices(ctx: CommandCtx): TemplateChoice[] {
   const ordered = [ctx.selected, ...ctx.state.workspaces.filter((w) => w.id !== ctx.selected.id)];
   for (const ws of ordered) {
     const marked = notesOf(ctx.state, ws.folder)
-      .filter((n) => n.template)
+      .filter((n) => n.template && !n.archived) // an archived template is out of the way
       .sort((a, b) => a.title.localeCompare(b.title));
     for (const n of marked) {
       out.push({ label: ws.id === ctx.selected.id ? n.title : `${n.title} (${ws.name})`, path: n.path });
@@ -1043,7 +1045,9 @@ export function buildCommands(deps: RegistryDeps): Command[] {
       listKeys: listKeysOf("note.favorite"),
       icon: Star,
       targetKind: "note",
-      when: (ctx) => !!targetNote(ctx) && !docsSelected(ctx),
+      // Greyed on an archived note: the Favorites section skips those, so the
+      // marker would land with nothing on screen to show for it.
+      when: (ctx) => !!targetNote(ctx) && !targetNote(ctx)?.archived && !docsSelected(ctx),
       run: (ctx) => {
         const note = targetNote(ctx);
         if (!note) return;
@@ -1052,6 +1056,35 @@ export function buildCommands(deps: RegistryDeps): Command[] {
           .then((error) => {
             if (error) ctx.ui.showError?.(error);
           }, failed(ctx));
+      },
+    },
+    // The archive marker, toggled: note.favorite's shape and target grammar
+    // (interactions.md §3). Archiving offers Undo on the strip, because the row
+    // leaves the tree and reads as deleted; Unarchive puts the row back where
+    // the eye already is, so it offers nothing.
+    {
+      id: "note.archive",
+      title: (ctx) => (targetNote(ctx)?.archived ? "Unarchive" : "Archive"),
+      listKeys: listKeysOf("note.archive"),
+      icon: Archive,
+      iconOf: (ctx) => (targetNote(ctx)?.archived ? ArchiveRestore : Archive),
+      targetKind: "note",
+      when: (ctx) => !!targetNote(ctx) && !docsSelected(ctx),
+      run: (ctx) => {
+        const note = targetNote(ctx);
+        if (!note) return;
+        const on = !note.archived;
+        const folder = ctx.selected.folder;
+        const docIds = docIdsForPath(ctx.state, note.path);
+        void deps.archiveNoteNow(folder, note.path, on, docIds).then((error) => {
+          if (error) ctx.ui.showError?.(error);
+          else if (on) {
+            ctx.ui.offerUndo?.({
+              label: `Archived “${note.title}”.`,
+              run: () => deps.archiveNoteNow(folder, note.path, false, docIds),
+            });
+          }
+        }, failed(ctx));
       },
     },
     cmd("note.move", {

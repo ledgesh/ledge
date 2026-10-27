@@ -9,6 +9,7 @@ const noParams = (over: Partial<NoteParams> = {}): NoteParams => ({
   envFile: null,
   env: {},
   favorite: false,
+  archived: false,
   locked: null,
   hosts: ["web1"],
   sudo: null,

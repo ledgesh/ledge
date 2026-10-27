@@ -12,9 +12,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { BacklinkHit, NoteMeta, TagHit, TerminalClaim, TrashedWorkspace, TrashMeta, UpdateState, VaultState, WorkspaceRootInfo } from "../shared/rpc-schema";
 import { headingOf, labelOf, slugify, slugOf } from "../shared/slug";
-import { frontmatterEnd, parseFrontmatter, setFavoriteLine } from "../shared/frontmatter";
+import { frontmatterEnd, parseFrontmatter, setMarkerLine, type MarkerKey } from "../shared/frontmatter";
 import { instantiateTemplate, isoDateOf } from "../shared/template";
-import { collectHits, type SearchHit } from "../shared/search";
+import { collectHits, liveFirst, type SearchHit } from "../shared/search";
 import { folderContains, folderLeafProblem, folderScopeOf, notesUnder } from "../shared/folders";
 import { resolveWikiTitle, wikiRefsOf } from "../shared/wikilinks";
 import { normalizeTag, tagDirectoryOf, tagRefsOf, type TagInfo } from "../shared/tags";
@@ -373,6 +373,7 @@ class FakeStore {
       ...(folder === "" ? {} : { folder }),
       ...(p.template ? { template: p.template } : {}),
       ...(p.favorite ? { favorite: true as const } : {}),
+      ...(p.archived ? { archived: true as const } : {}),
       ...(p.locked !== null ? { locked: true as const } : {}),
     };
   }
@@ -638,16 +639,16 @@ class FakeStore {
     return { mtimeMs, divergedTo };
   }
 
-  // Mirrors favoriteNote (bun/notes.ts): the frontmatter marker goes on or
+  // Mirrors favoriteNote and archiveNote (bun/notes.ts): the marker goes on or
   // off, the rest of the note is untouched, and the file's mtime moves only
   // when the line actually changed. A locked note takes it with the vault
   // shut, as it does there: the marker is head text, not body.
-  favorite(path: string, on: boolean): NoteMeta {
+  mark(path: string, key: MarkerKey, on: boolean): NoteMeta {
     this.assertWritable(path);
     const { data } = this.rootOf(path);
     const cur = data.notes.get(path);
     if (!cur) throw new Error(`no note at ${path}`);
-    const text = setFavoriteLine(cur.text, on);
+    const text = setMarkerLine(cur.text, key, on);
     if (text !== cur.text) data.notes.set(path, { text, mtimeMs: this.tick() });
     return this.meta(data, path);
   }
@@ -706,7 +707,7 @@ class FakeStore {
   // drift. That includes the locked skip: a locked note's body is never
   // scanned whatever the vault state, and the count rides back (locking.md §4).
   async search(root: string, query: string, scope = ""): Promise<{ hits: SearchHit[]; lockedSkipped: number }> {
-    const metas = notesUnder(this.list(root), scope);
+    const metas = liveFirst(notesUnder(this.list(root), scope));
     const open = metas.filter((m) => !m.locked);
     const hits = await collectHits(query, open, (p) => this.readNote(p));
     return { hits, lockedSkipped: metas.length - open.length };
@@ -719,7 +720,7 @@ class FakeStore {
     const metas = this.list(root);
     const out: BacklinkHit[] = [];
     let lockedSkipped = 0;
-    for (const meta of metas) {
+    for (const meta of liveFirst(metas)) {
       if (meta.path === path) continue;
       if (meta.locked) {
         lockedSkipped += 1;
@@ -759,7 +760,7 @@ class FakeStore {
     const want = normalizeTag(tag);
     const out: TagHit[] = [];
     let lockedSkipped = 0;
-    for (const meta of this.list(root)) {
+    for (const meta of liveFirst(this.list(root))) {
       if (meta.locked) lockedSkipped += 1;
       const text = this.tagSource(meta);
       if (text === null) continue;
@@ -900,7 +901,8 @@ configureNotes({
   retitle: async (path, text) => store.retitle(path, text),
   move: async (path, subfolder) => store.moveNote(path, subfolder),
   moveToWorkspace: async (path, folder) => store.moveNoteToWorkspace(path, folder),
-  favorite: async (path, on) => store.favorite(path, on),
+  favorite: async (path, on) => store.mark(path, "favorite", on),
+  archive: async (path, on) => store.mark(path, "archived", on),
   renameFolder: async (folder, subfolder, name) => store.renameFolder(folder, subfolder, name),
     deleteFolder: async (folder, subfolder) => store.deleteFolder(folder, subfolder),
   remove: async (path) => store.remove(path),

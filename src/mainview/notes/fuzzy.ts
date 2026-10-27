@@ -95,7 +95,10 @@ export function fuzzyFilter<T>(
   return scored.map((s) => s.item);
 }
 
-// Filters `notes` by `query` for the quick-open palette, best match first.
-export function filterNotes(query: string, notes: NoteMeta[]): NoteMeta[] {
-  return fuzzyFilter(query, notes, (n) => n.title);
+// Filters `notes` by `query` for the quick-open palette, best match first,
+// with every archived match after every unarchived one, whatever the match
+// quality (interactions.md §3). The `[[` picker ranks through here too.
+export function filterNotes<N extends NoteMeta>(query: string, notes: readonly N[]): N[] {
+  const ranked = fuzzyFilter(query, notes, (n) => n.title);
+  return [...ranked.filter((n) => !n.archived), ...ranked.filter((n) => n.archived)];
 }

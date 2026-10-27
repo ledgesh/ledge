@@ -198,7 +198,14 @@ describe("the schema's shape against the protocol version", () => {
   // NATIVE_METHODS. appQuit's case: the client shell answers it, no frame
   // carries it, and no server sees the name. The pin moves and the version
   // does not.
-  const PINNED = { protocol: 5, shape: "de8bd9f853f55606" };
+  // Then the archive marker: NoteMeta gained an optional `archived`, and
+  // noteArchive is a new method, the favorite marker's case again. An old
+  // server refuses the method by name, and a NoteMeta with no `archived`
+  // reads as unarchived, which every note on such a server is. An old client
+  // drops the flag and shows an archived note in its tree. Nothing was
+  // retyped, made required, or narrowed. The pin moves and the version does
+  // not.
+  const PINNED = { protocol: 5, shape: "2e677184a00a7ede" };
 
   test("a payload shape does not change without someone deciding whether it breaks", async () => {
     const shape = digest(shapeOf(await Bun.file(SCHEMA).text()));

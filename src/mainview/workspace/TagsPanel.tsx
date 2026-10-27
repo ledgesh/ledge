@@ -14,7 +14,7 @@
 // commands/target.ts). Enter drills into a directory row. Enter on an
 // occurrence row runs tag.openNote, backlink.open's body with a tag target.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, FileText, Hash, X } from "lucide-react";
+import { Archive, ChevronLeft, FileText, Hash, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useCommands } from "@/commands/CommandProvider";
@@ -254,7 +254,12 @@ function HitRow({
       title={hit.path}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+        {/* An archived note's row wears Archive, as it does in ⌘P (interactions.md §3). */}
+        {hit.archived ? (
+          <Archive className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
         <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{hit.title}</span>
         {/* Which of two same-titled notes this is (notes/FolderLabel.tsx). */}
         <FolderLabel folder={folder} />

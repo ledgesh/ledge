@@ -78,6 +78,11 @@ export interface NoteMeta {
   // so the marker needs no query and no registry. It rides the same head read
   // the title does.
   favorite?: true;
+  // Present when the note's frontmatter declares `archived: true`, absent
+  // otherwise. The browser keeps such a note out of its tree, its folder
+  // counts and its Favorites section, and draws its Archived section from the
+  // same lists; the pickers rank it last (architecture.md §3). Same head read.
+  archived?: true;
   // Present when the note is locked (its frontmatter carries the crypto
   // header, locking.md). The sidebar and ⌘P lock glyph, the scans' skip, and
   // the agent listings' flag all read this. It rides the same head read the
@@ -469,6 +474,14 @@ export type LedgeRPC = {
       // read. `on` false on a note that is not marked is a no-op, so the two
       // command faces cannot fight over a stale list.
       noteFavorite: { params: { path: string; on: boolean }; response: { note: NoteMeta } };
+      // Add or remove the note's `archived: true` frontmatter line, the marker
+      // that takes it out of the browser's tree and into its Archived section.
+      // noteFavorite's contract word for word: one line changes, a locked note
+      // takes it with the vault shut, and asking for the state the note is
+      // already in is a no-op. Its own method rather than a `key` on
+      // noteFavorite, so no client built against that method reads it
+      // differently (architecture.md §3).
+      noteArchive: { params: { path: string; on: boolean }; response: { note: NoteMeta } };
       // Create or open today's daily note (bun/daily.ts openDaily). Bun
       // computes the local YYYY-MM-DD title and resolves it by title in the
       // daily workspace: the daily.workspace setting when it names a registered

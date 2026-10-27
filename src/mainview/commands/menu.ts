@@ -181,6 +181,7 @@ export const MENU: readonly MenuSection[] = [
       // face it will run (registry.ts), where the pairs below are two
       // commands. Either way the visible item says what will happen.
       { command: "note.favorite" },
+      { command: "note.archive" },
       // Two-faces pairs: the registry keeps exactly one of each live, so the
       // visible item always says what will happen.
       { command: "note.templateOn", hideWhenDisabled: true },

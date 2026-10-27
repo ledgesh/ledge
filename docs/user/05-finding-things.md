@@ -34,7 +34,7 @@ This is the same narrowing that `ledge search -f` and the agent tools' `folder` 
 
 A wikilink names a title, never a path, so moving a note into a folder breaks none of the links to it.
 
-Titles are matched exactly, ignoring case. If two notes in different folders share a title, the link opens the one edited most recently, so give notes you link to titles of their own.
+Titles are matched exactly, ignoring case. If two notes in different folders share a title, the link opens the one that is not archived, then the one edited most recently, so give notes you link to titles of their own.
 
 Links address the title, never the filename. A retitle renames the file without leaving a stale path behind, and nothing rewrites your other notes to keep links working. A link whose title matches nothing is styled as dangling and edits like plain text.
 

@@ -18,13 +18,14 @@
 // spawn. A half-typed line is wrong until it is finished, so the message
 // stays quiet enough to write through.
 //
-// The closing fence carries the other half of that report: whether what the
+// A row under the closing fence carries the other half of that report: whether what the
 // block says is what the note's shells are running. Params apply at spawn and
 // never to a live shell (architecture.md §6a, restart-applies), which until
 // this hint was a rule with no surface. An edited `cwd:` looked ignored, and
 // the way to apply it was a palette command you had to already know about. Bun
 // says when the two disagree (rpc-schema `sessionStale`) and the hint is a
-// button running the same restart, on the block the edit was made in.
+// button running the same restart, under the block the edit was made in. An
+// `archived: true` block gets an Unarchive button in the same row.
 import {
   StateEffect,
   StateField,
@@ -47,7 +48,7 @@ import {
   unbracket,
   unquote,
 } from "../../shared/frontmatter";
-import { editProfile, isSessionStale, onSessionStaleChange, openTag, restartShell } from "./bridge";
+import { editProfile, isSessionStale, onSessionStaleChange, openTag, restartShell, unarchive } from "./bridge";
 import { modClick } from "../commands/format";
 import { modHeld } from "../commands/keymap";
 import { titleOf } from "../commands/keys";
@@ -245,57 +246,83 @@ const RESTART_ICON =
   'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/><path d="M13.6 2.3v3.2h-3.2"/></svg>';
 
+// A hint button's own click. The editor takes a mousedown as a caret move and
+// would steal the click before it became one, so that is swallowed first.
+function hintButton(icon: string, label: string, title: string, run: () => void): HTMLButtonElement {
+  const el = document.createElement("button");
+  el.className = "ledge-fm-hint";
+  el.type = "button";
+  el.innerHTML = icon;
+  // Appended rather than folded into innerHTML: the label is the only part of
+  // this element built from data, and a text node is never read as markup.
+  el.append(label);
+  el.title = title;
+  el.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  el.addEventListener("click", (e) => {
+    e.preventDefault();
+    run();
+  });
+  return el;
+}
+
+// The lucide Archive glyph, for RESTART_ICON's reason.
+const ARCHIVE_ICON =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/>' +
+  '<path d="M10 12h4"/></svg>';
+
 /**
- * The stale-params hint, drawn at the end of the closing fence.
+ * The block's hints, in one row of their own under the closing fence. A row
+ * rather than chips on the fence line, which read as part of the `---`. Under
+ * the block because each hint is about all of it, not about any one line.
  *
- * A button rather than an annotation, unlike ProblemWidget above: a refused
- * line is fixed by typing, and this one is fixed by a verb the person has no
- * other way to reach from here. `ignoreEvent` therefore returns false, and the
- * click runs the same edge as the "Restart Note Shell" command, whose title it
- * borrows so the two surfaces cannot drift (interactions.md, the registry is
- * the single definition).
- *
- * **It says why, not just what.** The verb's name answers "what will this do"
- * and leaves "why is this here" to the reader, who has just typed a line that
- * looks like it took. So the label carries the purpose clause and the tooltip
- * carries the mechanism. There is no chord to show beside them
- * (interactions.md §2: this verb is palette and menu only), and a label naming
- * a key that does not exist would be worse than naming none.
- *
- * At the closing fence because that is the foot of the block: the hint is about
- * everything above it, not about any one line, and the lines above it are the
- * ones being edited.
+ * - **Archived** ("Archived: Unarchive"): a note reached from search says it
+ *   is archived before anything in it runs (interactions.md §3). The click
+ *   takes the marker off.
+ * - **Stale** ("Restart Note Shell to apply changes"): this note's shells run
+ *   frontmatter the block no longer says. A button rather than an annotation
+ *   like ProblemWidget, because the fix is a verb with no other way to reach
+ *   it from here. It borrows the command's title so the two cannot drift, and
+ *   adds the reason, since the verb alone does not say why it is there
+ *   (interactions.md, Restart Note Shell). No chord: §2 gives the verb none.
  */
-class StaleWidget extends WidgetType {
-  constructor(readonly docId: string) {
+class HintsWidget extends WidgetType {
+  constructor(
+    readonly docId: string,
+    readonly archived: boolean,
+    readonly stale: boolean,
+  ) {
     super();
   }
-  eq(other: StaleWidget) {
-    return other.docId === this.docId;
+  eq(other: HintsWidget) {
+    return other.docId === this.docId && other.archived === this.archived && other.stale === this.stale;
   }
   toDOM(): HTMLElement {
-    const el = document.createElement("button");
-    el.className = "ledge-fm-stale";
-    el.type = "button";
-    el.innerHTML = RESTART_ICON;
-    // Appended rather than folded into innerHTML: the label is the only part
-    // of this element built from data, and appending it as a text node keeps
-    // it from ever being read as markup.
-    el.append(`${titleOf("session.restart")} to apply changes`);
-    el.title =
-      "This note's shells are still running the frontmatter they started with. " +
-      "Restarting them spawns fresh ones with what the block says now.";
-    el.addEventListener("mousedown", (e) => {
-      // The editor takes a mousedown as a caret move and would steal the click
-      // before it became one.
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    el.addEventListener("click", (e) => {
-      e.preventDefault();
-      restartShell(this.docId);
-    });
-    return el;
+    const row = document.createElement("div");
+    row.className = "ledge-fm-hints";
+    if (this.archived) {
+      const b = hintButton(ARCHIVE_ICON, "Archived: Unarchive", "This note is out of the sidebar's tree. Unarchiving puts it back.", () =>
+        unarchive(this.docId),
+      );
+      b.dataset.testid = "fm-archived";
+      row.append(b);
+    }
+    if (this.stale) {
+      const b = hintButton(
+        RESTART_ICON,
+        `${titleOf("session.restart")} to apply changes`,
+        "This note's shells are still running the frontmatter they started with. " +
+          "Restarting them spawns fresh ones with what the block says now.",
+        () => restartShell(this.docId),
+      );
+      b.dataset.testid = "fm-stale";
+      row.append(b);
+    }
+    return row;
   }
   ignoreEvent() {
     return false;
@@ -310,7 +337,8 @@ function build(state: EditorState): DecorationSet {
   // more than once (`tags: 123 456` is two refusals), so the map keys by line
   // and the widget shows them all rather than only the first.
   const byLine = new Map<number, string[]>();
-  for (const p of parseFrontmatter(head).problems) {
+  const parsed = parseFrontmatter(head);
+  for (const p of parsed.problems) {
     const at = byLine.get(p.line);
     if (at) at.push(p.message);
     else byLine.set(p.line, [p.message]);
@@ -343,9 +371,12 @@ function build(state: EditorState): DecorationSet {
     }
   }
   const docId = state.facet(sessionIdFacet);
-  if (isSessionStale(docId)) {
+  const archived = parsed.params.archived;
+  const stale = isSessionStale(docId);
+  // A block widget, which CodeMirror takes only from a state field (this one).
+  if (archived || stale) {
     ranges.push(
-      Decoration.widget({ widget: new StaleWidget(docId), side: 1 }).range(
+      Decoration.widget({ widget: new HintsWidget(docId, archived, stale), block: true, side: 1 }).range(
         state.doc.line(span.last).to,
       ),
     );

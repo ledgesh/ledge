@@ -432,6 +432,40 @@ Bun therefore validates everything and derives anything derivable:
   the folder it makes, and taking the last note out of a folder takes the row
   with it. The directory stays on disk, unlisted, which is the same bargain as
   a `.ledge-assets` file no note references any more.
+- **Archiving hides a note from the tree, not from the corpus.** An archived
+  note is an ordinary note whose frontmatter says `archived: true`
+  (`NoteMeta.archived`, written by `bun/notes.ts` archiveNote or by hand).
+  Nothing moves. `listNotes`, the search walk, the wikilink and tag scans, and
+  the path guards treat it as they treat any note, and `list_notes` hands an
+  agent the flag. The view decides what to hide, from the flag on the lists it
+  already holds: `notes/folders.ts` builds the tree and its counts from the
+  unarchived notes only, so a folder holding nothing but archived notes has no
+  row, and the Archived section draws the rest (interactions.md §3). The Move
+  to Folder… chooser still lists that folder, because it is built from every
+  note. Three rules go with the flag:
+  - **The search walk reaches archived notes last.** `searchNotes` and the tag
+    scans stop at `MAX_HITS`. Archived notes walked in path order could spend
+    that budget ahead of the live ones, which is the scope-before-scan trap
+    above with the archive as the noise. So `bun/notes.ts` walks the
+    unarchived notes first. Ranking the hits afterwards would be too late.
+  - **A title tie goes to the unarchived note.** `shared/wikilinks.ts` settles
+    two notes with one title by case, then by newest mtime. An unarchived note
+    now wins before mtime is asked, so archiving an old note beside a newer
+    one of the same title cannot pull links toward the old one, and editing
+    the old one cannot either. The MCP server resolves titles through the
+    same function.
+  - **Archive is a marker, not a place.** The obvious build was a
+    `.ledge-archive` dot-folder: the trash without the purge. It is refused
+    because dot-segments are invisible and the path guards refuse them (§2,
+    `shared/folders.ts`). A note in there could not be opened, searched,
+    linked or listed to an agent until it came back out, and making it
+    readable would cost a second exception in a trust-boundary guard. The
+    marker leaves the file where it was, so wikilinks, image references and
+    backlinks need nothing, and Rename Folder carries archived notes with
+    the rest. The marker gets its own RPC, `noteArchive`, beside
+    `noteFavorite` rather than one method for both: renaming `noteFavorite`
+    would break every client built against it, and an older server answers
+    the new call with the missing-method error §7 describes.
 - **Bun never mkdirs an external root.** A managed folder (a direct child of
   the app home) is Bun's to recreate; an external root that is missing is
   what an unmounted volume looks like, and mkdir-ing it would grow a shadow
@@ -824,7 +858,9 @@ snapshot at construction time through `lib/settings.ts`.
   instantiation. WHICH notes are favorites took that settled argument as its
   starting point and never had a knob: `favorite: true` in the note, read off
   the same lists (`NoteMeta.favorite`), written by the Favorite command
-  (`bun/notes.ts` favoriteNote) and by hand. **A new setting is also documented in `docs/user/`, on the
+  (`bun/notes.ts` favoriteNote) and by hand. WHICH notes are archived
+  followed it the same way: `archived: true` (`NoteMeta.archived`,
+  `bun/notes.ts` archiveNote). **A new setting is also documented in `docs/user/`, on the
   page its feature lives on** — not only in the template comment. The
   template is visible only to someone already inside the file; the manual is
   what full-text search, and every agent, can reach. Four knobs (`shell.*`,
@@ -950,12 +986,15 @@ host: web1 deploy@prod       # machines blocks may run on (ssh destinations / "l
 sudo: root                   # user the note's shells run as, through sudo
 template: true               # this note is a template: offered by ⌥⌘N, marker stripped at instantiation
                              # (value `daily` additionally claims the ⌘J role for ITS OWN workspace: per-workspace, never borrowed across roots)
+favorite: true               # the note sits in the browser's Favorites section
+archived: true               # the note leaves the browser's tree for its Archived section (§3)
 ---
 ```
 
 (`tags:` also lives in the block — shared/tags.ts's other tag source — and,
-like `template:`, never feeds a spawn: both ride the one parser because the
-block has one grammar, not because the shell cares.)
+like `template:`, `favorite:` and `archived:`, never feeds a spawn: they ride
+the one parser because the block has one grammar, not because the shell
+cares.)
 
 `shared/frontmatter.ts` owns the grammar (hand-rolled per §8; per-line
 degradation like `parseSettings`); `bun/spawnParams.ts` owns what the values
@@ -1130,7 +1169,7 @@ alike, which is what keeps all three telling one story about the note.
   found it. So Bun now records what each *persistent* shell was born with
   (`spawnKeyOf`, `spawnShell`), compares it with what the note last sent, and
   pushes `sessionStale` when the two differ. The editor draws that as a
-  button on the frontmatter's closing fence, labelled with its reason rather
+  button in a row under the frontmatter's closing fence, labelled with its reason rather
   than only its verb, running the same restart. Three
   properties make it advisory rather than nagging, and each is a test:
   - **Only the keys that feed a spawn.** `cwd`, `profile`, `envFile`, `env`,

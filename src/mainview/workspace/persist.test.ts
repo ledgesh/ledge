@@ -12,6 +12,7 @@ import { layoutLabels, restoreLayout, restoredState, reviveWorkspace, serializeL
 import { DEFAULT_ICON } from "./icons";
 import { expandFolder, expandedIn, resetExpansion } from "../notes/expansion";
 import { resetSort, setSort, sortIn } from "../notes/sorting";
+import { archivedOpenIn, resetArchivedOpen, setArchivedOpen } from "../notes/archivedSection";
 
 function note(path: string, title: string, mtimeMs = 1): NoteMeta {
   return { path, title, mtimeMs };
@@ -51,6 +52,7 @@ const FILED_BY = { [FOLDER]: [...NOTES, ...FILED], [FOLDER2]: FILED2 };
 afterEach(() => {
   resetExpansion();
   resetSort();
+  resetArchivedOpen();
 });
 
 // A state exercising everything the layout records: two workspaces (each on
@@ -127,6 +129,17 @@ describe("round trip", () => {
     expect(restoreLayout(text, ROOTS, NOTES_BY, {})).not.toBeNull();
     expect(sortIn(FOLDER)).toBe("title");
     expect(sortIn(FOLDER2)).toBe("modified");
+  });
+
+  test("an open Archived section comes back per workspace, and closed writes nothing", () => {
+    const before = richState();
+    expect(serializeLayout(before)).not.toContain('"archivedOpen"');
+    setArchivedOpen(FOLDER2, true);
+    const text = serializeLayout(before);
+    resetArchivedOpen();
+    expect(restoreLayout(text, ROOTS, NOTES_BY, {})).not.toBeNull();
+    expect(archivedOpenIn(FOLDER)).toBe(false);
+    expect(archivedOpenIn(FOLDER2)).toBe(true);
   });
 
   test("a sort value the build does not know restores as the default", () => {

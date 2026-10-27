@@ -11,7 +11,7 @@
 // and selected, the same open-at-the-hit move the search overlay makes
 // (commands/Overlay.tsx).
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Link2, X } from "lucide-react";
+import { Archive, FileText, Link2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useCommands } from "@/commands/CommandProvider";
@@ -195,7 +195,12 @@ function BacklinkRow({
       title={hit.path}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+        {/* An archived note's row wears Archive, as it does in ⌘P (interactions.md §3). */}
+        {hit.archived ? (
+          <Archive className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
         <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{hit.title}</span>
         {/* Which of two same-titled notes this is (notes/FolderLabel.tsx). */}
         <FolderLabel folder={folder} />

@@ -75,6 +75,7 @@ The id is what a `keys` entry names. A command with no default has no shortcut u
 | Search Notes… | `palette.search` | `Alt-Mod-p` |
 | Delete Note | `note.deleteCurrent` | `Mod-Backspace` |
 | Favorite | `note.favorite` |  |
+| Archive | `note.archive` |  |
 | Move to Folder… | `note.move` |  |
 | Move to Workspace… | `note.moveToWorkspace` |  |
 | New Folder… | `folder.new` |  |

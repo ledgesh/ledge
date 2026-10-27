@@ -9,6 +9,7 @@
 export interface WikiNote {
   path: string;
   title: string;
+  archived?: true;
 }
 
 /** A wikilink's inner text, split into the note title and the optional
@@ -26,19 +27,27 @@ export function parseWikiTarget(raw: string): { title: string; heading: string |
  * The note `title` names, or null. The match is exact and case-insensitive,
  * never fuzzy: opening the nearest title would follow a typo to the wrong
  * note, so a wrong title dangles instead. An exact-case match wins over a
- * case-folded one. Remaining ties go to the first in list order (newest mtime
- * first, as the store holds them).
+ * case-folded one, then an unarchived note over an archived one
+ * (architecture.md §3). Remaining ties go to the first in list order (newest
+ * mtime first, as the store holds them).
  */
 export function resolveWikiTitle<N extends WikiNote>(title: string, notes: readonly N[]): N | null {
   const want = title.trim().toLowerCase();
   if (!want) return null;
+  let exactArchived: N | null = null;
   let folded: N | null = null;
+  let foldedArchived: N | null = null;
   for (const n of notes) {
     const t = n.title.trim();
-    if (t === title.trim()) return n;
-    if (folded === null && t.toLowerCase() === want) folded = n;
+    if (t === title.trim()) {
+      if (!n.archived) return n;
+      exactArchived ??= n;
+    } else if (t.toLowerCase() === want) {
+      if (!n.archived) folded ??= n;
+      else foldedArchived ??= n;
+    }
   }
-  return folded;
+  return exactArchived ?? folded ?? foldedArchived;
 }
 
 /** One wikilink occurrence in a note's text, located by 1-based line. `raw`
