@@ -17,6 +17,7 @@ import { dispatchNativeCommand } from "./lib/menu";
 import { escapeTop, watchLayers } from "./commands/layers";
 import { configureShell } from "./lib/shell";
 import { scrollToTop } from "./lib/scrollToTop";
+import { setWindowSize } from "./lib/viewport";
 
 // Milestones, in milliseconds since the page began loading.
 //
@@ -55,8 +56,12 @@ async function start(): Promise<void> {
   // Asked before the first dial, because the client id keys the saved layout
   // (remote.md §5). Keying it stops a phone restoring a desktop's three-pane
   // tree onto a 390-point screen (ios.md §9).
-  const { client, label, destination, key, back } = await shell.hello();
+  const { client, label, destination, key, back, window: size } = await shell.hello();
   mark("hello");
+  // The pane arrangement reads the window's size from here, not from `screen`,
+  // which on an iPhone Duo names the wrong display (lib/viewport.ts).
+  if (size) setWindowSize(size.w, size.h);
+  shell.onWindow(setWindowSize);
 
   // A phone runs a note's blocks and has no terminal drawer (ios.md §8 gives
   // the reasoning for both, and for splitting them into two booleans). Set

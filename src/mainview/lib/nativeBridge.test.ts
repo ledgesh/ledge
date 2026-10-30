@@ -158,6 +158,27 @@ describe("the byte stream", () => {
 // app rather than about a socket or a key. ios.tsx probes the wire on it
 // rather than reloading (ios.md §5), and the duration is Swift's measurement
 // because no timer of the page's ran while the app was away.
+// The window's size, which an iPhone Duo changes by folding (lib/viewport.ts).
+describe("the window's size", () => {
+  test("hands the subscriber each new size", () => {
+    const { shell } = recorder();
+    const sizes: [number, number][] = [];
+    shell.onWindow((w, h) => sizes.push([w, h]));
+    shell.deliver({ t: "window", w: 951, h: 669 });
+    shell.deliver({ t: "window", w: 466, h: 678 });
+    expect(sizes).toEqual([
+      [951, 669],
+      [466, 678],
+    ]);
+  });
+
+  test("before anything subscribes, it is dropped rather than thrown", () => {
+    // Swift sends one on the first layout pass, before the page has loaded.
+    const { shell } = recorder();
+    expect(() => shell.deliver({ t: "window", w: 951, h: 669 })).not.toThrow();
+  });
+});
+
 describe("coming back to the foreground", () => {
   test("hands the subscriber how long the app was away", () => {
     const { shell } = recorder();

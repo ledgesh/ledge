@@ -40,6 +40,14 @@ describe("one pane or several", () => {
     expect(isSinglePane(PANES_MIN_WIDTH)).toBe(false);
   });
 
+  test("an iPhone Duo is one pane closed and several open", () => {
+    // Measured in the iOS 27.2 Simulator. The second argument is the window's
+    // shorter side as the shell reports it: WebKit's `screen` says 466x678 in
+    // both poses, which would keep the open phone on one pane.
+    expect(isSinglePane(383, 466)).toBe(true); // closed, 466x678 window
+    expect(isSinglePane(867, 669)).toBe(false); // open, 951x669 window
+  });
+
   test("a window narrowed past the breakpoint switches, not only a phone", () => {
     // The breakpoint is on width alone, so a Mac window dragged narrow gets
     // this branch too. ios.md §9 asks for that: below 640 the sidebar's

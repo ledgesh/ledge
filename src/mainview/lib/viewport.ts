@@ -15,13 +15,26 @@ export const PANES_MIN_WIDTH = 640;
 // The shape's other axis. A phone turned on its side is 734 to 840 points wide
 // and clears the width rule, but it is 372 to 410 points tall, and the sidebar
 // beside the editor cannot fit its own rows in that (ios.md §9). The test is
-// the SCREEN's shorter side, not the viewport's height: the web view is
+// the WINDOW's shorter side, not the viewport's height: the web view is
 // constrained to the keyboard (ios/Sources/WebHost.swift), so its height
 // drops by half whenever the keyboard comes up, and a height query would flip
-// an iPad's arrangement mid-word. The screen never changes with the keyboard.
+// an iPad's arrangement mid-word. The window never changes with the keyboard.
 // 500 sits between the widest phone (440) and the narrowest iPad (744), and a
 // Mac has no screen that small.
 export const PHONE_SCREEN_MAX = 500;
+
+// The window's shorter side, as the iOS shell reports it (`setWindowSize`).
+// Null on every other client, which reads `screen` instead. On an iPhone Duo
+// WebKit's `screen` is the outer display's 466x678 even while the app fills
+// the inner one, so the shell's number is the only right one there.
+let shellShortSide: number | null = null;
+const resized = new Set<() => void>();
+
+/** The window's size in points, from a shell that knows it (ios.tsx). */
+export function setWindowSize(w: number, h: number): void {
+  shellShortSide = Math.min(w, h);
+  for (const cb of resized) cb();
+}
 
 /** Whether a window shows one pane at a time: too narrow for two, or on a
  * screen too small for two whichever way it is turned. */
@@ -29,12 +42,12 @@ export function isSinglePane(width: number, screenShortSide = Infinity): boolean
   return width < PANES_MIN_WIDTH || screenShortSide < PHONE_SCREEN_MAX;
 }
 
-// Read on every snapshot rather than once. A device's screen never changes
-// while the page lives, but Playwright's WebKit reports the viewport as the
+// Read on every snapshot rather than once. A folding phone's window changes
+// while the page lives, and Playwright's WebKit reports the viewport as the
 // screen, so the e2e harness's screen follows setViewportSize and a stale read
 // would keep the phone project on one pane at 1200 points (phone.spec.ts).
 const shortSide = () =>
-  typeof screen !== "undefined" ? Math.min(screen.width, screen.height) : Infinity;
+  shellShortSide ?? (typeof screen !== "undefined" ? Math.min(screen.width, screen.height) : Infinity);
 
 // The media query below tests width alone, not `(pointer: coarse)`. A
 // touchscreen laptop is a coarse pointer at 1920 points, and it keeps its
@@ -45,13 +58,15 @@ const media =
     : null;
 
 // The resize listener is for the harness's screen, which moves with the
-// viewport (shortSide above); on a device only the media query ever fires.
+// viewport (shortSide above). `resized` is the iOS shell's window size.
 function subscribe(cb: () => void): () => void {
   media?.addEventListener("change", cb);
   window.addEventListener("resize", cb);
+  resized.add(cb);
   return () => {
     media?.removeEventListener("change", cb);
     window.removeEventListener("resize", cb);
+    resized.delete(cb);
   };
 }
 

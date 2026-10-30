@@ -283,13 +283,22 @@ function Shell() {
     setRightWidth(Math.max(SIDEBAR_MIN, Math.min(w, SIDEBAR_MAX)));
   }, []);
   // Crossing into the drawer arrangement closes whatever was open, so a window
-  // dragged narrow does not land with its editor behind a scrim. This runs on
-  // the way in only. Crossing back out reopens nothing, and the header toggles
-  // are how a panel comes back.
+  // dragged narrow or a Duo folded shut does not land behind a scrim. The panes
+  // it closed are remembered, and crossing back out restores them rather than
+  // whatever the drawers held. Before any crossing they are the boot default.
+  const widePanels = useRef({ sidebar: true, right: null as typeof rightPanel });
+  const wasSinglePane = useRef(singlePane);
   useEffect(() => {
-    if (!singlePane) return;
-    setSidebarOpen(false);
-    setRightPanel(null);
+    if (singlePane === wasSinglePane.current) return;
+    wasSinglePane.current = singlePane;
+    if (singlePane) {
+      widePanels.current = { sidebar: sidebarOpenRef.current, right: rightPanelRef.current };
+      setSidebarOpen(false);
+      setRightPanel(null);
+    } else {
+      setSidebarOpen(widePanels.current.sidebar);
+      setRightPanel(widePanels.current.right);
+    }
   }, [singlePane]);
 
   // Picking a note out of the sidebar drawer closes it. Watching the focused

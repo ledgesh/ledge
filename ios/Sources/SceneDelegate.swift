@@ -7,8 +7,13 @@ import UIKit
 /// forward the two lifecycle moments that mean something to a client the
 /// operating system stops running (ios.md §5): going to the background, and
 /// coming back.
-@objc(AppDelegate)
-final class AppDelegate: UIResponder, UIApplicationDelegate {
+///
+/// A scene delegate, because an app built with the iOS 27 SDK that has none
+/// aborts at launch. There is one scene: Info.plist's
+/// `UIApplicationSupportsMultipleScenes` is false, since a second window would
+/// be a second connection to the same server.
+@objc(SceneDelegate)
+final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private var host: WebHost?
     /// The shell's own screens, when they are what the window is showing: the
@@ -16,15 +21,19 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// step off either of them.
     private var chooser: UINavigationController?
 
-    func application(
-        _ application: UIApplication,
-        didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil
-    ) -> Bool {
-        let window = UIWindow(frame: UIScreen.main.bounds)
+    func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        guard let scene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: scene)
         self.window = window
         show()
         window.makeKeyAndVisible()
-        return true
+        // A link that launched the app arrives here, not through
+        // `scene(_:openURLContexts:)`, which only sees links while it runs.
+        if let url = connectionOptions.urlContexts.first?.url { open(url) }
     }
 
     /// The shell's screens until there is a server to dial, then the app.
@@ -161,7 +170,11 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
     /// A `ledge://pair#…` link. Universal links on ledge.sh arrive the same way
     /// once the site and the Associated Domains entitlement exist (ios.md §12).
-    func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+    func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
+        if let url = contexts.first?.url { open(url) }
+    }
+
+    private func open(_ url: URL) {
         switch PairingCode.read(url.absoluteString) {
         case .code(let code):
             openCode(code, tapped: true)
@@ -170,7 +183,6 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             alert.addAction(UIAlertAction(title: "OK", style: .cancel))
             topmost()?.present(alert, animated: true)
         }
-        return true
     }
 
     /// A pairing code's screen, which dials only when the person holding the
@@ -224,11 +236,11 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     // Both edges are reported and the page decides. Neither of them closes the
     // socket: a short app switch usually comes back to a wire that still
     // works, and `WebHost.willSuspend` has why.
-    func applicationDidEnterBackground(_ application: UIApplication) {
+    func sceneDidEnterBackground(_ scene: UIScene) {
         host?.willSuspend()
     }
 
-    func applicationWillEnterForeground(_ application: UIApplication) {
+    func sceneWillEnterForeground(_ scene: UIScene) {
         host?.didResume()
     }
 }

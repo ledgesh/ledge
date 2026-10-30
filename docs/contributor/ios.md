@@ -1184,14 +1184,14 @@ failure it prevents. The phone writes a single-pane tree of its own and the
 Mac never sees it.
 
 **One pane at a time, and the rule is a shape rather than a device**
-(`mainview/lib/viewport.ts`). Below 640 points of width, or on a screen whose
+(`mainview/lib/viewport.ts`). Below 640 points of width, or in a window whose
 shorter side is under 500 points, the sidebar and the right-hand panel stop
 taking width and cover the editor instead: a 280-point drawer over a scrim,
 dismissed by a tap on what it covers, by Escape, or by picking something out
 of it. The editor keeps the full width underneath either way, so opening and
 closing a drawer reflows nothing.
 
-Four things follow, and each is a test in `e2e/phone.spec.ts`:
+Five things follow, and each is a test in `e2e/phone.spec.ts`:
 
 - **The drawer starts shut**, because a phone that booted showing its chrome
   would not be showing the note the last session left focused. Phase 2 shipped
@@ -1212,14 +1212,15 @@ Four things follow, and each is a test in `e2e/phone.spec.ts`:
   scroll (the connection bar, Trash, New Workspace, New Note) are 44 points
   each on touch and took the whole column, the note list was left no height,
   and the page overflowed the window so that WebKit scrolled the app itself.
-  So the second clause of the rule is the screen's shorter side, and a phone
+  So the second clause of the rule is the window's shorter side, and a phone
   gets the drawer whichever way it is turned. That is Obsidian's shape on a
   phone, and Blink's reason to allow the rotation at all: a running block gets
   the full width for its columns and the keyboard is wider. The clause reads
-  `screen`, not the viewport's height, because the web view is constrained to
-  the keyboard (§7): its height halves when the keyboard comes up, and a height
-  query would have flipped an iPad's arrangement mid-word. Nothing is locked in
-  `Info.plist`; the iPad keeps its panes in both orientations.
+  the window's size as the shell reports it, not the viewport's height, because
+  the web view is constrained to the keyboard (§7): its height halves when the
+  keyboard comes up, and a height query would have flipped an iPad's
+  arrangement mid-word. The window never changes with the keyboard. Nothing is
+  locked in `Info.plist`; the iPad keeps its panes in both orientations.
 
   The drawer at that height is 324 points tall, and the sidebar answers with a
   second rule of its own (`workspace/Sidebar.tsx`): under 480 points of height
@@ -1229,6 +1230,23 @@ Four things follow, and each is a test in `e2e/phone.spec.ts`:
   the strip's height is clamped against the sidebar on every layout rather than
   only when the divider is dragged, so shrinking a window can no longer push
   the note list's rows off the bottom.
+- **Crossing between the arrangements keeps each one's own panels.** Crossing
+  into one pane closes the sidebar and the right-hand panel, so the editor does
+  not land behind a scrim, and remembers which were open. Crossing back to panes
+  restores those, whatever the drawers did in between. Before the first
+  crossing the panes are what a wide boot shows: the sidebar open, no right
+  panel. The memory is the page's, so it does not outlive the app.
+
+**An iPhone Duo is a phone closed and a tablet open.** Closed, its window is
+466 by 678 points and the editor gets one pane. Open, it is 951 by 669, and
+the page gets the panes. Folding changes the window while the page lives, so
+the shell sends the size in `@hello` and again after every layout pass that
+changes it (`WebHost.swift`). The page cannot read it from `screen`: WebKit
+reports the outer display's 466 by 678 in both poses. A client that sends no
+size (Android, the Mac) falls back to `screen`. Both poses are cases in
+`lib/viewport.test.ts`, since the e2e harness has no shell to send a size.
+Unfolding brings back the panels the Duo had open when it was last unfolded,
+by the crossing rule above.
 
 What did NOT change is focus. Opening a note from a list row shows it without
 taking focus off the row (`workspace/PaneTree.tsx`), and the drawer keeps that
@@ -1389,13 +1407,15 @@ Xcode. Phase 3 got away with a bare `swiftc` over a glob; phase 4 has a
 dependency to resolve, which is the one thing a glob cannot do, and SwiftPM is
 the smaller of the two answers to that.
 
-Five things that build has to do that Xcode would have done quietly. The first
-four announced themselves as launch failures with no obvious cause; the fifth
-announces itself as nothing at all:
+Seven things that build has to do that Xcode would have done quietly. Five
+announced themselves as launch failures with no obvious cause, one as a link
+error, and the icon as nothing at all:
 
 | What | Why |
 | ---- | --- |
 | `-sdk` and `-target` pushed through `-Xswiftc`, `-Xcc` and the link | SwiftPM builds for its host and has no iOS destination. The last `-target` wins, which is why the output lands in a directory named for macOS and is an iOS Simulator binary |
+| `--build-system native` | Xcode 27's SwiftPM defaults to the `swiftbuild` engine, which ignores the pushed-through `-target` for a C module's link step and links NIO's `CNIOWindows` for macOS. The native engine is deprecated, so this lasts until the cross-compile is written for `swiftbuild` |
+| A scene manifest in `Info.plist` and a scene delegate | An app built with the iOS 27 SDK that has no `UIApplicationSceneManifest` aborts at launch with "UIScene life cycle is required". The window, the link handling and the two lifecycle edges of §5 live in `SceneDelegate.swift`; the app delegate is empty |
 | The back-deployment shims copied into `Frameworks/` | A binary built with this toolchain and deployed to iOS 17 links a compatibility dylib for every standard-library type the runtime there lacks. Missing, it is a dyld abort at launch. The list is read out of the binary, because it belongs to the toolchain |
 | An ad hoc signature | The keychain answers `errSecMissingEntitlement` to a process with no application identity, and the device key is a keychain item (§4) |
 | Entitlements as a Mach-O section, not in the signature | The Simulator's rule, and not the device's. A signature carrying them is refused at launch with a POSIX 153 |

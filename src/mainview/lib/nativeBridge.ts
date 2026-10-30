@@ -150,6 +150,10 @@ export type ToPage =
   // A tap on the status bar. The page's scrolling is all in CSS, so iOS's
   // scroll to the top has to be done here (lib/scrollToTop.ts).
   | { t: "top" }
+  // The window's size in points, sent when it changes. An iPhone Duo folding
+  // or unfolding is the change this exists for: WebKit's `screen` there names
+  // the outer display whichever one the app is on (lib/viewport.ts).
+  | { t: "window"; w: number; h: number }
   // Android's Back button, sent while `@back` last said a layer was open. The
   // page closes the top one, as Escape would.
   | { t: "back" };
@@ -169,6 +173,9 @@ export interface ShellHello {
   /** True for a shell with a system Back button (Android). Absent from iOS's
    * answer. */
   back?: boolean;
+  /** The window's size in points when the page asked; `window` messages carry
+   * later changes. iOS's answer only. */
+  window?: { w: number; h: number };
 }
 
 export interface Shell {
@@ -203,6 +210,8 @@ export interface Shell {
   onTop(fn: () => void): void;
   /** Told when Back was pressed with a layer open. */
   onBack(fn: () => void): void;
+  /** Told the window's new size in points. */
+  onWindow(fn: (w: number, h: number) => void): void;
   /** One message from Swift. */
   deliver(msg: ToPage): void;
 }
@@ -223,6 +232,7 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
   let key: (name: string) => void = () => {};
   let top: () => void = () => {};
   let back: () => void = () => {};
+  let resized: (w: number, h: number) => void = () => {};
 
   function call(m: ShellCall, p: unknown): Promise<unknown> {
     const id = nextId++;
@@ -271,6 +281,10 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
 
     onBack(fn) {
       back = fn;
+    },
+
+    onWindow(fn) {
+      resized = fn;
     },
 
     async hello() {
@@ -328,6 +342,9 @@ export function nativeShell(post: (msg: ToShell) => void): Shell {
           return;
         case "back":
           back();
+          return;
+        case "window":
+          resized(msg.w, msg.h);
           return;
       }
     },

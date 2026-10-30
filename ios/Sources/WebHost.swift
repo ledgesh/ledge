@@ -230,6 +230,30 @@ final class WebHost: UIViewController {
         deliver(["t": "resumed", "away": Int((gone * 1000).rounded())])
     }
 
+    // --- the window's size -----------------------------------------------------
+
+    /// The size `window` messages last carried, so a layout pass that changed
+    /// nothing sends nothing.
+    private var sentSize: CGSize = .zero
+
+    /// The page decides one pane or several from the window's shorter side
+    /// (mainview/lib/viewport.ts). The root view is the window's size whatever
+    /// the keyboard does, and WebKit's `screen` is the outer display on an
+    /// iPhone Duo even while the app is on the inner one.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let size = view.bounds.size
+        guard size != sentSize, size != .zero else { return }
+        sentSize = size
+        var message = windowSize(size)
+        message["t"] = "window"
+        deliver(message)
+    }
+
+    private func windowSize(_ size: CGSize) -> [String: Any] {
+        ["w": Double(size.width), "h": Double(size.height)]
+    }
+
     // --- the bridge -----------------------------------------------------------
 
     private func deliver(_ message: [String: Any]) {
@@ -505,6 +529,7 @@ extension WebHost: WKScriptMessageHandler {
                 "label": ShellConfig.label,
                 "destination": server.destination,
                 "key": line,
+                "window": windowSize(view.bounds.size),
             ])
         case "@open":
             open(id)

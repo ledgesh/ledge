@@ -15,6 +15,11 @@
 // (ios.md §4). Nothing above the byte stream changes.
 import UIKit
 
+/// Empty: the window and everything in it belong to the scene
+/// (SceneDelegate.swift), which Info.plist's scene manifest names.
+@objc(AppDelegate)
+final class AppDelegate: UIResponder, UIApplicationDelegate {}
+
 UIApplicationMain(
     CommandLine.argc,
     CommandLine.unsafeArgv,

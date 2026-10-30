@@ -188,6 +188,47 @@ test("the breakpoint is a width, not a device", async ({ page }) => {
   await expectWidth(page.locator("main"), 390);
 });
 
+test("crossing back to panes brings back the panes it left, not the drawers", async ({
+  page,
+}) => {
+  // An iPhone Duo unfolded and folded again, or a Mac dragged narrow and back.
+  // Before any crossing out of panes, panes start as a wide boot would: the tree
+  // shown and no right panel.
+  const sidebarToggle = page.getByRole("button", { name: /Toggle Sidebar/ });
+  const outline = page.getByText("OUTLINE");
+  // The header's, not the open panel's own button of the same name.
+  const outlineToggle = page.getByRole("banner").getByRole("button", { name: /Outline/ });
+  await page.setViewportSize({ width: 1200, height: 844 });
+  await expect(noteRow(page, "Alpha")).toBeVisible();
+  await expect(outline).toBeHidden();
+
+  await sidebarToggle.tap();
+  await outlineToggle.tap();
+  await expect(noteRow(page, "Alpha")).toBeHidden();
+  await expect(outline).toBeVisible();
+
+  // Narrow, the tree is opened and put away as a drawer. That is the drawers'
+  // own state and does not change what the panes come back as.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(drawer(page)).toHaveCount(0);
+  await openSidebar(page);
+  await page.touchscreen.tap(345, 500);
+  await expect(drawer(page)).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1200, height: 844 });
+  await expect(outline).toBeVisible();
+  await expect(noteRow(page, "Alpha")).toBeHidden();
+
+  // And the other way: the tree shown and the panel shut come back as such.
+  await sidebarToggle.tap();
+  await outlineToggle.tap();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(drawer(page)).toHaveCount(0);
+  await page.setViewportSize({ width: 1200, height: 844 });
+  await expect(noteRow(page, "Alpha")).toBeVisible();
+  await expect(outline).toBeHidden();
+});
+
 // --- nothing appears under a finger (interactions.md §1a) --------------------
 //
 // iOS sends a synthetic mousemove ahead of the click of every tap, and WebKit

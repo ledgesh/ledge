@@ -217,6 +217,10 @@ const TRIPLE = `arm64-apple-ios${DEPLOYMENT}${phone ? "" : "-simulator"}`;
 const swiftpm = [
   "swift",
   "build",
+  // Xcode 27's default engine (`swiftbuild`) links NIO's C modules for the host
+  // despite the `-target` below. The native engine is deprecated (ios.md §12).
+  "--build-system",
+  "native",
   "--package-path",
   join(REPO, "ios"),
   // Release, because the numbers this build reports are the ones ios.md §5
@@ -581,12 +585,14 @@ if (store) {
 if (phone && profile) {
   interface CoreDevice {
     deviceProperties: { name: string };
-    hardwareProperties: { udid: string; marketingName: string };
+    hardwareProperties: { udid: string; marketingName: string; reality: string };
     connectionProperties: { tunnelState: string };
   }
   const listing = join(OUT, "devices.json");
   await run(["xcrun", "devicectl", "list", "devices", "--json-output", listing], { quiet: true });
-  const paired = (JSON.parse(readFileSync(listing, "utf8")) as { result: { devices: CoreDevice[] } }).result.devices;
+  // Xcode 27's devicectl lists the Simulator's devices too, as "simulated".
+  const paired = (JSON.parse(readFileSync(listing, "utf8")) as { result: { devices: CoreDevice[] } }).result.devices
+    .filter((d) => d.hardwareProperties.reality === "physical");
 
   if (paired.length === 0) {
     throw new Error("no devices are paired with this Mac; connect the phone, unlock it, and trust this computer");
