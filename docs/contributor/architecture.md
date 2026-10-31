@@ -305,8 +305,9 @@ Bun therefore validates everything and derives anything derivable:
   so those two need nothing. Its in-root images are COPIED into the
   destination's `.ledge-assets/` before the reference rewrite
   (`carryAssetRefs`, `assets.ts` copyAssetInto): copied and not moved,
-  because another note in the old workspace may show the same image, and the
-  orphan left behind is the trade deleting a note already makes. The
+  because another note in the old workspace may show the same image. A copy
+  left behind that no note names any more goes to that workspace's trash on a
+  later sweep (images, below). The
   wikilinks that named it from the old workspace stop resolving, which the
   handler counts before the move and the Undo strip says. Two workspaces can
   sit on two volumes, the one place rename(2) fails with EXDEV: then
@@ -333,7 +334,11 @@ Bun therefore validates everything and derives anything derivable:
   `bun/workspaces.ts`, both gated by `trashEntryDir` (an id is one visible
   segment directly inside the app home's `.ledge-trash`, so no id reaches the
   trash itself, its parent, or a live workspace beside it), and the first sits
-  behind a confirmation that says how many notes go. `assertTrashed` accepts a `.md` file
+  behind a confirmation that says how many notes go. One more removes an
+  image: `purgeTrashedAssets` in `bun/assetSweep.ts`, gated by
+  `assertTrashedAsset` (an image file directly in its root's
+  `.ledge-trash/.ledge-assets`), on the trash's TTL and behind no
+  confirmation, the way `purgeTrash` is. `assertTrashed` accepts a `.md` file
   *visibly* inside the trash at any depth — visible meaning no dot-segment
   below `.ledge-trash`, the same rule `trashFiles` walks by, so the guard
   accepts exactly the set the Trash section listed. It used to require the
@@ -430,8 +435,7 @@ Bun therefore validates everything and derives anything derivable:
   reconcile. The cost is stated rather than worked around: an EMPTY folder is
   not a thing the browser can draw, so `folder.new` writes the first note into
   the folder it makes, and taking the last note out of a folder takes the row
-  with it. The directory stays on disk, unlisted, which is the same bargain as
-  a `.ledge-assets` file no note references any more.
+  with it. The directory stays on disk, unlisted.
 - **Archiving hides a note from the tree, not from the corpus.** An archived
   note is an ordinary note whose frontmatter says `archived: true`
   (`NoteMeta.archived`, written by `bun/notes.ts` archiveNote or by hand).
@@ -524,10 +528,31 @@ Bun therefore validates everything and derives anything derivable:
   (`bun/assets.ts`). Pasted images land in `<root>/.ledge-assets/` — one pool
   per root, whatever folder the pasting note is in, so two notes can share an
   image, an external workspace carries its images with it, and the lock sweep
-  has one place to look. Saves are the same temp-plus-rename as notes, names
-  come from `uniqueName` (same clobber-safety), and **nothing ever unlinks an
-  asset**: deleting a note orphans its images, deliberately — cheaper than
-  joining the unlink list above.
+  has one place to look. Saves are the same temp-plus-rename as notes, and
+  names come from `uniqueName` against the pool and its trashed copy together
+  (same clobber-safety, and below).
+- **An image no note names goes to the trash, and leaves it on the trash's
+  clock** (`bun/assetSweep.ts`). Once per launch, after `purgeTrash`, the
+  server sweeps each writable root's pool. An image no note names, older than
+  `ASSET_GRACE_MS` (a day), is renamed into `<root>/.ledge-trash/.ledge-assets/`.
+  A trashed image a note names again is renamed back. `purgeTrashedAssets`
+  unlinks a trashed image once its ctime is older than `trash.ttlDays`.
+  Missing a reference loses a picture a note still shows, so each rule errs
+  toward keeping the file:
+
+  | Rule | What it protects |
+  |---|---|
+  | A reference is the file name anywhere in a note's text, case-folded, plain or percent-encoded. Nothing parses `![](…)`. | A title, angle brackets, an `<img>` tag, a reference-style link. |
+  | Every `.md` under the root is read except under `.git`: dot-folders, the trash, `.ledgeignore`d folders. | A deleted note's Restore. A note no listing shows. |
+  | A locked note that will not open (vault shut, or damaged) holds the root. Restores still run; nothing is trashed or purged. The first unlock retries the root (`server.ts` assetSweepHeld). | An image only a locked body names. |
+  | The grace period. | A paste whose note is not saved yet, here or on another device. |
+  | `readPooled` (`bun/assets.ts`) renames a missing pool image back from the trash when a read asks for it. | An undo. A note restored from git or a backup. |
+  | New names are allocated against both pools. | A returning image meeting a newer file under its name. |
+  | The passphrase change rewraps the trashed pool too (`imageFilesUnder`). | A sealed image opening when it comes back. |
+
+  The sweep reads only the `.ledge-assets` pool. An image elsewhere in the
+  folder, such as an attached project's own `img/`, is the user's, and
+  nothing moves it.
 - **A reference resolves against the note that carries it, not the root**
   (`baseDirOf`), so a note one folder down writes `../.ledge-assets/x.png`.
   Notes live in folders, and every other tool that reads Markdown resolves an

@@ -20,19 +20,48 @@
 // `assets/` (architecture.md §3). Finder hides dotted folders, which is the
 // cost: the image is still greppable by name, and the note carries its path.
 //
-// Nothing here unlinks an asset, so this file joins none of the three unlink
-// paths in notes.ts (architecture.md §3). Deleting a note orphans its images,
-// and that is the trade: an orphan costs disk, joining that list costs a guard
-// and a confirmation. The one unlink below is the temp-file discard on a
-// failed save, the same pattern as writeNote.
+// The one unlink in this file is the temp-file discard on a failed save, the
+// same pattern as writeNote. An image no note names any more is moved to the
+// trash by the orphan sweep (assetSweep.ts), and comes back from there when a
+// note asks for it again (readPooled below). architecture.md §3 has the rules.
 import { basename, dirname, join, relative, resolve, extname, sep } from "node:path";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { ASSETS_DIRNAME } from "../shared/rpc-schema";
-import { assertRegisteredRoot, assertWritableRoot, isInside, uniqueName } from "./workspaces";
+import { assertRegisteredRoot, assertWritableRoot, isInside, rootContaining, uniqueName } from "./workspaces";
 import { isSealedAsset, openAssetBytes, sealAssetBytes, vaultState } from "./vault";
 
 export function assetsDirOf(root: string): string {
   return join(resolve(root), ASSETS_DIRNAME);
+}
+
+/** Where the orphan sweep puts a pool image no note names: a pool of the same
+ * name inside the root's trash (notes.ts trashDirOf). */
+export function trashedAssetsDirOf(root: string): string {
+  return join(resolve(root), ".ledge-trash", ASSETS_DIRNAME);
+}
+
+// Every name either pool holds. A new file is named against both, so a
+// trashed image that comes back can never meet a newer file under its name.
+async function poolNames(root: string): Promise<Set<string>> {
+  const live = await readdir(assetsDirOf(root)).catch(() => []);
+  const trashed = await readdir(trashedAssetsDirOf(root)).catch(() => []);
+  return new Set([...live, ...trashed]);
+}
+
+// readFile for an asset, moving it back out of the trash when the orphan sweep
+// put it there. The sweep cannot see an undo, an unsaved edit on another
+// device, or a note restored from a backup, and each of those asks for the
+// image by reading it.
+async function readPooled(path: string): Promise<Buffer> {
+  try {
+    return await readFile(path);
+  } catch (err) {
+    const root = rootContaining(path);
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT" || !root || dirname(resolve(path)) !== assetsDirOf(root)) throw err;
+    await rename(join(trashedAssetsDirOf(root), basename(path)), path);
+    console.log("[assets] brought a swept image back from the trash", path);
+    return readFile(path);
+  }
 }
 
 // The renderable set, by extension. An allowlist, not "whatever has a dot":
@@ -144,7 +173,7 @@ export async function readAsset(root: string, src: string, from?: string | null,
   const path = assetPathOf(root, src, from);
   let bytes: Buffer;
   try {
-    bytes = await readFile(path);
+    bytes = await readPooled(path);
   } catch {
     return null; // deleted or unreadable: the widget shows a broken placeholder
   }
@@ -193,13 +222,13 @@ export async function savePastedImage(root: string, bytes: Uint8Array, ext = ".p
   // read-only gate, refuses before this writes a file nothing would show.
   const assetsDir = assetsDirOf(assertWritableRoot(assertRegisteredRoot(root)));
   await mkdir(assetsDir, { recursive: true });
-  const taken = new Set(await readdir(assetsDir));
+  const taken = await poolNames(root);
   const base = `pasted-${new Date().toISOString().slice(0, 10)}`;
   const name = uniqueName(base, taken, ext);
   // A paste into a locked note is sealed from the first byte (locking.md §5).
-  // The plaintext never exists at this path, so the never-unlink orphaning
-  // above cannot leak one. The name is the same either way: the magic header
-  // marks a sealed asset, not the filename.
+  // The plaintext never exists at this path, so an orphan the sweep moves to
+  // the trash cannot leak one. The name is the same either way: the magic
+  // header marks a sealed asset, not the filename.
   await writeAsset(assetsDir, join(assetsDir, name), seal ? sealAssetBytes(bytes) : bytes);
   return assetRefFor(root, join(assetsDir, name), from);
 }
@@ -213,11 +242,11 @@ export async function savePastedImage(root: string, bytes: Uint8Array, ext = ".p
  * (locking.md §5). uniqueName suffixes the name only where the pool has it.
  */
 export async function copyAssetInto(root: string, src: string): Promise<string | null> {
-  const bytes = await readFile(src).catch(() => null);
+  const bytes = await readPooled(src).catch(() => null);
   if (bytes === null) return null;
   const assetsDir = assetsDirOf(assertWritableRoot(assertRegisteredRoot(root)));
   await mkdir(assetsDir, { recursive: true });
-  const taken = new Set(await readdir(assetsDir));
+  const taken = await poolNames(root);
   const ext = extname(src);
   const name = uniqueName(basename(src, ext), taken, ext);
   const path = join(assetsDir, name);
@@ -237,7 +266,7 @@ export async function replaceAssetBytes(path: string, bytes: Uint8Array): Promis
  * note's folder to resolve against a second time. */
 export async function rawAssetBytes(path: string): Promise<Buffer | null> {
   try {
-    return await readFile(path);
+    return await readPooled(path);
   } catch {
     return null;
   }

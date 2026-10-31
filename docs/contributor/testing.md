@@ -81,6 +81,11 @@ new rules should imitate:
   through a dot-segment (`notes.fs.test.ts`). The paired test asserts a nested
   trashed note IS accepted, so widening the guard cannot be mistaken for
   loosening it;
+- `purgeTrashedAssets` unlinks only what `assertTrashedAsset` accepts: an
+  image directly in `.ledge-trash/.ledge-assets`. Its refusals each have a
+  test (the live pool, a trashed note, a non-image, a dotted file, a deeper
+  folder), and so does each way the orphan sweep could miss a reference
+  (`assetSweep.fs.test.ts`);
 - `folderPathOf` refuses absolute paths, `..`, dot-entries and every other way
   of naming somewhere outside the workspace root (`notes.fs.test.ts`);
 - `assetPathOf` refuses everything it refused before once the base is the

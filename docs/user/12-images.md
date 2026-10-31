@@ -41,7 +41,9 @@ A reference inline in a sentence stays compact instead: the syntax is concealed 
 
 ## Deleting notes and images
 
-Deleting a note leaves its images in place. A stray unused image is cheaper than an image another note still references.
+Deleting a note leaves its images in place. An image no note names any more, including notes in the Trash, moves to the workspace's `.ledge-trash/.ledge-assets/` the next time Ledge starts, once it is a day old. It is deleted after 30 days there, on the same `trash.ttlDays` setting as deleted notes.
+
+An image comes back by itself when a note names it again: undo the edit that removed it, or restore an old copy of the note, and the picture draws. Images only a locked note names stay put until the vault is unlocked, since Ledge cannot read the note before then.
 
 Moving a note to another folder leaves them in place too, and rewrites the note's references so they still point at the same files. A locked note has to be unlocked first, because its references are inside the encrypted body.
 

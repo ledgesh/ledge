@@ -1662,4 +1662,19 @@ describe("changeVaultPassphrase", () => {
     expect(await unlockV("new pass", DEVICE)).toBe(true);
     expect((await readNote(b.path))?.text).toContain("second secret body");
   });
+
+  test("a locked note in the trash is rewrapped too, so it still opens once restored", async () => {
+    resetVaultForTests();
+    await rmF(VP, { force: true });
+    await createVault("old pass", DEVICE);
+    const note = await createNote(ROOT, "# Binned\n\ntrashed secret body\n");
+    await lockNote(note.path);
+    const trashed = await deleteNote(note.path);
+    expect(trashed).not.toBeNull();
+    expect(await changeVaultPassphrase("new pass", [ROOT])).toBe(1);
+    lockVault();
+    expect(await unlockVault("new pass", DEVICE)).toBe(true);
+    const restored = await restoreNote(trashed!);
+    expect((await readNote(restored.path))?.text).toContain("trashed secret body");
+  });
 });

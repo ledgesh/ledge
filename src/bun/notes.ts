@@ -41,7 +41,7 @@ import {
   stripLockedLine,
   vaultState,
 } from "./vault";
-import { assetPathOf, assetRefFor, copyAssetInto, imageMimeOf, rawAssetBytes, replaceAssetBytes } from "./assets";
+import { assetPathOf, assetRefFor, copyAssetInto, imageMimeOf, rawAssetBytes, replaceAssetBytes, trashedAssetsDirOf } from "./assets";
 import { folderLeafProblem, folderNameProblem, folderScopeOf, notesUnder } from "../shared/folders";
 
 // Where a deleted note goes: a `.ledge-trash` directory in its own workspace
@@ -867,12 +867,18 @@ async function planRewrap(rootsToScan: readonly string[], oldKey: Buffer): Promi
     } catch {
       throw new Error(`the workspace folder ${root} is not readable right now, so its locked notes cannot be rewrapped`);
     }
-    for (const meta of metas) {
-      if (!meta.locked) continue;
-      const header = await headAt(meta.path).then((h) => (h === null ? null : parseFrontmatter(h).params.locked));
-      if (header === null) continue; // unlocked between the listing and here
-      if (headerOpensWith(header, oldKey)) plan.notes.push(meta.path);
-      else stuck.push(meta.path);
+    // Trashed notes count, because a locked one restored after the change must
+    // open under the new key. trashFiles carries no locked flag, so the header
+    // check below decides for those.
+    const candidates = [
+      ...metas.filter((meta) => meta.locked).map((meta) => meta.path),
+      ...(await trashFiles(root)).map((file) => file.path),
+    ];
+    for (const path of candidates) {
+      const header = await headAt(path).then((h) => (h === null ? null : parseFrontmatter(h).params.locked));
+      if (header === null) continue; // unlocked since the listing, or never locked
+      if (headerOpensWith(header, oldKey)) plan.notes.push(path);
+      else stuck.push(path);
     }
     // Sealed images: any in-root image file carrying the magic. The walk is
     // listNotes' walk (dot-entries skipped) plus the app's own assets
@@ -950,7 +956,9 @@ async function rollBack(
 
 // Every image file the passphrase sweep must consider: the root's dotted
 // .ledge-assets pool, plus non-dotted in-root images. The lock sweep may have
-// sealed any of those, since a note can reference `img/x.png`.
+// sealed any of those, since a note can reference `img/x.png`. The trashed
+// pool counts too, because a sealed image the orphan sweep moved there must
+// still open when it comes back (assetSweep.ts).
 async function imageFilesUnder(root: string): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string): Promise<void> => {
@@ -968,6 +976,7 @@ async function imageFilesUnder(root: string): Promise<string[]> {
     }
   };
   await walk(resolve(root));
+  await walk(trashedAssetsDirOf(root));
   return out;
 }
 
@@ -1317,7 +1326,7 @@ const TRASH_GITIGNORE = "# Deleted notes stay out of git.\n*\n";
 // `git add -A` that committed them would hold them in the log long past the
 // purge. One `*` covers the whole directory, which is what lets a workspace
 // attached from an existing repo need no edit to its own .gitignore.
-async function ensureTrashDir(root: string, dir: string): Promise<void> {
+export async function ensureTrashDir(root: string, dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   // `wx` rather than a plain write: this runs on every delete, and a user who
   // edited the file keeps their version. A failure leaves the delete alone.

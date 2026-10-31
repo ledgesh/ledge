@@ -82,7 +82,9 @@ import {
   rootContaining,
   roots,
   trashRoot,
+  writableRoots,
 } from "./workspaces";
+import { tidyAssets } from "./assetSweep";
 import { createFromTemplatePath, openDaily, resolveConfiguredWorkspace } from "./daily";
 import { syncDocs } from "./docs";
 import { readLayout, writeLayout } from "./layout";
@@ -1142,6 +1144,7 @@ export async function createServer(deps: { push: Audience; exitsWhenIdle?: boole
       const probe = vaultState() === "none" ? await firstLockedHeader(availableRoots()) : undefined;
       const ok = await unlockVault(passphrase, device, probe);
       if (ok) pushVaultState();
+      if (ok && assetSweepHeld.size > 0) void tidyAssetsIn([...assetSweepHeld]);
       return { ok };
     },
     vaultLock: () => {
@@ -1650,6 +1653,25 @@ export async function createServer(deps: { push: Audience; exitsWhenIdle?: boole
 
   wake();
 
+  // Sweep each workspace's unused images into its trash and purge the old ones
+  // (assetSweep.ts). A workspace a locked note held back waits in
+  // assetSweepHeld for the first unlock, which retries it.
+  const assetSweepHeld = new Set<string>();
+  async function tidyAssetsIn(rootsToTidy: readonly string[]): Promise<void> {
+    for (const root of rootsToTidy) {
+      try {
+        const res = await tidyAssets(root, settings.trash.ttlDays * 24 * 60 * 60 * 1000);
+        if (res.held) assetSweepHeld.add(root);
+        else assetSweepHeld.delete(root);
+        if (res.trashed + res.restored + res.purged > 0) {
+          console.log(`[assets] ${root}: ${res.trashed} unused image(s) to the trash, ${res.restored} back, ${res.purged} purged`);
+        }
+      } catch (err) {
+        console.error("[assets] image sweep failed", root, err);
+      }
+    }
+  }
+
   // Age old deletions out of every available workspace's trash, once per
   // launch. Not awaited: it is housekeeping, and the window should not wait on
   // folder scans to open. Once per launch rather than on a timer, so a trashed
@@ -1660,7 +1682,9 @@ export async function createServer(deps: { push: Audience; exitsWhenIdle?: boole
       const n = ns.reduce((a, b) => a + b, 0);
       if (n > 0) console.log(`[notes] purged ${n} trashed note(s) past the ${settings.trash.ttlDays}-day limit`);
     })
-    .catch((err) => console.error("[notes] trash purge failed", err));
+    .catch((err) => console.error("[notes] trash purge failed", err))
+    // After the note purge, so an image only a purged note named is unused now.
+    .then(() => tidyAssetsIn(writableRoots()));
   // Deleted workspaces age out on the same setting, from the app home's trash.
   void purgeTrashedWorkspaces(settings.trash.ttlDays * 24 * 60 * 60 * 1000)
     .then((n) => {

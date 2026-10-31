@@ -8,7 +8,7 @@ the code disagree, one of them is wrong — fix deliberately.
 
 Two amendments landed with the implementation, recorded in place below:
 sealed images keep their own filenames (in-place sealing, §5 — the `.enc`
-suffix lost to the never-unlink rule and reference stability), and a shared
+suffix lost to the unlink it would need and to reference stability), and a shared
 image seals with a surfaced notice instead of refusing (§5 — a hard refusal
 deadlocks locking two notes that share an image).
 
@@ -198,7 +198,10 @@ tags: finance
 - **Passphrase change** re-derives a new master key under a new salt and
   rewraps every locked note's data key and every encrypted asset's header —
   headers only, bodies untouched. It enumerates locked notes by the same
-  walk `listNotes` uses, and sealed assets by `imageFilesUnder`, across
+  walk `listNotes` uses plus the trash's own walk (`trashFiles`), and sealed
+  assets by `imageFilesUnder`, which includes the trashed pool
+  `.ledge-trash/.ledge-assets`. Trashed items are in scope because a
+  restore brings them back under the new key. The sweep runs across
   `lockableRoots()`: every REGISTERED root but the docs one, not
   `availableRoots()`. Available only while unlocked.
 
@@ -388,18 +391,24 @@ it. Assets are therefore in scope from v1, with one structural decision:
   a locked note writes ciphertext from the first byte; a sealed image is
   detected by its magic header, never by a filename. (The design originally
   said `.enc`; implementation showed the suffix loses on every axis: a
-  rename-to-suffix transition would need the one asset unlink the
-  never-unlink rule forbids, and rewriting `![](…)` references would churn
+  rename-to-suffix transition would need an asset unlink on every lock,
+  and rewriting `![](…)` references would churn
   note bodies. Same-name sealing keeps references stable, needs only the
   ordinary temp-plus-rename, and an external tool still fails loudly — the
   bytes are not a PNG and no longer pretend to be.) Because encryption
-  happens at write, the deliberate never-unlink orphaning of assets
-  (architecture §3) stays a storage quirk and never becomes a privacy leak.
+  happens at write, an orphaned asset is ciphertext too. The orphan sweep
+  (architecture §3) moves it to the trash as its sealed bytes, and it opens
+  as before when a note names it again.
 - **`readAsset` is the one decrypt seam** — images already cross the RPC as
   base64 and become data URLs view-side, so display needs no new plumbing.
   Locked vault (or a plaintext note referencing an encrypted asset): the
   widget renders a locked-image placeholder; unlock makes it an image. The
   view-side data-URL cache is evicted on relock (§3).
+- **The orphan sweep reads locked bodies, and only on the server.** It
+  decrypts each locked note to look for image names, keeps the text in
+  memory for that test alone, and answers only which names it found. With the vault shut it
+  cannot read them, so a root holding a locked note trashes nothing until the
+  first unlock (architecture §3).
 - **Locking an existing note sweeps its referenced assets**: each in-root
   image reference is sealed in place (temp-plus-rename; the reference text
   never changes). References are note-relative (architecture.md §3), so both
