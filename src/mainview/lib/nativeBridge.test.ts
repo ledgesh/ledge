@@ -5,6 +5,7 @@
 // part that touches WebKit, and nothing here covers it.
 import { describe, expect, test } from "bun:test";
 import { CLIENT_METHODS, fromBase64, REQUEST_METHODS, toBase64, type RequestClient } from "../../shared/wire";
+import { clientSettingsTemplate, DEFAULT_SETTINGS } from "../../shared/settings";
 import {
   focusReporter,
   iosClientMethods,
@@ -743,6 +744,64 @@ describe("the client overlay", () => {
     // line that gets pinned (shared/connections.ts knownHostsHost).
     await o.connectionProbe({ destination: "ledge@new", port: 2222 });
     expect(probed).toEqual(["ledge@new", "ledge@new:2222"]);
+  });
+
+  test("the This app tab is this phone's file, and the Server tab is the server's", async () => {
+    const asked: Array<[string, unknown]> = [];
+    let stored: string | null = null;
+    const o = overlay(
+      async (m, p) => {
+        asked.push([m, p]);
+        if (m === "settings.read") return stored;
+        if (m === "settings.write") stored = (p as { text: string }).text;
+        return null;
+      },
+      noServer({
+        settingsRead: async ({ home }) => ({ text: `server's ${home}` }),
+        settingsWrite: async () => ({ ok: true }),
+      }),
+    );
+    // No file yet: the commented template, and nothing written by reading it.
+    expect((await o.settingsRead({ home: "client" })).text).toBe(clientSettingsTemplate(DEFAULT_SETTINGS));
+    expect(stored).toBeNull();
+    expect(await o.settingsWrite({ home: "client", text: "{}" })).toEqual({ ok: true });
+    expect(await o.settingsRead({ home: "client" })).toEqual({ text: "{}" });
+    expect(await o.settingsRead({ home: "server" })).toEqual({ text: "server's server" });
+    expect(await o.settingsWrite({ home: "server", text: "{}" })).toEqual({ ok: true });
+    expect(asked.map(([m]) => m)).toEqual(["settings.read", "settings.write", "settings.read"]);
+  });
+
+  test("a save the device refused reaches the dialog", async () => {
+    const o = overlay(async (m) => {
+      if (m === "settings.write") throw new Error("this device would not save the settings file");
+      return null;
+    });
+    await expect(o.settingsWrite({ home: "client", text: "{}" })).rejects.toThrow("would not save");
+  });
+
+  test("the snapshot takes the client sections from this phone and the rest from the server", async () => {
+    const theirs = {
+      ...DEFAULT_SETTINGS,
+      shell: { path: "/bin/zsh", args: ["-l"] },
+      editor: { ...DEFAULT_SETTINGS.editor, fontSize: 99 },
+    };
+    const o = overlay(
+      async (m) => (m === "settings.read" ? `{ // big text\n "editor": { "fontSize": 20 }, "terminal": { "fontSize": 18 } }` : null),
+      noServer({ settingsGet: async () => ({ settings: theirs, stale: "restart the server" }) }),
+    );
+    const got = await o.settingsGet({});
+    expect(got.settings.editor.fontSize).toBe(20);
+    expect(got.settings.terminal.fontSize).toBe(18);
+    expect(got.settings.shell).toEqual({ path: "/bin/zsh", args: ["-l"] });
+    expect(got.stale).toBe("restart the server");
+  });
+
+  test("a phone with no file, or one that does not parse, runs on the defaults", async () => {
+    const theirs = { ...DEFAULT_SETTINGS, editor: { ...DEFAULT_SETTINGS.editor, fontSize: 99 } };
+    for (const stored of [null, "{ not json"]) {
+      const o = overlay(async () => stored, noServer({ settingsGet: async () => ({ settings: theirs }) }));
+      expect((await o.settingsGet({})).settings.editor).toEqual(DEFAULT_SETTINGS.editor);
+    }
   });
 
   test("everything else is the server's", async () => {

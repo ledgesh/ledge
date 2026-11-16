@@ -6,6 +6,14 @@
 import { hostPart, validateConnection, validatePassword, type AuthMode } from "../../shared/connections";
 import { fedDuplex, type ClientConnection, type Duplex } from "../../shared/transport";
 import type { UpdateState } from "../../shared/rpc-schema";
+import { stripJsonc } from "../../shared/jsonc";
+import {
+  clientSettingsTemplate,
+  DEFAULT_SETTINGS,
+  mergeSettings,
+  parseSettings,
+  type Settings,
+} from "../../shared/settings";
 import { BUILD_VERSION } from "../../shared/version";
 import {
   CLIENT_METHODS,
@@ -15,7 +23,7 @@ import {
   type RequestClient,
 } from "../../shared/wire";
 
-/** What the shells implement: twenty strings and a flat switch in Swift, and
+/** What the shells implement: a list of strings and a flat switch in Swift, and
  * the same plus `@back` in Kotlin (android/.../WebHost.kt). The calls are
  * their own vocabulary, `clipboard.read` and not `clipboardRead`: they are not
  * the schema's methods, and naming them as if they were is the invitation to
@@ -96,6 +104,12 @@ export const SHELL_CALLS = [
   // that never reached a server, and this is the page in that state asking for
   // the native list instead (mainview/ios.tsx, ios.md §4).
   "servers.choose",
+  // This app's own settings.jsonc, the client half of remote.md §5, kept in
+  // the app's container. Swift and Kotlin hold the text and nothing else: the
+  // read answers null when there is no file yet, and the template, the parse
+  // and the merge with the server's half are `nativeOverlay`'s below.
+  "settings.read",
+  "settings.write",
 ] as const;
 
 export type ShellCall = (typeof SHELL_CALLS)[number];
@@ -393,13 +407,60 @@ export function focusReporter(tell: (over: BarFace) => void): (over: BarFace) =>
  *
  * `build` is the server's, read off its handshake (remote.md §11), rather than
  * this client's own version: the connection chrome reports what it reached.
+ *
+ * The three settings entries wrap the server's copy, as bun/clientSeams.ts
+ * `clientOverlay` does on a Mac: "client" is this phone's file and anything
+ * else is the server's, and settingsGet merges the two halves.
  */
 export function nativeOverlay(
   wire: Pick<ClientConnection, "requests" | "recheck">,
   shell: Pick<Shell, "call" | "destination">,
   build: string,
 ): RequestClient {
-  return { ...wire.requests, ...clientSeams(wire, shell, build) };
+  const requests = wire.requests;
+  return {
+    ...requests,
+    ...clientSeams(wire, shell, build),
+    // Read on every call rather than once per process, as the Mac does. A
+    // phone asks once per boot, and a reload is a boot (ios.md §5).
+    settingsGet: async (p) => {
+      const [theirs, text] = await Promise.all([requests.settingsGet(p), clientSettingsText(shell)]);
+      return { ...theirs, settings: mergeSettings(theirs.settings, clientSettingsOf(text)) };
+    },
+    settingsRead: async ({ home }) =>
+      home === "client" ? { text: await clientSettingsText(shell) } : requests.settingsRead({ home }),
+    settingsWrite: async ({ home, text }) => {
+      if (home !== "client") return requests.settingsWrite({ home, text });
+      await shell.call("settings.write", { text });
+      return { ok: true };
+    },
+  };
+}
+
+/**
+ * This phone's settings.jsonc, or the commented template with the defaults
+ * when the shell has none yet. Nothing is written until the dialog saves:
+ * the Mac seeds on read so the file exists to open in an editor, and a
+ * phone's file has no other editor.
+ */
+async function clientSettingsText(shell: Pick<Shell, "call">): Promise<string> {
+  const stored = await shell.call("settings.read", {});
+  return typeof stored === "string" ? stored : clientSettingsTemplate(DEFAULT_SETTINGS);
+}
+
+/** The bun/clientSettings.ts `loadClientSettings` rules: text that does not
+ * parse runs on defaults, and a bad value costs only its own field. */
+function clientSettingsOf(text: string): Settings {
+  let json: unknown;
+  try {
+    json = JSON.parse(stripJsonc(text));
+  } catch (err) {
+    console.warn(`[settings] this app's settings.jsonc is not valid JSONC (${err}); running on defaults`);
+    return DEFAULT_SETTINGS;
+  }
+  const { settings, problems } = parseSettings(json, "client");
+  for (const p of problems) console.warn(`[settings] ${p}; using the default`);
+  return settings;
 }
 
 /** One server this phone knows, as Swift stores it (ios/Sources/ShellConfig).

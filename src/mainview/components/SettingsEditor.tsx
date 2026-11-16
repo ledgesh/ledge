@@ -85,6 +85,10 @@ function problemsOf(text: string, home: SettingsHome): string[] {
   return home === "client" ? [...problems, ...resolveKeys(parsedSettings.keys).problems] : problems;
 }
 
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // The two tabs, in the words the manual's table of what lives where uses
 // (docs/user/09). "Server" rather than "this Mac", because the app's own
 // daemon is one (remote.md §1); "This app" rather than a machine, because its
@@ -103,6 +107,11 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
   const [docs, setDocs] = useState<Partial<Record<SettingsHome, string>>>({});
   const [disk, setDisk] = useState<Partial<Record<SettingsHome, string>>>({});
   const [problems, setProblems] = useState<string[]>([]);
+  // Why a tab's file could not be read, or why Save failed. Shown in place of
+  // "Loading…" or above the buttons, so a refused call is never a dialog that
+  // waits forever.
+  const [unread, setUnread] = useState<Partial<Record<SettingsHome, string>>>({});
+  const [saveError, setSaveError] = useState("");
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const text = docs[home];
@@ -110,12 +119,19 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (text !== undefined) return;
     let alive = true;
-    void readSettingsFile(home).then((t) => {
-      if (!alive) return;
-      setDocs((d) => ({ ...d, [home]: t }));
-      setDisk((d) => ({ ...d, [home]: t }));
-      setProblems(problemsOf(t, home));
-    });
+    setUnread((u) => ({ ...u, [home]: undefined }));
+    readSettingsFile(home).then(
+      (t) => {
+        if (!alive) return;
+        setDocs((d) => ({ ...d, [home]: t }));
+        setDisk((d) => ({ ...d, [home]: t }));
+        setProblems(problemsOf(t, home));
+      },
+      (err: unknown) => {
+        if (!alive) return;
+        setUnread((u) => ({ ...u, [home]: messageOf(err) }));
+      },
+    );
     return () => {
       alive = false;
     };
@@ -140,11 +156,16 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
     // Writing that back is not free: when the file exists but cannot be read,
     // readSettingsFile returns the seeded template instead of its bytes
     // (bun/settings.ts), so the write would put the template over the file.
-    await Promise.all(
-      TABS.map(({ home: h }) =>
-        next[h] !== undefined && next[h] !== disk[h] ? writeSettingsFile(h, next[h]!) : Promise.resolve(),
-      ),
-    );
+    try {
+      await Promise.all(
+        TABS.map(({ home: h }) =>
+          next[h] !== undefined && next[h] !== disk[h] ? writeSettingsFile(h, next[h]!) : Promise.resolve(),
+        ),
+      );
+    } catch (err) {
+      setSaveError(`Could not save: ${messageOf(err)}`);
+      return;
+    }
     onClose();
   };
   // The CM keymap closure is built once; reach the current save through a ref.
@@ -267,7 +288,11 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
 
         <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-md border border-input">
           {text === undefined ? (
-            <p className="p-3 text-[12px] text-muted-foreground">Loading…</p>
+            unread[home] !== undefined ? (
+              <p className="p-3 text-[12px] text-destructive">Could not read this settings file: {unread[home]}</p>
+            ) : (
+              <p className="p-3 text-[12px] text-muted-foreground">Loading…</p>
+            )
           ) : (
             <div ref={hostRef} className="h-[55vh] overflow-y-auto [&_.cm-editor]:h-full" />
           )}
@@ -280,6 +305,8 @@ export function SettingsEditor({ onClose }: { onClose: () => void }) {
             ))}
           </ul>
         )}
+
+        {saveError && <p className="mt-2 text-[12px] text-destructive">{saveError}</p>}
 
         <div className="mt-3 flex items-center justify-between">
           <p className="text-[12px] text-muted-foreground">Changes apply the next time Ledge launches.</p>

@@ -122,7 +122,7 @@ an optimization to reach for with a profile in hand, not a thing to build
 first. Phase 3 says it is not the bottleneck yet: a whole boot's frames cross
 it inside the 16ms between `server` and `view` in §5's measurement.
 
-**The bridge is twenty strings, and it is written down twice.**
+**The bridge is a short list of strings, and it is written down twice.**
 `mainview/lib/nativeBridge.ts` is the page's half and
 `ios/Sources/WebHost.swift` is Swift's; between them is a byte stream in both
 directions and a request/response channel for what only a device can answer.
@@ -1254,8 +1254,13 @@ rule rather than making an exception to it — which is also why a tap that
 navigates leaves focus nowhere instead of summoning the software keyboard over
 the note it just opened.
 
-**Appearance settings are already per device**, so the phone's font size is
-independent by construction and nothing new is needed to make it so.
+**Appearance settings are per device.** The phone keeps its own
+`settings.jsonc` in Application Support (Android: the app's files directory),
+read and written through the `settings.read` and `settings.write` bridge calls.
+Swift and Kotlin hold the text only. `nativeOverlay` in
+`mainview/lib/nativeBridge.ts` answers the dialog's This app tab from it, shows
+the template when there is none, and merges it with the server's half in
+`settingsGet`, as `clientOverlay` does on a Mac (remote.md §5).
 
 ## 10. Locking on a phone
 

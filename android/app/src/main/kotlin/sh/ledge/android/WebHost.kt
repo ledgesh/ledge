@@ -340,6 +340,8 @@ class WebHost : ComponentActivity() {
 
     private fun reply(id: Int, value: Any?) = deliver(JSONObject().put("t", "reply").put("id", id).put("r", value ?: JSONObject.NULL))
 
+    private fun settingsFile() = java.io.File(filesDir, "settings.jsonc")
+
     private fun fail(id: Int, why: String) = deliver(JSONObject().put("t", "fail").put("id", id).put("e", why))
 
     /** Back on the main thread, where the reply proxy lives. */
@@ -423,6 +425,17 @@ class WebHost : ComponentActivity() {
             // There is no menu bar on a phone. The page answers this itself; the
             // case is here so a page that asks gets an answer, not a hang.
             "menu.set" -> reply(id, null)
+            // This app's settings.jsonc, in the app's files directory, or null
+            // for none yet. The page owns the template and the parse.
+            "settings.read" -> reply(id, runCatching { settingsFile().readText() }.getOrNull())
+            "settings.write" -> {
+                val saved = runCatching {
+                    val tmp = java.io.File(filesDir, "settings.jsonc.tmp")
+                    tmp.writeText(params.optString("text"))
+                    if (!tmp.renameTo(settingsFile())) error("rename failed")
+                }
+                if (saved.isSuccess) reply(id, null) else fail(id, "this device would not save the settings file")
+            }
 
             "servers.list" -> {
                 val stored = store.load()

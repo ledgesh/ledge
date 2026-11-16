@@ -638,6 +638,21 @@ extension WebHost: WKScriptMessageHandler {
             // never gets here; the case exists so that a page which does ask
             // gets an answer rather than a hang (ios.md §11).
             reply(id, NSNull())
+        // The text of this app's settings.jsonc, or null for none yet
+        // (`ClientSettings`). A failed save fails the call, which the
+        // settings dialog shows.
+        case "settings.read":
+            if let text = ClientSettings.read() {
+                reply(id, text)
+            } else {
+                reply(id, NSNull())
+            }
+        case "settings.write":
+            if ClientSettings.write(params["text"] as? String ?? "") {
+                reply(id, NSNull())
+            } else {
+                fail(id, "this device would not save the settings file")
+            }
         default:
             fail(id, "the Ledge shell has no \(method)")
         }
